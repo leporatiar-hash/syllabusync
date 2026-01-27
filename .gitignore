@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Database files
+*.db
+*.db.bak
+
+# Node
+node_modules/
+.next/
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Build
+*.tsbuildinfo
+next-env.d.ts
+
+# Claude
+.claude/
