@@ -149,6 +149,7 @@ function FlashcardsContent() {
 
         if (setIdParam && allSets.find(s => s.id === setIdParam)) {
           setSelectedSetId(setIdParam)
+          setMode('study')
         }
       }
     } catch (err) {
@@ -236,6 +237,7 @@ function FlashcardsContent() {
 
   const handleSelectSet = (setId: string) => {
     setSelectedSetId(setId)
+    setMode('study')
     // Update URL without navigation
     window.history.pushState({}, '', `/flashcards?set=${setId}`)
   }
