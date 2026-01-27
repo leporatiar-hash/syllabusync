@@ -41,28 +41,29 @@ npm run dev
 
 Frontend runs at http://localhost:3000
 
-## Deploy to Railway
+## Deploy to Railway (Monorepo: API + App)
 
-### 1. Deploy Backend
+Create two Railway services from the same GitHub repo.
 
-```bash
-cd api
-railway init
-railway up
-railway domain
-```
+### Service 1: API (FastAPI)
 
-Save the backend URL (e.g., `https://your-api.railway.app`)
+- **Root Directory**: `api`
+- **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- **Variables**:
+  - `DATABASE_URL` (Railway Postgres URL or sqlite for testing)
+  - `OPENAI_API_KEY`
+  - `ALLOWED_ORIGINS` (set to your frontend domain, or `*` for testing)
 
-### 2. Deploy Frontend
+Generate a public domain for the API service (e.g., `https://your-api.up.railway.app`).
 
-```bash
-cd app
-railway init
-railway variables set NEXT_PUBLIC_API_URL=https://your-api.railway.app
-railway up
-railway domain
-```
+### Service 2: App (Next.js)
+
+- **Root Directory**: `app`
+- **Start Command**: `npm run start`
+- **Variables**:
+  - `NEXT_PUBLIC_API_URL` (set to your API domain)
+
+Generate a public domain for the App service (e.g., `https://your-app.up.railway.app`).
 
 ## API Endpoints
 
@@ -91,7 +92,8 @@ railway domain
 ### Backend (`api/.env`)
 ```
 OPENAI_API_KEY=your-openai-api-key
-DATABASE_URL=sqlite:///./classmate.db  # or PostgreSQL URL
+DATABASE_URL=sqlite:///./railway.db  # or PostgreSQL URL
+ALLOWED_ORIGINS=http://localhost:3000
 ```
 
 ### Frontend (`app/.env.local`)

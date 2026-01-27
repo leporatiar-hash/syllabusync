@@ -40,13 +40,24 @@ def get_current_user_id(request: Request = None) -> str:
     return "default"
 
 # Database setup
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./classmate.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./railway.db")
 # Handle Railway's postgres:// vs postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # Use String for UUID to support both SQLite and Postgres
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+def _safe_db_url(url: str) -> str:
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    if "@" in rest:
+        return f"{scheme}://****:****@{rest.split('@', 1)[1]}"
+    return url
+
+
+print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
+
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -673,6 +684,11 @@ def validate_deadlines(deadlines: list) -> list:
 @app.get("/")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health")
+def healthcheck():
+    return {"ok": True}
 
 
 @app.post("/courses")

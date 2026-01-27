@@ -1,3 +1,5 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { API_BASE_URL } from '../../lib/config'
+
+const API_URL = API_BASE_URL || 'http://localhost:8000'
 
 export { API_URL }
