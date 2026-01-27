@@ -302,6 +302,15 @@ class UpdateDeadlineRequest(BaseModel):
     date: str
 
 
+class UserProfileRequest(BaseModel):
+    email: str | None = None
+    full_name: str | None = None
+    school_name: str | None = None
+    school_type: str | None = None
+    academic_year: str | None = None
+    major: str | None = None
+
+
 class CreateDeadlineRequest(BaseModel):
     title: str
     date: str
@@ -752,6 +761,50 @@ def create_course(payload: CreateCourseRequest, user_id: str = Depends(get_curre
         db.close()
 
 
+@app.get("/me")
+def get_me(user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        if not profile:
+            return {"user_id": user_id, "profile": None}
+        return {
+            "user_id": user_id,
+            "profile": {
+                "email": profile.email,
+                "full_name": profile.full_name,
+                "school_name": profile.school_name,
+                "school_type": profile.school_type,
+                "academic_year": profile.academic_year,
+                "major": profile.major,
+            }
+        }
+    finally:
+        db.close()
+
+
+@app.post("/me/profile")
+def upsert_profile(payload: UserProfileRequest, user_id: str = Depends(get_current_user_id)):
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        if not profile:
+            profile = UserProfile(user_id=user_id)
+            db.add(profile)
+
+        profile.email = payload.email or profile.email
+        profile.full_name = payload.full_name or profile.full_name
+        profile.school_name = payload.school_name or profile.school_name
+        profile.school_type = payload.school_type or profile.school_type
+        profile.academic_year = payload.academic_year or profile.academic_year
+        profile.major = payload.major or profile.major
+
+        db.commit()
+        return {"message": "Profile saved"}
+    finally:
+        db.close()
+
+
 @app.get("/courses")
 def list_courses(user_id: str = Depends(get_current_user_id)):
     """List all courses."""
@@ -969,7 +1022,10 @@ def delete_deadline(deadline_id: str, user_id: str = Depends(get_current_user_id
             raise HTTPException(status_code=404, detail="Deadline not found")
 
         # Also remove calendar entry if exists
-        calendar_entry = db.query(CalendarEntry).filter(CalendarEntry.deadline_id == deadline_id).first()
+        calendar_entry = db.query(CalendarEntry).filter(
+            CalendarEntry.deadline_id == deadline_id,
+            CalendarEntry.user_id == user_id
+        ).first()
         if calendar_entry:
             db.delete(calendar_entry)
 
@@ -1014,21 +1070,24 @@ def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, user_id: s
         db.close()
 
 @app.post("/deadlines/{deadline_id}/save-to-calendar")
-def save_deadline_to_calendar(deadline_id: str):
+def save_deadline_to_calendar(deadline_id: str, user_id: str = Depends(get_current_user_id)):
     """Save a deadline to the user's calendar."""
     db = SessionLocal()
     try:
-        deadline = db.query(Deadline).filter(Deadline.id == deadline_id).first()
+        deadline = db.query(Deadline).filter(Deadline.id == deadline_id, Deadline.user_id == user_id).first()
         if not deadline:
             raise HTTPException(status_code=404, detail="Deadline not found")
 
         # Check if already saved
-        existing = db.query(CalendarEntry).filter(CalendarEntry.deadline_id == deadline_id).first()
+        existing = db.query(CalendarEntry).filter(
+            CalendarEntry.deadline_id == deadline_id,
+            CalendarEntry.user_id == user_id
+        ).first()
         if existing:
             return {"id": existing.id, "deadline_id": deadline_id, "already_saved": True}
 
         # Create calendar entry
-        entry = CalendarEntry(deadline_id=deadline_id)
+        entry = CalendarEntry(deadline_id=deadline_id, user_id=user_id)
         db.add(entry)
         db.commit()
         db.refresh(entry)
@@ -1044,11 +1103,14 @@ def save_deadline_to_calendar(deadline_id: str):
 
 
 @app.delete("/deadlines/{deadline_id}/save-to-calendar")
-def remove_deadline_from_calendar(deadline_id: str):
+def remove_deadline_from_calendar(deadline_id: str, user_id: str = Depends(get_current_user_id)):
     """Remove a deadline from the user's calendar."""
     db = SessionLocal()
     try:
-        entry = db.query(CalendarEntry).filter(CalendarEntry.deadline_id == deadline_id).first()
+        entry = db.query(CalendarEntry).filter(
+            CalendarEntry.deadline_id == deadline_id,
+            CalendarEntry.user_id == user_id
+        ).first()
         if not entry:
             raise HTTPException(status_code=404, detail="Calendar entry not found")
 
@@ -1060,11 +1122,11 @@ def remove_deadline_from_calendar(deadline_id: str):
 
 
 @app.get("/calendar-entries")
-def list_calendar_entries():
+def list_calendar_entries(user_id: str = Depends(get_current_user_id)):
     """Get all deadlines that have been saved to calendar."""
     db = SessionLocal()
     try:
-        entries = db.query(CalendarEntry).all()
+        entries = db.query(CalendarEntry).filter(CalendarEntry.user_id == user_id).all()
         result = []
         for entry in entries:
             deadline = entry.deadline
@@ -1304,12 +1366,12 @@ def get_summary(summary_id: str, user_id: str = Depends(get_current_user_id)):
 
 # Flashcard endpoints
 @app.post("/courses/{course_id}/flashcards")
-async def generate_flashcards(course_id: str, file: UploadFile = File(...)):
+async def generate_flashcards(course_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
     """Upload study material and generate flashcards using AI."""
     print(f"[DEBUG] /courses/{course_id}/flashcards request received")
     db = SessionLocal()
     try:
-        course = db.query(Course).filter(Course.id == course_id).first()
+        course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
@@ -1385,6 +1447,7 @@ Make questions clear and answers concise but complete."""
 
         # Create flashcard set
         flashcard_set = FlashcardSet(
+            user_id=user_id,
             course_id=course_id,
             name=file.filename.rsplit('.', 1)[0]  # Use filename without extension
         )
@@ -1394,6 +1457,7 @@ Make questions clear and answers concise but complete."""
         # Create flashcards
         for fc in flashcards_data:
             flashcard = Flashcard(
+                user_id=user_id,
                 flashcard_set_id=flashcard_set.id,
                 front=fc.get("front", ""),
                 back=fc.get("back", "")
@@ -1425,11 +1489,11 @@ Make questions clear and answers concise but complete."""
 
 
 @app.get("/flashcard-sets/{set_id}")
-def get_flashcard_set(set_id: str):
+def get_flashcard_set(set_id: str, user_id: str = Depends(get_current_user_id)):
     """Get a flashcard set with all its cards."""
     db = SessionLocal()
     try:
-        flashcard_set = db.query(FlashcardSet).filter(FlashcardSet.id == set_id).first()
+        flashcard_set = db.query(FlashcardSet).filter(FlashcardSet.id == set_id, FlashcardSet.user_id == user_id).first()
         if not flashcard_set:
             raise HTTPException(status_code=404, detail="Flashcard set not found")
 
@@ -1447,11 +1511,11 @@ def get_flashcard_set(set_id: str):
 
 
 @app.delete("/flashcard-sets/{set_id}")
-def delete_flashcard_set(set_id: str):
+def delete_flashcard_set(set_id: str, user_id: str = Depends(get_current_user_id)):
     """Delete a flashcard set."""
     db = SessionLocal()
     try:
-        flashcard_set = db.query(FlashcardSet).filter(FlashcardSet.id == set_id).first()
+        flashcard_set = db.query(FlashcardSet).filter(FlashcardSet.id == set_id, FlashcardSet.user_id == user_id).first()
         if not flashcard_set:
             raise HTTPException(status_code=404, detail="Flashcard set not found")
 
@@ -1463,7 +1527,7 @@ def delete_flashcard_set(set_id: str):
 
 
 @app.post("/upload")
-async def upload_syllabus(file: UploadFile = File(...)):
+async def upload_syllabus(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
     print("[DEBUG] /upload request received")
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
@@ -1511,6 +1575,7 @@ async def upload_syllabus(file: UploadFile = File(...)):
 
             # Create course
             course = Course(
+                user_id=user_id,
                 name=course_name,
                 code=course_code,
                 semester=metadata.get("semester"),
@@ -1524,6 +1589,7 @@ async def upload_syllabus(file: UploadFile = File(...)):
             # Create deadlines
             for d in deadlines_data:
                 deadline = Deadline(
+                    user_id=user_id,
                     course_id=course.id,
                     date=d.get("date"),
                     time=d.get("time"),
@@ -1568,11 +1634,11 @@ async def upload_syllabus(file: UploadFile = File(...)):
 # ============= Quiz Endpoints =============
 
 @app.post("/courses/{course_id}/generate-quiz")
-async def generate_quiz(course_id: str, file: UploadFile = File(...)):
+async def generate_quiz(course_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
     """Generate a multiple-choice quiz from study materials."""
     db = SessionLocal()
     try:
-        course = db.query(Course).filter(Course.id == course_id).first()
+        course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
@@ -1662,6 +1728,7 @@ Guidelines:
 
         # Create quiz
         quiz = Quiz(
+            user_id=user_id,
             course_id=course_id,
             name=file.filename.rsplit('.', 1)[0]  # Use filename without extension
         )
@@ -1677,6 +1744,7 @@ Guidelines:
                 options_json = json.dumps([])
 
             question = QuizQuestion(
+                user_id=user_id,
                 quiz_id=quiz.id,
                 question=q.get("question", ""),
                 options=options_json,
@@ -1709,11 +1777,11 @@ Guidelines:
 
 
 @app.get("/quizzes/{quiz_id}")
-def get_quiz(quiz_id: str):
+def get_quiz(quiz_id: str, user_id: str = Depends(get_current_user_id)):
     """Get a quiz with all its questions."""
     db = SessionLocal()
     try:
-        quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+        quiz = db.query(Quiz).filter(Quiz.id == quiz_id, Quiz.user_id == user_id).first()
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")
 
@@ -1743,11 +1811,11 @@ def get_quiz(quiz_id: str):
 
 
 @app.post("/quizzes/{quiz_id}/submit")
-def submit_quiz(quiz_id: str, submission: QuizSubmission):
+def submit_quiz(quiz_id: str, submission: QuizSubmission, user_id: str = Depends(get_current_user_id)):
     """Submit quiz answers and get results."""
     db = SessionLocal()
     try:
-        quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+        quiz = db.query(Quiz).filter(Quiz.id == quiz_id, Quiz.user_id == user_id).first()
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")
 
@@ -1792,11 +1860,11 @@ def submit_quiz(quiz_id: str, submission: QuizSubmission):
 
 
 @app.get("/courses/{course_id}/quizzes")
-def get_course_quizzes(course_id: str):
+def get_course_quizzes(course_id: str, user_id: str = Depends(get_current_user_id)):
     """Get all quizzes for a course."""
     db = SessionLocal()
     try:
-        course = db.query(Course).filter(Course.id == course_id).first()
+        course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
@@ -1814,11 +1882,11 @@ def get_course_quizzes(course_id: str):
 
 
 @app.delete("/quizzes/{quiz_id}")
-def delete_quiz(quiz_id: str):
+def delete_quiz(quiz_id: str, user_id: str = Depends(get_current_user_id)):
     """Delete a quiz."""
     db = SessionLocal()
     try:
-        quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+        quiz = db.query(Quiz).filter(Quiz.id == quiz_id, Quiz.user_id == user_id).first()
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")
 
