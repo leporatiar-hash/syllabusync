@@ -21,6 +21,9 @@ node_modules/
 # OS
 .DS_Store
 
+# Logs
+*.log
+
 # Build
 *.tsbuildinfo
 next-env.d.ts

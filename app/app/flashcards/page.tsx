@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { API_URL } from '../hooks/useAuthFetch'
 
 interface Flashcard {
   id: string
@@ -45,7 +46,7 @@ interface Quiz {
   courseCode?: string
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// API_URL comes from hooks/useAuthFetch
 
 // Vibrant gradient palette for deck cards
 const deckGradients = [
@@ -60,6 +61,8 @@ const deckGradients = [
 ]
 
 function FlashcardsContent() {
+
+
   const searchParams = useSearchParams()
   const setIdParam = searchParams.get('set')
 

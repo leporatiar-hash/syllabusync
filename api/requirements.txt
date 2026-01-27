@@ -4,8 +4,6 @@ python-multipart
 PyPDF2
 python-dotenv
 python-docx
-python-jose[cryptography]
-requests
 openai
 sqlalchemy
 psycopg2-binary

@@ -9,7 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.36.10",
     "jspdf": "^4.0.0",
     "lucide-react": "^0.563.0",
     "next": "16.1.4",

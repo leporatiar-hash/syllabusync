@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
+import { API_URL } from '../../hooks/useAuthFetch'
 
 interface Deadline {
   id: string
@@ -70,8 +71,6 @@ interface CourseDetail {
   flashcard_sets?: FlashcardSet[]
   summaries?: Summary[]
 }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode }> = {
   Exam: { badge: 'bg-[#FEE2E2] text-[#FB7185]', date: 'bg-[#FFF1F2] text-[#FB7185]', icon: <BookOpen size={10} className="text-white" /> },

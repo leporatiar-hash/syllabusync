@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useAuth } from '@clerk/nextjs'
+import { API_URL } from '../hooks/useAuthFetch'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -17,8 +17,6 @@ interface Course {
   deadline_count?: number
   course_info?: CourseInfo | null
 }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const gradients = [
   'from-[#E0EAFF] to-[#F5F7FF]',
@@ -49,24 +47,11 @@ export default function CoursesPage() {
   const [editSemester, setEditSemester] = useState('')
   const [editError, setEditError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const { getToken } = useAuth()
-
-  const authFetch = async (url: string, options: RequestInit = {}) => {
-    const token = await getToken()
-    if (!token) throw new Error('Not authenticated')
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...(options.headers || {}),
-        Authorization: `Bearer ${token}`,
-      },
-    })
-  }
 
   useEffect(() => {
     const loadCourses = async () => {
       try {
-        const res = await authFetch(`${API_URL}/courses`, { cache: 'no-store' })
+        const res = await fetch(`${API_URL}/courses`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           setCourses(data)
@@ -91,7 +76,7 @@ export default function CoursesPage() {
     try {
       const url = `${API_URL}/courses`
       console.log('[Create Course] Sending request to:', url)
-      const res = await authFetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -140,7 +125,7 @@ export default function CoursesPage() {
     if (!courseToDelete) return
     setDeleting(true)
     try {
-      const res = await authFetch(`${API_URL}/courses/${courseToDelete.id}`, {
+      const res = await fetch(`${API_URL}/courses/${courseToDelete.id}`, {
         method: 'DELETE',
         cache: 'no-store',
       })
@@ -181,7 +166,7 @@ export default function CoursesPage() {
     }
     setEditing(true)
     try {
-      const res = await authFetch(`${API_URL}/courses/${courseToEdit.id}`, {
+      const res = await fetch(`${API_URL}/courses/${courseToEdit.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

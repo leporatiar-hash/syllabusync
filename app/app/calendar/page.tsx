@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper } from 'lucide-react'
+import { API_URL } from '../hooks/useAuthFetch'
 
 interface Deadline {
   id: string
@@ -24,7 +25,7 @@ interface Course {
   code?: string
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// API_URL comes from useAuthFetch hook
 
 const typeColors: Record<string, { bg: string; text: string; icon: ReactNode }> = {
   Exam: { bg: 'bg-red-100', text: 'text-red-700', icon: <BookOpen size={12} /> },
@@ -52,6 +53,8 @@ const viewOptions = ['Month', 'Week', 'Day'] as const
 type ViewOption = (typeof viewOptions)[number]
 
 export default function CalendarPage() {
+
+
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
   const [filterCourse, setFilterCourse] = useState<string>('all')

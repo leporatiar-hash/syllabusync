@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import { jsPDF } from 'jspdf'
+import { API_URL } from '../../hooks/useAuthFetch'
 
 interface SummaryDetail {
   id: string
@@ -16,9 +17,9 @@ interface SummaryDetail {
   course_code?: string | null
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-
 export default function SummaryPage() {
+
+
   const params = useParams()
   const router = useRouter()
   const summaryId = Array.isArray(params?.id) ? params.id[0] : params?.id

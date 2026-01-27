@@ -3,8 +3,7 @@
 import { useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { API_URL } from './hooks/useAuthFetch'
 
 interface Deadline {
   id: string

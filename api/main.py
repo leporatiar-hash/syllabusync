@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
-from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -16,9 +16,6 @@ import io
 import os
 import re
 import base64
-import requests
-from jose import jwt, JWTError
-import time
 
 # Load environment variables
 load_dotenv()
@@ -38,47 +35,9 @@ app.add_middleware(
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Auth config (Clerk)
-CLERK_JWT_ISSUER = os.getenv("CLERK_JWT_ISSUER")
-CLERK_JWKS_URL = os.getenv("CLERK_JWKS_URL")
-JWKS_CACHE = {"keys": None, "fetched_at": 0}
-
-
-def get_jwks():
-    if JWKS_CACHE["keys"] and time.time() - JWKS_CACHE["fetched_at"] < 3600:
-        return JWKS_CACHE["keys"]
-    if not CLERK_JWKS_URL:
-        raise HTTPException(status_code=500, detail="CLERK_JWKS_URL not configured")
-    resp = requests.get(CLERK_JWKS_URL, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    JWKS_CACHE["keys"] = data.get("keys", [])
-    JWKS_CACHE["fetched_at"] = time.time()
-    return JWKS_CACHE["keys"]
-
-
-def get_current_user_id(request: Request) -> str:
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    token = auth.split(" ", 1)[1]
-    try:
-        unverified = jwt.get_unverified_header(token)
-        kid = unverified.get("kid")
-        jwks = get_jwks()
-        key = next((k for k in jwks if k.get("kid") == kid), None)
-        if not key:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        decoded = jwt.decode(
-            token,
-            key,
-            algorithms=["RS256"],
-            issuer=CLERK_JWT_ISSUER,
-            options={"verify_aud": False},
-        )
-        return decoded.get("sub")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+# Auth disabled: return a stable local user id for all requests.
+def get_current_user_id(request: Request = None) -> str:
+    return "default"
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./classmate.db")
@@ -110,40 +69,44 @@ def ensure_user_columns():
     ]
     with engine.begin() as conn:
         for table in tables:
-            cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+            cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))]
             if cols and "user_id" not in cols:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN user_id TEXT"))
+
+        course_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(courses)"))]
+        if course_cols and "course_info" not in course_cols:
+            conn.execute(text("ALTER TABLE courses ADD COLUMN course_info TEXT"))
 
         # Backfill user_id from parent relationships when possible
-        conn.execute("UPDATE courses SET user_id = COALESCE(user_id, 'legacy') WHERE user_id IS NULL")
-        conn.execute(
+        conn.execute(text("UPDATE courses SET user_id = COALESCE(user_id, 'legacy') WHERE user_id IS NULL"))
+        conn.execute(text(
             "UPDATE deadlines SET user_id = (SELECT user_id FROM courses WHERE courses.id = deadlines.course_id) "
             "WHERE user_id IS NULL"
-        )
-        conn.execute(
+        ))
+        conn.execute(text(
             "UPDATE flashcard_sets SET user_id = (SELECT user_id FROM courses WHERE courses.id = flashcard_sets.course_id) "
             "WHERE user_id IS NULL"
-        )
-        conn.execute(
+        ))
+        conn.execute(text(
             "UPDATE flashcards SET user_id = (SELECT user_id FROM flashcard_sets WHERE flashcard_sets.id = flashcards.flashcard_set_id) "
             "WHERE user_id IS NULL"
-        )
-        conn.execute(
+        ))
+        conn.execute(text(
             "UPDATE summaries SET user_id = (SELECT user_id FROM courses WHERE courses.id = summaries.course_id) "
             "WHERE user_id IS NULL"
-        )
-        conn.execute(
+        ))
+        conn.execute(text(
             "UPDATE quizzes SET user_id = (SELECT user_id FROM courses WHERE courses.id = quizzes.course_id) "
             "WHERE user_id IS NULL"
-        )
-        conn.execute(
+        ))
+        conn.execute(text(
             "UPDATE quiz_questions SET user_id = (SELECT user_id FROM quizzes WHERE quizzes.id = quiz_questions.quiz_id) "
             "WHERE user_id IS NULL"
-        )
-        conn.execute(
+        ))
+        conn.execute(text(
             "UPDATE calendar_entries SET user_id = (SELECT user_id FROM deadlines WHERE deadlines.id = calendar_entries.deadline_id) "
             "WHERE user_id IS NULL"
-        )
+        ))
 
 
 # Database Models
