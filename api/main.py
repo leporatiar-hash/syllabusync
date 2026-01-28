@@ -68,6 +68,8 @@ def generate_uuid():
 
 
 def ensure_user_columns():
+    if engine.dialect.name != "sqlite":
+        return
     tables = [
         "courses",
         "deadlines",
