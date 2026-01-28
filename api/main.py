@@ -378,6 +378,8 @@ def generate_summary_from_image(content: bytes, filename: str) -> str:
 
 
 # Create tables / migrations
+# Ensure schema exists before running column updates
+Base.metadata.create_all(bind=engine)
 ensure_user_columns()
 Base.metadata.create_all(bind=engine)
 
