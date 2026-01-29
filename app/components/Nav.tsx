@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import AuthModal from './AuthModal'
 
 const navItems = [
   { href: '/', label: 'Home' },
@@ -13,20 +15,14 @@ const navItems = [
 
 export default function Nav() {
   const pathname = usePathname()
-  const { token, profile } = useAuth()
+  const { token, profile, logout } = useAuth()
+  const [showAuth, setShowAuth] = useState(false)
 
-  // If not logged in, show only a Log In button
-  if (!token) {
-    return (
-      <nav className="flex items-center gap-6 text-sm text-slate-600">
-        <Link
-          href="/login"
-          className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-white font-semibold shadow hover:bg-[#3b6ed6] transition-colors"
-        >
-          Log In
-        </Link>
-      </nav>
-    )
+  const handleProtectedNav = (e: React.MouseEvent) => {
+    if (!token) {
+      e.preventDefault()
+      setShowAuth(true)
+    }
   }
 
   const initials = (
@@ -36,37 +32,58 @@ export default function Nav() {
   ).toUpperCase()
 
   return (
-    <nav className="flex items-center gap-6 text-sm text-slate-600">
-      {navItems.map((item) => {
-        const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`relative pb-1 transition-all duration-300 hover:text-slate-900 ${
-              isActive ? 'text-slate-900' : ''
-            }`}
-          >
-            <span>{item.label}</span>
-            <span
-              className={`absolute left-0 -bottom-1 h-[3px] w-full rounded-full bg-[#5B8DEF] transition-all duration-300 ${
-                isActive ? 'opacity-100' : 'opacity-0'
+    <>
+      <nav className="flex items-center gap-6 text-sm text-slate-600">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={handleProtectedNav}
+              className={`relative pb-1 transition-all duration-300 hover:text-slate-900 ${
+                isActive ? 'text-slate-900' : ''
               }`}
-            />
-          </Link>
-        )
-      })}
+            >
+              <span>{item.label}</span>
+              <span
+                className={`absolute left-0 -bottom-1 h-[3px] w-full rounded-full bg-[#5B8DEF] transition-all duration-300 ${
+                  isActive ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+            </Link>
+          )
+        })}
 
-      <Link
-        href="/settings"
-        className="ml-2 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#A78BFA] text-xs font-bold text-white overflow-hidden transition-transform hover:scale-105"
-      >
-        {profile?.profile_picture ? (
-          <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+        {!token ? (
+          <button
+            onClick={() => setShowAuth(true)}
+            className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-white font-semibold shadow hover:bg-[#3b6ed6] transition-colors"
+          >
+            Log In
+          </button>
         ) : (
-          initials
+          <div className="flex items-center gap-3">
+            <Link
+              href="/settings"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#A78BFA] text-xs font-bold text-white overflow-hidden transition-transform hover:scale-105"
+            >
+              {profile?.profile_picture ? (
+                <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+              ) : (
+                initials
+              )}
+            </Link>
+            <button
+              onClick={logout}
+              className="text-xs text-slate-500 hover:text-slate-700"
+            >
+              Log out
+            </button>
+          </div>
         )}
-      </Link>
-    </nav>
+      </nav>
+      <AuthModal open={showAuth} onClose={() => setShowAuth(false)} />
+    </>
   )
 }

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
 import { API_URL, authFetch } from './hooks/useAuthFetch'
 import { useAuth } from './context/AuthContext'
+import AuthModal from './components/AuthModal'
 
 interface Deadline {
   id: string
@@ -61,14 +62,10 @@ const features = [
 ]
 
 export default function HomePage() {
-  const { token, requestCode, verifyCode } = useAuth()
+  const { token } = useAuth()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [step, setStep] = useState<'email' | 'code'>('email')
-  const [loginError, setLoginError] = useState('')
-  const [loggingIn, setLoggingIn] = useState(false)
+  const [showAuth, setShowAuth] = useState(false)
 
   useEffect(() => {
     const loadDeadlines = async () => {
@@ -103,70 +100,6 @@ export default function HomePage() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
-  const handleInlineLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoginError('')
-    setLoggingIn(true)
-    try {
-      if (step === 'email') {
-        await requestCode(email)
-        setStep('code')
-      } else {
-        await verifyCode(email, code)
-      }
-    } catch (err: unknown) {
-      setLoginError(err instanceof Error ? err.message : 'Login failed')
-    } finally {
-      setLoggingIn(false)
-    }
-  }
-
-  if (!token) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#EEF2FF] via-[#F9F5FF] to-[#ECFEFF] px-4">
-        <div className="w-full max-w-md rounded-3xl border border-white/60 bg-white/80 p-8 shadow-lg backdrop-blur flex flex-col items-center">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">ClassMate</h1>
-          <p className="text-slate-600 mb-6 text-center">Your classes. Your deadlines. One place.</p>
-          <form onSubmit={handleInlineLogin} className="w-full space-y-4">
-            {loginError && (
-              <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600 text-center">
-                {loginError}
-              </div>
-            )}
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={step === 'code'}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              placeholder="Enter your .edu email"
-            />
-            {step === 'code' && (
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="\\d{6}"
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-                placeholder="123456"
-              />
-            )}
-            <button
-              type="submit"
-              disabled={loggingIn}
-              className="w-full rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              {loggingIn ? 'Starting...' : step === 'email' ? 'Send Code' : 'Verify & Continue'}
-            </button>
-          </form>
-        </div>
-      </main>
-    )
-  }
-
   return (
     <main className="min-h-screen">
       <section className="relative overflow-hidden bg-gradient-to-br from-[#EEF2FF] via-[#F9F5FF] to-[#ECFEFF]">
@@ -187,18 +120,36 @@ export default function HomePage() {
               A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
-              <Link
-                href="/courses"
-                className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                Get Started
-              </Link>
-              <Link
-                href="/calendar"
-                className="rounded-full border border-white/70 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-              >
-                View Calendar
-              </Link>
+              {token ? (
+                <Link
+                  href="/courses"
+                  className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                >
+                  Get Started
+                </Link>
+              ) : (
+                <button
+                  onClick={() => setShowAuth(true)}
+                  className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                >
+                  Get Started
+                </button>
+              )}
+              {token ? (
+                <Link
+                  href="/calendar"
+                  className="rounded-full border border-white/70 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  View Calendar
+                </Link>
+              ) : (
+                <button
+                  onClick={() => setShowAuth(true)}
+                  className="rounded-full border border-white/70 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  View Calendar
+                </button>
+              )}
             </div>
           </div>
 
@@ -225,12 +176,21 @@ export default function HomePage() {
                   </div>
                   <p className="mt-3 text-sm font-semibold text-slate-700">No upcoming deadlines yet</p>
                   <p className="mt-1 text-xs text-slate-500">Upload a syllabus to get started!</p>
-                  <Link
-                    href="/courses"
-                    className="mt-4 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-                  >
-                    Get Started
-                  </Link>
+                  {token ? (
+                    <Link
+                      href="/courses"
+                      className="mt-4 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      Get Started
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => setShowAuth(true)}
+                      className="mt-4 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      Get Started
+                    </button>
+                  )}
                 </div>
               ) : (
                 deadlines.map((deadline) => {
@@ -278,6 +238,7 @@ export default function HomePage() {
           ))}
         </div>
       </section>
+      <AuthModal open={showAuth} onClose={() => setShowAuth(false)} />
     </main>
   )
 }

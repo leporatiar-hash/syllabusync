@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '../context/AuthContext'
 
-const PUBLIC_PATHS = ['/login', '/signup', '/favicon.ico']
+const PUBLIC_PATHS = ['/', '/login', '/signup', '/favicon.ico']
 
 function isPublicPath(pathname: string) {
   if (PUBLIC_PATHS.includes(pathname)) return true
