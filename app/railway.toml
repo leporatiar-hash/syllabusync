@@ -1,5 +1,6 @@
 [build]
 builder = "NIXPACKS"
+buildCommand = "cd app && npm ci && npm run build"
 
 [deploy]
-startCommand = "npm run start"
+startCommand = "cd app && npm run start"
