@@ -18,8 +18,8 @@ interface AuthState {
   userId: string | null
   profile: UserProfile | null
   isLoading: boolean
-  login: (email: string) => Promise<void>
-  register: (email: string, fullName?: string) => Promise<void>
+  requestCode: (email: string) => Promise<void>
+  verifyCode: (email: string, code: string) => Promise<void>
   logout: () => void
   updateProfile: (profile: Partial<UserProfile>) => void
 }
@@ -42,10 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(data.profile)
         if (data.token) {
           fetch(`${API_URL}/auth/session`, {
-            headers: {
-              Authorization: `Bearer ${data.token}`,
-              ...(data.userId ? { 'X-User-Id': data.userId } : {}),
-            },
+            headers: { Authorization: `Bearer ${data.token}` },
           })
             .then(async (res) => {
               if (res.status === 401) {
@@ -87,29 +84,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('auth', JSON.stringify({ token: t, userId: uid, profile: p }))
   }
 
-  const login = async (email: string) => {
-    const res = await fetch(`${API_URL}/auth/login`, {
+  const requestCode = async (email: string) => {
+    const res = await fetch(`${API_URL}/auth/request-code`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     })
     if (!res.ok) {
       const err = await res.json()
-      throw new Error(err.detail || 'Login failed')
+      throw new Error(err.detail || 'Failed to send code')
     }
-    const data = await res.json()
-    persistAuth(data.access_token, data.user_id, data.profile)
   }
 
-  const register = async (email: string, fullName?: string) => {
-    const res = await fetch(`${API_URL}/auth/register`, {
+  const verifyCode = async (email: string, code: string) => {
+    const res = await fetch(`${API_URL}/auth/verify-code`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, full_name: fullName }),
+      body: JSON.stringify({ email, code }),
     })
     if (!res.ok) {
       const err = await res.json()
-      throw new Error(err.detail || 'Registration failed')
+      throw new Error(err.detail || 'Invalid code')
     }
     const data = await res.json()
     persistAuth(data.access_token, data.user_id, data.profile)
@@ -139,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ token, userId, profile, isLoading, login, register, logout, updateProfile }}>
+    <AuthContext.Provider value={{ token, userId, profile, isLoading, requestCode, verifyCode, logout, updateProfile }}>
       {children}
     </AuthContext.Provider>
   )

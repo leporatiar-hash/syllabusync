@@ -18,7 +18,7 @@ export default function Nav() {
   // If not logged in, show only a Log In button
   if (!token) {
     return (
-      <nav className="hidden items-center gap-6 text-sm text-slate-600 md:flex">
+      <nav className="flex items-center gap-6 text-sm text-slate-600">
         <Link
           href="/login"
           className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-white font-semibold shadow hover:bg-[#3b6ed6] transition-colors"
@@ -36,7 +36,7 @@ export default function Nav() {
   ).toUpperCase()
 
   return (
-    <nav className="hidden items-center gap-6 text-sm text-slate-600 md:flex">
+    <nav className="flex items-center gap-6 text-sm text-slate-600">
       {navItems.map((item) => {
         const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
         return (

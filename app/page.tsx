@@ -61,10 +61,12 @@ const features = [
 ]
 
 export default function HomePage() {
-  const { token, login } = useAuth()
+  const { token, requestCode, verifyCode } = useAuth()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
   const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [step, setStep] = useState<'email' | 'code'>('email')
   const [loginError, setLoginError] = useState('')
   const [loggingIn, setLoggingIn] = useState(false)
 
@@ -106,7 +108,12 @@ export default function HomePage() {
     setLoginError('')
     setLoggingIn(true)
     try {
-      await login(email)
+      if (step === 'email') {
+        await requestCode(email)
+        setStep('code')
+      } else {
+        await verifyCode(email, code)
+      }
     } catch (err: unknown) {
       setLoginError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -131,15 +138,28 @@ export default function HomePage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              disabled={step === 'code'}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
               placeholder="Enter your .edu email"
             />
+            {step === 'code' && (
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="\\d{6}"
+                required
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                placeholder="123456"
+              />
+            )}
             <button
               type="submit"
               disabled={loggingIn}
               className="w-full rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
             >
-              {loggingIn ? 'Starting...' : 'Continue'}
+              {loggingIn ? 'Starting...' : step === 'email' ? 'Send Code' : 'Verify & Continue'}
             </button>
           </form>
         </div>

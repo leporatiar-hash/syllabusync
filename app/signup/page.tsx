@@ -6,11 +6,12 @@ import Link from 'next/link'
 import { useAuth } from '../context/AuthContext'
 
 export default function SignupPage() {
-  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [step, setStep] = useState<'email' | 'code'>('email')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { register } = useAuth()
+  const { requestCode, verifyCode } = useAuth()
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -19,8 +20,13 @@ export default function SignupPage() {
 
     setLoading(true)
     try {
-      await register(email, fullName || undefined)
-      router.push('/onboarding')
+      if (step === 'email') {
+        await requestCode(email)
+        setStep('code')
+      } else {
+        await verifyCode(email, code)
+        router.push('/onboarding')
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {
@@ -47,20 +53,6 @@ export default function SignupPage() {
           )}
 
           <div>
-            <label htmlFor="fullName" className="mb-1 block text-sm font-medium text-slate-700">
-              Full Name
-            </label>
-            <input
-              id="fullName"
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              placeholder="Alex Johnson"
-            />
-          </div>
-
-          <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
               Email
             </label>
@@ -70,17 +62,37 @@ export default function SignupPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              disabled={step === 'code'}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
               placeholder="you@school.edu"
             />
           </div>
+
+          {step === 'code' && (
+            <div>
+              <label htmlFor="code" className="mb-1 block text-sm font-medium text-slate-700">
+                6-digit code
+              </label>
+              <input
+                id="code"
+                type="text"
+                inputMode="numeric"
+                pattern="\\d{6}"
+                required
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                placeholder="123456"
+              />
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={loading}
             className="w-full rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? 'Creating...' : 'Continue'}
+            {loading ? 'Creating...' : step === 'email' ? 'Send Code' : 'Verify & Continue'}
           </button>
         </form>
 

@@ -8,11 +8,8 @@ export function authHeaders(): Record<string, string> {
   try {
     const stored = localStorage.getItem('auth')
     if (stored) {
-      const { token, userId } = JSON.parse(stored)
-      const headers: Record<string, string> = {}
-      if (token) headers.Authorization = `Bearer ${token}`
-      if (userId) headers['X-User-Id'] = userId
-      if (Object.keys(headers).length > 0) return headers
+      const { token } = JSON.parse(stored)
+      if (token) return { Authorization: `Bearer ${token}` }
     }
   } catch {}
   return {}
@@ -22,7 +19,6 @@ export function authFetch(url: string, options: RequestInit = {}): Promise<Respo
   const headers = new Headers(options.headers)
   const auth = authHeaders()
   if (auth.Authorization) headers.set('Authorization', auth.Authorization)
-  if (auth['X-User-Id']) headers.set('X-User-Id', auth['X-User-Id'])
   return fetch(url, { ...options, headers }).then(res => {
     if (res.status === 401) {
       localStorage.removeItem('auth')
