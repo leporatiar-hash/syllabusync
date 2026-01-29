@@ -107,6 +107,7 @@ def _safe_db_url(url: str) -> str:
 
 
 print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
+print(f"[AUTH] ALLOW_ANON={ALLOW_ANON} REQUIRE_AUTH_FOR_WRITE={REQUIRE_AUTH_FOR_WRITE} DEMO_USER_ID={DEMO_USER_ID}")
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1050,6 +1051,11 @@ def get_session(current_user: User = Depends(get_current_user), db=Depends(get_d
             "full_name": profile.full_name if profile else None,
         }
     }
+
+
+@app.get("/auth/me")
+def get_me_auth(current_user: User = Depends(get_current_user)):
+    return {"id": current_user.id, "email": current_user.email, "created_at": current_user.created_at}
 
 
 @app.post("/auth/logout")
