@@ -15,7 +15,19 @@ export default function Nav() {
   const pathname = usePathname()
   const { token, profile } = useAuth()
 
-  if (!token) return null
+  // If not logged in, show only a Log In button
+  if (!token) {
+    return (
+      <nav className="hidden items-center gap-6 text-sm text-slate-600 md:flex">
+        <Link
+          href="/login"
+          className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-white font-semibold shadow hover:bg-[#3b6ed6] transition-colors"
+        >
+          Log In
+        </Link>
+      </nav>
+    )
+  }
 
   const initials = (
     profile?.full_name?.[0] ||
