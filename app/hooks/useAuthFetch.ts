@@ -18,7 +18,13 @@ export function authHeaders(): Record<string, string> {
 export function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)
   const auth = authHeaders()
-  if (auth.Authorization) headers.set('Authorization', auth.Authorization)
+  if (auth.Authorization) {
+    headers.set('Authorization', auth.Authorization)
+  } else {
+    // No token: do not fire protected requests, open login instead
+    window.dispatchEvent(new Event('auth:open'))
+    return Promise.resolve(new Response(null, { status: 401, statusText: 'Unauthorized' }))
+  }
   return fetch(url, { ...options, headers }).then(res => {
     if (res.status === 401) {
       localStorage.removeItem('auth')
