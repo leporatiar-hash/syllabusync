@@ -116,53 +116,33 @@ export default function HomePage() {
 
   if (!token) {
     return (
-      <main className="min-h-screen">
-        <section className="relative overflow-hidden bg-gradient-to-br from-[#EEF2FF] via-[#F9F5FF] to-[#ECFEFF]">
-          <div className="absolute inset-0 opacity-40">
-            <div className="absolute -left-20 top-24 h-56 w-56 rounded-full bg-[#5B8DEF]/30 blur-3xl" />
-            <div className="absolute right-10 top-10 h-64 w-64 rounded-full bg-[#A78BFA]/30 blur-3xl" />
-            <div className="absolute bottom-0 left-1/2 h-48 w-48 -translate-x-1/2 rounded-full bg-[#38BDF8]/20 blur-3xl" />
-          </div>
-          <div className="relative mx-auto flex max-w-6xl flex-col gap-10 px-4 py-20 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-xl">
-              <p className="mb-4 inline-flex items-center rounded-full bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#5B8DEF] shadow-sm">
-                Your academic companion
-              </p>
-              <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
-                Welcome to ClassMate
-              </h1>
-              <p className="mt-4 text-lg text-slate-600">
-                A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.
-              </p>
-            </div>
-            <div className="w-full max-w-md rounded-3xl border border-white/60 bg-white/80 p-6 shadow-lg backdrop-blur">
-              <h2 className="text-lg font-semibold text-slate-900">Enter your .edu email</h2>
-              <p className="mt-1 text-sm text-slate-500">Start your private workspace in seconds.</p>
-              <form onSubmit={handleInlineLogin} className="mt-4 space-y-3">
-                {loginError && (
-                  <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600">
-                    {loginError}
-                  </div>
-                )}
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-                  placeholder="you@school.edu"
-                />
-                <button
-                  type="submit"
-                  disabled={loggingIn}
-                  className="w-full rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  {loggingIn ? 'Starting...' : 'Continue'}
-                </button>
-              </form>
-            </div>
-          </div>
-        </section>
+      <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#EEF2FF] via-[#F9F5FF] to-[#ECFEFF] px-4">
+        <div className="w-full max-w-md rounded-3xl border border-white/60 bg-white/80 p-8 shadow-lg backdrop-blur flex flex-col items-center">
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">ClassMate</h1>
+          <p className="text-slate-600 mb-6 text-center">Your classes. Your deadlines. One place.</p>
+          <form onSubmit={handleInlineLogin} className="w-full space-y-4">
+            {loginError && (
+              <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600 text-center">
+                {loginError}
+              </div>
+            )}
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+              placeholder="Enter your .edu email"
+            />
+            <button
+              type="submit"
+              disabled={loggingIn}
+              className="w-full rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {loggingIn ? 'Starting...' : 'Continue'}
+            </button>
+          </form>
+        </div>
       </main>
     )
   }
