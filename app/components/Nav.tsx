@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import AuthModal from './AuthModal'
 
@@ -15,13 +14,12 @@ const navItems = [
 
 export default function Nav() {
   const pathname = usePathname()
-  const { token, profile, logout } = useAuth()
-  const [showAuth, setShowAuth] = useState(false)
+  const { token, profile, logout, openLogin, closeLogin, isLoginOpen } = useAuth()
 
   const handleProtectedNav = (e: React.MouseEvent) => {
     if (!token) {
       e.preventDefault()
-      setShowAuth(true)
+      openLogin()
     }
   }
 
@@ -57,7 +55,7 @@ export default function Nav() {
 
         {!token ? (
           <button
-            onClick={() => setShowAuth(true)}
+            onClick={openLogin}
             className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-white font-semibold shadow hover:bg-[#3b6ed6] transition-colors"
           >
             Log In
@@ -83,7 +81,7 @@ export default function Nav() {
           </div>
         )}
       </nav>
-      <AuthModal open={showAuth} onClose={() => setShowAuth(false)} />
+      <AuthModal open={isLoginOpen} onClose={closeLogin} />
     </>
   )
 }

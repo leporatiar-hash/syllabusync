@@ -20,6 +20,9 @@ interface AuthState {
   isLoading: boolean
   requestCode: (email: string) => Promise<void>
   verifyCode: (email: string, code: string) => Promise<void>
+  isLoginOpen: boolean
+  openLogin: () => void
+  closeLogin: () => void
   logout: () => void
   updateProfile: (profile: Partial<UserProfile>) => void
 }
@@ -31,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoginOpen, setIsLoginOpen] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem('auth')
@@ -66,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setUserId(null)
               setProfile(null)
               localStorage.removeItem('auth')
+              setIsLoginOpen(true)
             })
             .finally(() => setIsLoading(false))
           return
@@ -75,6 +80,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     setIsLoading(false)
+  }, [])
+
+  useEffect(() => {
+    const handleOpen = () => setIsLoginOpen(true)
+    const handleClose = () => setIsLoginOpen(false)
+    window.addEventListener('auth:open', handleOpen as EventListener)
+    window.addEventListener('auth:close', handleClose as EventListener)
+    return () => {
+      window.removeEventListener('auth:open', handleOpen as EventListener)
+      window.removeEventListener('auth:close', handleClose as EventListener)
+    }
   }, [])
 
   const persistAuth = (t: string, uid: string, p: UserProfile) => {
@@ -108,7 +124,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const data = await res.json()
     persistAuth(data.access_token, data.user_id, data.profile)
+    setIsLoginOpen(false)
   }
+
+  const openLogin = () => setIsLoginOpen(true)
+  const closeLogin = () => setIsLoginOpen(false)
 
   const logout = () => {
     if (token) {
@@ -121,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserId(null)
     setProfile(null)
     localStorage.removeItem('auth')
+    setIsLoginOpen(true)
   }
 
   const updateProfile = (partial: Partial<UserProfile>) => {
@@ -134,7 +155,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ token, userId, profile, isLoading, requestCode, verifyCode, logout, updateProfile }}>
+    <AuthContext.Provider value={{
+      token,
+      userId,
+      profile,
+      isLoading,
+      requestCode,
+      verifyCode,
+      isLoginOpen,
+      openLogin,
+      closeLogin,
+      logout,
+      updateProfile,
+    }}>
       {children}
     </AuthContext.Provider>
   )

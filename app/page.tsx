@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
 import { API_URL, authFetch } from './hooks/useAuthFetch'
 import { useAuth } from './context/AuthContext'
-import AuthModal from './components/AuthModal'
 
 interface Deadline {
   id: string
@@ -62,10 +61,9 @@ const features = [
 ]
 
 export default function HomePage() {
-  const { token } = useAuth()
+  const { token, openLogin } = useAuth()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
-  const [showAuth, setShowAuth] = useState(false)
 
   useEffect(() => {
     const loadDeadlines = async () => {
@@ -129,7 +127,7 @@ export default function HomePage() {
                 </Link>
               ) : (
                 <button
-                  onClick={() => setShowAuth(true)}
+                  onClick={openLogin}
                   className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                 >
                   Get Started
@@ -144,7 +142,7 @@ export default function HomePage() {
                 </Link>
               ) : (
                 <button
-                  onClick={() => setShowAuth(true)}
+                  onClick={openLogin}
                   className="rounded-full border border-white/70 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
                 >
                   View Calendar
@@ -185,7 +183,7 @@ export default function HomePage() {
                     </Link>
                   ) : (
                     <button
-                      onClick={() => setShowAuth(true)}
+                      onClick={openLogin}
                       className="mt-4 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
                     >
                       Get Started
@@ -238,7 +236,6 @@ export default function HomePage() {
           ))}
         </div>
       </section>
-      <AuthModal open={showAuth} onClose={() => setShowAuth(false)} />
     </main>
   )
 }

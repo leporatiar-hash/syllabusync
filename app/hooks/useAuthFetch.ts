@@ -22,7 +22,7 @@ export function authFetch(url: string, options: RequestInit = {}): Promise<Respo
   return fetch(url, { ...options, headers }).then(res => {
     if (res.status === 401) {
       localStorage.removeItem('auth')
-      window.location.href = '/login'
+      window.dispatchEvent(new Event('auth:open'))
     }
     return res
   })
