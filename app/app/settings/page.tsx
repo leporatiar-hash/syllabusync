@@ -1,0 +1,276 @@
+'use client'
+
+import { useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '../context/AuthContext'
+import { API_URL, authFetch } from '../hooks/useAuthFetch'
+
+const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
+const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
+
+export default function SettingsPage() {
+  const { profile, updateProfile, logout } = useAuth()
+  const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const [fullName, setFullName] = useState(profile?.full_name || '')
+  const [schoolName, setSchoolName] = useState(profile?.school_name || '')
+  const [schoolType, setSchoolType] = useState(profile?.school_type || '')
+  const [academicYear, setAcademicYear] = useState(profile?.academic_year || '')
+  const [major, setMajor] = useState(profile?.major || '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [uploadingPic, setUploadingPic] = useState(false)
+
+  const initials = (
+    profile?.full_name?.[0] ||
+    profile?.email?.[0] ||
+    'U'
+  ).toUpperCase()
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setSaved(false)
+    try {
+      const res = await authFetch(`${API_URL}/me/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: fullName || undefined,
+          school_name: schoolName || undefined,
+          school_type: schoolType || undefined,
+          academic_year: academicYear || undefined,
+          major: major || undefined,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        updateProfile(data.profile)
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handlePictureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingPic(true)
+    try {
+      // Resize and compress image
+      const dataUrl = await resizeImage(file, 200, 200)
+
+      const res = await authFetch(`${API_URL}/me/profile-picture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data: dataUrl }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        updateProfile({ profile_picture: data.profile_picture })
+      }
+    } finally {
+      setUploadingPic(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleLogout = () => {
+    logout()
+    router.push('/login')
+  }
+
+  return (
+    <main className="mx-auto max-w-2xl px-4 py-10">
+      <h1 className="mb-8 text-2xl font-bold">Profile & Settings</h1>
+
+      {/* Profile Picture */}
+      <div className="mb-8 flex items-center gap-5">
+        <div
+          className="relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#A78BFA] text-2xl font-bold text-white shadow-md transition-transform hover:scale-105"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {profile?.profile_picture ? (
+            <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+          ) : (
+            initials
+          )}
+          <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors hover:bg-black/30">
+            <span className="text-xs font-normal text-white opacity-0 transition-opacity hover:opacity-100">
+              Edit
+            </span>
+          </div>
+        </div>
+        <div>
+          <p className="font-medium text-slate-900">{profile?.full_name || 'Your Name'}</p>
+          <p className="text-sm text-slate-500">{profile?.email}</p>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingPic}
+            className="mt-1 text-xs font-medium text-[#5B8DEF] hover:underline"
+          >
+            {uploadingPic ? 'Uploading...' : 'Change photo'}
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handlePictureUpload}
+        />
+      </div>
+
+      {/* Profile Form */}
+      <form onSubmit={handleSave} className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div>
+          <label htmlFor="fullName" className="mb-1 block text-sm font-medium text-slate-700">
+            Full Name
+          </label>
+          <input
+            id="fullName"
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            disabled
+            value={profile?.email || ''}
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
+          />
+          <p className="mt-1 text-xs text-slate-400">Email cannot be changed</p>
+        </div>
+
+        <div>
+          <label htmlFor="schoolName" className="mb-1 block text-sm font-medium text-slate-700">
+            School / University
+          </label>
+          <input
+            id="schoolName"
+            type="text"
+            value={schoolName}
+            onChange={(e) => setSchoolName(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+            placeholder="e.g. University of Michigan"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="schoolType" className="mb-1 block text-sm font-medium text-slate-700">
+              School Type
+            </label>
+            <select
+              id="schoolType"
+              value={schoolType}
+              onChange={(e) => setSchoolType(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+            >
+              <option value="">Select...</option>
+              {schoolTypes.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="academicYear" className="mb-1 block text-sm font-medium text-slate-700">
+              Academic Year
+            </label>
+            <select
+              id="academicYear"
+              value={academicYear}
+              onChange={(e) => setAcademicYear(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+            >
+              <option value="">Select...</option>
+              {academicYears.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="major" className="mb-1 block text-sm font-medium text-slate-700">
+            Major / Field of Study
+          </label>
+          <input
+            id="major"
+            type="text"
+            value={major}
+            onChange={(e) => setMajor(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+            placeholder="e.g. Computer Science"
+          />
+        </div>
+
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+          {saved && (
+            <span className="text-sm font-medium text-green-600">Saved!</span>
+          )}
+        </div>
+      </form>
+
+      {/* Logout */}
+      <div className="mt-8 rounded-2xl border border-red-100 bg-white p-6">
+        <h2 className="mb-2 text-sm font-semibold text-slate-900">Sign Out</h2>
+        <p className="mb-4 text-sm text-slate-500">Sign out of your ClassMate account on this device.</p>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+        >
+          Sign Out
+        </button>
+      </div>
+    </main>
+  )
+}
+
+function resizeImage(file: File, maxW: number, maxH: number): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let w = img.width
+        let h = img.height
+        if (w > maxW || h > maxH) {
+          const ratio = Math.min(maxW / w, maxH / h)
+          w = Math.round(w * ratio)
+          h = Math.round(h * ratio)
+        }
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', 0.8))
+      }
+      img.src = e.target?.result as string
+    }
+    reader.readAsDataURL(file)
+  })
+}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { API_URL } from '../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../hooks/useAuthFetch'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -51,7 +51,7 @@ export default function CoursesPage() {
   useEffect(() => {
     const loadCourses = async () => {
       try {
-        const res = await fetch(`${API_URL}/courses`, { cache: 'no-store' })
+        const res = await authFetch(`${API_URL}/courses`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           setCourses(data)
@@ -76,7 +76,7 @@ export default function CoursesPage() {
     try {
       const url = `${API_URL}/courses`
       console.log('[Create Course] Sending request to:', url)
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -125,7 +125,7 @@ export default function CoursesPage() {
     if (!courseToDelete) return
     setDeleting(true)
     try {
-      const res = await fetch(`${API_URL}/courses/${courseToDelete.id}`, {
+      const res = await authFetch(`${API_URL}/courses/${courseToDelete.id}`, {
         method: 'DELETE',
         cache: 'no-store',
       })
@@ -166,7 +166,7 @@ export default function CoursesPage() {
     }
     setEditing(true)
     try {
-      const res = await fetch(`${API_URL}/courses/${courseToEdit.id}`, {
+      const res = await authFetch(`${API_URL}/courses/${courseToEdit.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

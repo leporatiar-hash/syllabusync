@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper } from 'lucide-react'
-import { API_URL } from '../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../hooks/useAuthFetch'
 
 interface Deadline {
   id: string
@@ -88,8 +88,8 @@ export default function CalendarPage() {
       setLoading(true)
       try {
         const [deadlinesRes, coursesRes] = await Promise.all([
-          fetch(`${API_URL}/deadlines`, { cache: 'no-store' }),
-          fetch(`${API_URL}/courses`, { cache: 'no-store' })
+          authFetch(`${API_URL}/deadlines`, { cache: 'no-store' }),
+          authFetch(`${API_URL}/courses`, { cache: 'no-store' })
         ])
 
         if (deadlinesRes.ok) {
@@ -236,7 +236,7 @@ export default function CalendarPage() {
 
   const toggleComplete = async (deadlineId: string) => {
     try {
-      const res = await fetch(`${API_URL}/deadlines/${deadlineId}/complete`, {
+      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/complete`, {
         method: 'PATCH',
         cache: 'no-store',
       })
@@ -261,7 +261,7 @@ export default function CalendarPage() {
     if (deadline.date === newDate) return
 
     try {
-      const res = await fetch(`${API_URL}/deadlines/${deadline.id}`, {
+      const res = await authFetch(`${API_URL}/deadlines/${deadline.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: newDate }),
@@ -287,7 +287,7 @@ export default function CalendarPage() {
     if (!lastMove) return
     const { id, from } = lastMove
     try {
-      const res = await fetch(`${API_URL}/deadlines/${id}`, {
+      const res = await authFetch(`${API_URL}/deadlines/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: from }),
@@ -313,7 +313,7 @@ export default function CalendarPage() {
 
     setCreating(true)
     try {
-      const res = await fetch(`${API_URL}/deadlines`, {
+      const res = await authFetch(`${API_URL}/deadlines`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

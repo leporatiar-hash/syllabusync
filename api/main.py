@@ -1,8 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
+from passlib.context import CryptContext
+from jose import JWTError, jwt
 from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
@@ -20,6 +23,14 @@ import base64
 # Load environment variables
 load_dotenv()
 
+# Auth configuration
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 7 days
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+bearer_scheme = HTTPBearer(auto_error=False)
+
 app = FastAPI()
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
@@ -35,9 +46,17 @@ app.add_middleware(
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Auth disabled: return a stable local user id for all requests.
-def get_current_user_id(request: Request = None) -> str:
-    return "default"
+# Auth helpers
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(user_id: str) -> tuple[str, datetime]:
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": user_id, "exp": expire}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM), expire
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./railway.db")
@@ -79,16 +98,35 @@ def ensure_user_columns():
         "quiz_questions",
         "summaries",
         "calendar_entries",
+        "user_profiles",
     ]
     with engine.begin() as conn:
         for table in tables:
             cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))]
-            if cols and "user_id" not in cols:
+            if not cols:
+                continue
+            if "user_id" not in cols:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN user_id TEXT"))
 
         course_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(courses)"))]
         if course_cols and "course_info" not in course_cols:
             conn.execute(text("ALTER TABLE courses ADD COLUMN course_info TEXT"))
+
+        profile_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(user_profiles)"))]
+        if profile_cols:
+            if "password_hash" not in profile_cols:
+                conn.execute(text("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT"))
+            if "profile_picture" not in profile_cols:
+                conn.execute(text("ALTER TABLE user_profiles ADD COLUMN profile_picture TEXT"))
+            if "email" not in profile_cols:
+                conn.execute(text("ALTER TABLE user_profiles ADD COLUMN email TEXT"))
+            # Backfill defaults for legacy rows
+            conn.execute(text(
+                "UPDATE user_profiles SET email = user_id || '@legacy.local' WHERE email IS NULL"
+            ))
+            conn.execute(text(
+                "UPDATE user_profiles SET password_hash = 'email-only' WHERE password_hash IS NULL"
+            ))
 
         # Backfill user_id from parent relationships when possible
         conn.execute(text("UPDATE courses SET user_id = COALESCE(user_id, 'legacy') WHERE user_id IS NULL"))
@@ -206,12 +244,14 @@ class UserProfile(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     user_id = Column(String, unique=True, nullable=False)
-    email = Column(String, nullable=True)
+    email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
     school_name = Column(String, nullable=True)
     school_type = Column(String, nullable=True)
     academic_year = Column(String, nullable=True)
     major = Column(String, nullable=True)
+    profile_picture = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -256,6 +296,24 @@ class QuizQuestion(Base):
 
     quiz = relationship("Quiz", back_populates="questions")
 
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    token = Column(Text, unique=True, nullable=False)
+    user_id = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class EmailAuthRequest(BaseModel):
+    email: str
+    full_name: str | None = None
+
+class ProfilePictureRequest(BaseModel):
+    image_data: str  # base64-encoded image
 
 class CreateCourseRequest(BaseModel):
     name: str
@@ -379,11 +437,61 @@ def generate_summary_from_image(content: bytes, filename: str) -> str:
     return response.choices[0].message.content.strip()
 
 
+def ensure_auth_columns():
+    """Add auth columns to user_profiles if they don't exist (Postgres only)."""
+    if engine.dialect.name == "sqlite":
+        return
+    with engine.begin() as conn:
+        result = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'user_profiles' AND column_name = 'password_hash'"
+        ))
+        if not result.fetchone():
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT"))
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN profile_picture TEXT"))
+            # Backfill nulls so existing rows don't break NOT NULL constraint
+            conn.execute(text(
+                "UPDATE user_profiles SET email = user_id || '@legacy.local' WHERE email IS NULL"
+            ))
+            conn.execute(text(
+                "UPDATE user_profiles SET password_hash = 'legacy-no-login' WHERE password_hash IS NULL"
+            ))
+
 # Create tables / migrations
 # Ensure schema exists before running column updates
 Base.metadata.create_all(bind=engine)
 ensure_user_columns()
+ensure_auth_columns()
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_indexes():
+    """Create minimal indexes/constraints for user isolation and lookup performance."""
+    index_statements = [
+        # user-owned tables
+        "CREATE INDEX IF NOT EXISTS idx_courses_user_id ON courses(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_deadlines_user_id ON deadlines(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_flashcard_sets_user_id ON flashcard_sets(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_flashcards_user_id ON flashcards(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_summaries_user_id ON summaries(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_user_id ON quizzes(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quiz_questions_user_id ON quiz_questions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_id ON calendar_entries(user_id)",
+        # sessions
+        "CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token)",
+        # user email uniqueness
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email)",
+    ]
+    with engine.begin() as conn:
+        for stmt in index_statements:
+            try:
+                conn.execute(text(stmt))
+            except Exception as e:
+                print(f"[WARN] Failed to apply index: {stmt} ({e})")
+
+
+ensure_indexes()
 
 
 def get_db():
@@ -392,6 +500,40 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db=Depends(get_db),
+) -> UserProfile:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    header_user_id = request.headers.get("X-User-Id")
+    if header_user_id and header_user_id != user_id:
+        raise HTTPException(status_code=401, detail="User mismatch")
+
+    session = db.query(AuthSession).filter(
+        AuthSession.token == token,
+        AuthSession.user_id == user_id,
+        AuthSession.revoked_at.is_(None),
+    ).first()
+    if not session or session.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="Session expired")
+
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(status_code=401, detail="User not found")
+    return profile
 
 
 def parse_json_response(result: str):
@@ -695,11 +837,128 @@ def healthcheck():
     return {"ok": True}
 
 
+# ============= Auth Endpoints =============
+
+def _normalize_email(raw: str) -> str:
+    return raw.lower().strip()
+
+
+def _email_auth_response(profile: UserProfile) -> dict:
+    return {
+        "token_type": "bearer",
+        "user_id": profile.user_id,
+        "profile": {
+            "email": profile.email,
+            "full_name": profile.full_name,
+            "school_name": profile.school_name,
+            "school_type": profile.school_type,
+            "academic_year": profile.academic_year,
+            "major": profile.major,
+            "profile_picture": profile.profile_picture,
+        }
+    }
+
+
+def _get_or_create_email_user(db, email: str, full_name: str | None, allow_name_update: bool) -> UserProfile:
+    normalized = _normalize_email(email)
+    profile = db.query(UserProfile).filter(UserProfile.email == normalized).first()
+    if profile:
+        if allow_name_update and full_name and not profile.full_name:
+            profile.full_name = full_name
+            db.commit()
+        return profile
+
+    user_id = generate_uuid()
+    profile = UserProfile(
+        user_id=user_id,
+        email=normalized,
+        password_hash="email-only",
+        full_name=full_name,
+    )
+    db.add(profile)
+    db.commit()
+    return profile
+
+
+def _create_session(db, user_id: str) -> str:
+    token, expires_at = create_access_token(user_id)
+    session = AuthSession(
+        token=token,
+        user_id=user_id,
+        expires_at=expires_at,
+        revoked_at=None,
+    )
+    db.add(session)
+    db.commit()
+    return token
+
+
+@app.post("/auth/register")
+def register(payload: EmailAuthRequest):
+    """Register or return an account using email only."""
+    if not payload.email or "@" not in payload.email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    db = SessionLocal()
+    try:
+        profile = _get_or_create_email_user(db, payload.email, payload.full_name, allow_name_update=True)
+        token = _create_session(db, profile.user_id)
+        response = _email_auth_response(profile)
+        response["access_token"] = token
+        return response
+    finally:
+        db.close()
+
+
+@app.post("/auth/login")
+def login(payload: EmailAuthRequest):
+    """Login with email only (creates the user if missing)."""
+    if not payload.email or "@" not in payload.email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    db = SessionLocal()
+    try:
+        profile = _get_or_create_email_user(db, payload.email, None, allow_name_update=False)
+        token = _create_session(db, profile.user_id)
+        response = _email_auth_response(profile)
+        response["access_token"] = token
+        return response
+    finally:
+        db.close()
+
+
+@app.get("/auth/session")
+def get_session(current_user: UserProfile = Depends(get_current_user)):
+    return {
+        "user": {
+            "id": current_user.user_id,
+            "email": current_user.email,
+            "created_at": current_user.created_at,
+        }
+    }
+
+
+@app.post("/auth/logout")
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db=Depends(get_db),
+):
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = credentials.credentials
+    session = db.query(AuthSession).filter(AuthSession.token == token, AuthSession.revoked_at.is_(None)).first()
+    if session:
+        session.revoked_at = datetime.utcnow()
+        db.commit()
+    return {"ok": True}
+
+
 @app.post("/courses")
-def create_course(payload: CreateCourseRequest, user_id: str = Depends(get_current_user_id)):
+def create_course(payload: CreateCourseRequest, current_user: UserProfile = Depends(get_current_user)):
     """Create a course manually."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         if not payload.name:
             raise HTTPException(status_code=400, detail="Course name is required")
 
@@ -745,9 +1004,10 @@ def create_course(payload: CreateCourseRequest, user_id: str = Depends(get_curre
 
 
 @app.get("/me")
-def get_me(user_id: str = Depends(get_current_user_id)):
+def get_me(current_user: UserProfile = Depends(get_current_user)):
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
         if not profile:
             return {"user_id": user_id, "profile": None}
@@ -760,6 +1020,7 @@ def get_me(user_id: str = Depends(get_current_user_id)):
                 "school_type": profile.school_type,
                 "academic_year": profile.academic_year,
                 "major": profile.major,
+                "profile_picture": profile.profile_picture,
             }
         }
     finally:
@@ -767,15 +1028,14 @@ def get_me(user_id: str = Depends(get_current_user_id)):
 
 
 @app.post("/me/profile")
-def upsert_profile(payload: UserProfileRequest, user_id: str = Depends(get_current_user_id)):
+def upsert_profile(payload: UserProfileRequest, current_user: UserProfile = Depends(get_current_user)):
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
         if not profile:
-            profile = UserProfile(user_id=user_id)
-            db.add(profile)
+            raise HTTPException(status_code=404, detail="Profile not found")
 
-        profile.email = payload.email or profile.email
         profile.full_name = payload.full_name or profile.full_name
         profile.school_name = payload.school_name or profile.school_name
         profile.school_type = payload.school_type or profile.school_type
@@ -783,16 +1043,48 @@ def upsert_profile(payload: UserProfileRequest, user_id: str = Depends(get_curre
         profile.major = payload.major or profile.major
 
         db.commit()
-        return {"message": "Profile saved"}
+        return {
+            "message": "Profile saved",
+            "profile": {
+                "email": profile.email,
+                "full_name": profile.full_name,
+                "school_name": profile.school_name,
+                "school_type": profile.school_type,
+                "academic_year": profile.academic_year,
+                "major": profile.major,
+                "profile_picture": profile.profile_picture,
+            }
+        }
+    finally:
+        db.close()
+
+
+@app.post("/me/profile-picture")
+def upload_profile_picture(payload: ProfilePictureRequest, current_user: UserProfile = Depends(get_current_user)):
+    """Upload a profile picture as base64."""
+    db = SessionLocal()
+    try:
+        user_id = current_user.user_id
+        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        if len(payload.image_data) > 500_000:
+            raise HTTPException(status_code=400, detail="Image too large (max ~375KB)")
+
+        profile.profile_picture = payload.image_data
+        db.commit()
+        return {"message": "Profile picture updated", "profile_picture": profile.profile_picture}
     finally:
         db.close()
 
 
 @app.get("/courses")
-def list_courses(user_id: str = Depends(get_current_user_id)):
+def list_courses(current_user: UserProfile = Depends(get_current_user)):
     """List all courses."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         courses = db.query(Course).filter(Course.user_id == user_id).order_by(Course.created_at.desc()).all()
         return [
             {
@@ -814,10 +1106,11 @@ def list_courses(user_id: str = Depends(get_current_user_id)):
 
 
 @app.get("/courses/{course_id}")
-def get_course(course_id: str, user_id: str = Depends(get_current_user_id)):
+def get_course(course_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Get a course with its deadlines and flashcard sets."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -887,10 +1180,11 @@ def get_course(course_id: str, user_id: str = Depends(get_current_user_id)):
 
 
 @app.get("/courses/{course_id}/deadlines")
-def list_course_deadlines(course_id: str, user_id: str = Depends(get_current_user_id)):
+def list_course_deadlines(course_id: str, current_user: UserProfile = Depends(get_current_user)):
     """List deadlines for a specific course."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         deadlines = db.query(Deadline).filter(Deadline.course_id == course_id, Deadline.user_id == user_id).all()
         return [
             {
@@ -917,11 +1211,12 @@ def list_all_deadlines(
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     course_id: str | None = None,
-    user_id: str = Depends(get_current_user_id),
+    current_user: UserProfile = Depends(get_current_user),
 ):
     """Get all deadlines from all courses (for calendar view)."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         print(f"[DEBUG] /deadlines request from={from_date} to={to_date} course_id={course_id}")
         query = db.query(Deadline).join(Course).filter(Deadline.user_id == user_id)
         if course_id:
@@ -954,10 +1249,11 @@ def list_all_deadlines(
 
 
 @app.post("/deadlines")
-def create_deadline(payload: CreateDeadlineRequest, user_id: str = Depends(get_current_user_id)):
+def create_deadline(payload: CreateDeadlineRequest, current_user: UserProfile = Depends(get_current_user)):
     """Create a custom deadline (user-generated, not from syllabus)."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         if not payload.course_id:
             raise HTTPException(status_code=400, detail="course_id is required")
 
@@ -996,10 +1292,11 @@ def create_deadline(payload: CreateDeadlineRequest, user_id: str = Depends(get_c
 
 
 @app.delete("/deadlines/{deadline_id}")
-def delete_deadline(deadline_id: str, user_id: str = Depends(get_current_user_id)):
+def delete_deadline(deadline_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Delete a deadline."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         deadline = db.query(Deadline).filter(Deadline.id == deadline_id, Deadline.user_id == user_id).first()
         if not deadline:
             raise HTTPException(status_code=404, detail="Deadline not found")
@@ -1020,10 +1317,11 @@ def delete_deadline(deadline_id: str, user_id: str = Depends(get_current_user_id
 
 
 @app.patch("/deadlines/{deadline_id}/complete")
-def toggle_deadline_complete(deadline_id: str, user_id: str = Depends(get_current_user_id)):
+def toggle_deadline_complete(deadline_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Toggle a deadline's completed status."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         deadline = db.query(Deadline).filter(Deadline.id == deadline_id, Deadline.user_id == user_id).first()
         if not deadline:
             raise HTTPException(status_code=404, detail="Deadline not found")
@@ -1036,10 +1334,11 @@ def toggle_deadline_complete(deadline_id: str, user_id: str = Depends(get_curren
 
 
 @app.patch("/deadlines/{deadline_id}")
-def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, user_id: str = Depends(get_current_user_id)):
+def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, current_user: UserProfile = Depends(get_current_user)):
     """Update deadline fields (currently supports date only)."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         deadline = db.query(Deadline).filter(Deadline.id == deadline_id, Deadline.user_id == user_id).first()
         if not deadline:
             raise HTTPException(status_code=404, detail="Deadline not found")
@@ -1053,10 +1352,11 @@ def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, user_id: s
         db.close()
 
 @app.post("/deadlines/{deadline_id}/save-to-calendar")
-def save_deadline_to_calendar(deadline_id: str, user_id: str = Depends(get_current_user_id)):
+def save_deadline_to_calendar(deadline_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Save a deadline to the user's calendar."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         deadline = db.query(Deadline).filter(Deadline.id == deadline_id, Deadline.user_id == user_id).first()
         if not deadline:
             raise HTTPException(status_code=404, detail="Deadline not found")
@@ -1086,10 +1386,11 @@ def save_deadline_to_calendar(deadline_id: str, user_id: str = Depends(get_curre
 
 
 @app.delete("/deadlines/{deadline_id}/save-to-calendar")
-def remove_deadline_from_calendar(deadline_id: str, user_id: str = Depends(get_current_user_id)):
+def remove_deadline_from_calendar(deadline_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Remove a deadline from the user's calendar."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         entry = db.query(CalendarEntry).filter(
             CalendarEntry.deadline_id == deadline_id,
             CalendarEntry.user_id == user_id
@@ -1105,10 +1406,11 @@ def remove_deadline_from_calendar(deadline_id: str, user_id: str = Depends(get_c
 
 
 @app.get("/calendar-entries")
-def list_calendar_entries(user_id: str = Depends(get_current_user_id)):
+def list_calendar_entries(current_user: UserProfile = Depends(get_current_user)):
     """Get all deadlines that have been saved to calendar."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         entries = db.query(CalendarEntry).filter(CalendarEntry.user_id == user_id).all()
         result = []
         for entry in entries:
@@ -1134,10 +1436,11 @@ def list_calendar_entries(user_id: str = Depends(get_current_user_id)):
 
 
 @app.delete("/courses/{course_id}")
-def delete_course(course_id: str, user_id: str = Depends(get_current_user_id)):
+def delete_course(course_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Delete a course and all its deadlines."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1157,10 +1460,11 @@ def delete_course(course_id: str, user_id: str = Depends(get_current_user_id)):
 
 
 @app.patch("/courses/{course_id}")
-def update_course(course_id: str, payload: UpdateCourseRequest, user_id: str = Depends(get_current_user_id)):
+def update_course(course_id: str, payload: UpdateCourseRequest, current_user: UserProfile = Depends(get_current_user)):
     """Update course fields."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1194,7 +1498,7 @@ def update_course(course_id: str, payload: UpdateCourseRequest, user_id: str = D
 
 
 @app.post("/courses/{course_id}/syllabus")
-async def upload_course_syllabus(course_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def upload_course_syllabus(course_id: str, file: UploadFile = File(...), current_user: UserProfile = Depends(get_current_user)):
     """Upload a syllabus PDF and attach extracted deadlines to an existing course."""
     print(f"[DEBUG] /courses/{course_id}/syllabus request received")
     if not file.filename.lower().endswith(".pdf"):
@@ -1220,6 +1524,7 @@ async def upload_course_syllabus(course_id: str, file: UploadFile = File(...), u
 
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1258,11 +1563,12 @@ async def upload_course_syllabus(course_id: str, file: UploadFile = File(...), u
 
 
 @app.post("/courses/{course_id}/summaries")
-async def generate_summary(course_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def generate_summary(course_id: str, file: UploadFile = File(...), current_user: UserProfile = Depends(get_current_user)):
     """Upload notes and generate a study summary attached to a course."""
     print(f"[DEBUG] /courses/{course_id}/summaries request received")
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1311,10 +1617,11 @@ async def generate_summary(course_id: str, file: UploadFile = File(...), user_id
 
 
 @app.delete("/summaries/{summary_id}")
-def delete_summary(summary_id: str, user_id: str = Depends(get_current_user_id)):
+def delete_summary(summary_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Delete a summary."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         summary = db.query(Summary).filter(Summary.id == summary_id, Summary.user_id == user_id).first()
         if not summary:
             raise HTTPException(status_code=404, detail="Summary not found")
@@ -1326,10 +1633,11 @@ def delete_summary(summary_id: str, user_id: str = Depends(get_current_user_id))
 
 
 @app.get("/summaries/{summary_id}")
-def get_summary(summary_id: str, user_id: str = Depends(get_current_user_id)):
+def get_summary(summary_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Get a summary with course info."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         summary = db.query(Summary).filter(Summary.id == summary_id, Summary.user_id == user_id).first()
         if not summary:
             raise HTTPException(status_code=404, detail="Summary not found")
@@ -1349,11 +1657,12 @@ def get_summary(summary_id: str, user_id: str = Depends(get_current_user_id)):
 
 # Flashcard endpoints
 @app.post("/courses/{course_id}/flashcards")
-async def generate_flashcards(course_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def generate_flashcards(course_id: str, file: UploadFile = File(...), current_user: UserProfile = Depends(get_current_user)):
     """Upload study material and generate flashcards using AI."""
     print(f"[DEBUG] /courses/{course_id}/flashcards request received")
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1472,10 +1781,11 @@ Make questions clear and answers concise but complete."""
 
 
 @app.get("/flashcard-sets/{set_id}")
-def get_flashcard_set(set_id: str, user_id: str = Depends(get_current_user_id)):
+def get_flashcard_set(set_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Get a flashcard set with all its cards."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         flashcard_set = db.query(FlashcardSet).filter(FlashcardSet.id == set_id, FlashcardSet.user_id == user_id).first()
         if not flashcard_set:
             raise HTTPException(status_code=404, detail="Flashcard set not found")
@@ -1494,10 +1804,11 @@ def get_flashcard_set(set_id: str, user_id: str = Depends(get_current_user_id)):
 
 
 @app.delete("/flashcard-sets/{set_id}")
-def delete_flashcard_set(set_id: str, user_id: str = Depends(get_current_user_id)):
+def delete_flashcard_set(set_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Delete a flashcard set."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         flashcard_set = db.query(FlashcardSet).filter(FlashcardSet.id == set_id, FlashcardSet.user_id == user_id).first()
         if not flashcard_set:
             raise HTTPException(status_code=404, detail="Flashcard set not found")
@@ -1510,8 +1821,9 @@ def delete_flashcard_set(set_id: str, user_id: str = Depends(get_current_user_id
 
 
 @app.post("/upload")
-async def upload_syllabus(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def upload_syllabus(file: UploadFile = File(...), current_user: UserProfile = Depends(get_current_user)):
     print("[DEBUG] /upload request received")
+    user_id = current_user.user_id
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
@@ -1617,10 +1929,11 @@ async def upload_syllabus(file: UploadFile = File(...), user_id: str = Depends(g
 # ============= Quiz Endpoints =============
 
 @app.post("/courses/{course_id}/generate-quiz")
-async def generate_quiz(course_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+async def generate_quiz(course_id: str, file: UploadFile = File(...), current_user: UserProfile = Depends(get_current_user)):
     """Generate a multiple-choice quiz from study materials."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1760,10 +2073,11 @@ Guidelines:
 
 
 @app.get("/quizzes/{quiz_id}")
-def get_quiz(quiz_id: str, user_id: str = Depends(get_current_user_id)):
+def get_quiz(quiz_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Get a quiz with all its questions."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         quiz = db.query(Quiz).filter(Quiz.id == quiz_id, Quiz.user_id == user_id).first()
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")
@@ -1794,10 +2108,11 @@ def get_quiz(quiz_id: str, user_id: str = Depends(get_current_user_id)):
 
 
 @app.post("/quizzes/{quiz_id}/submit")
-def submit_quiz(quiz_id: str, submission: QuizSubmission, user_id: str = Depends(get_current_user_id)):
+def submit_quiz(quiz_id: str, submission: QuizSubmission, current_user: UserProfile = Depends(get_current_user)):
     """Submit quiz answers and get results."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         quiz = db.query(Quiz).filter(Quiz.id == quiz_id, Quiz.user_id == user_id).first()
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")
@@ -1843,10 +2158,11 @@ def submit_quiz(quiz_id: str, submission: QuizSubmission, user_id: str = Depends
 
 
 @app.get("/courses/{course_id}/quizzes")
-def get_course_quizzes(course_id: str, user_id: str = Depends(get_current_user_id)):
+def get_course_quizzes(course_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Get all quizzes for a course."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -1865,10 +2181,11 @@ def get_course_quizzes(course_id: str, user_id: str = Depends(get_current_user_i
 
 
 @app.delete("/quizzes/{quiz_id}")
-def delete_quiz(quiz_id: str, user_id: str = Depends(get_current_user_id)):
+def delete_quiz(quiz_id: str, current_user: UserProfile = Depends(get_current_user)):
     """Delete a quiz."""
     db = SessionLocal()
     try:
+        user_id = current_user.user_id
         quiz = db.query(Quiz).filter(Quiz.id == quiz_id, Quiz.user_id == user_id).first()
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")

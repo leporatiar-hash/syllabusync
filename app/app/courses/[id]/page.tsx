@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
-import { API_URL } from '../../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../../hooks/useAuthFetch'
 
 interface Deadline {
   id: string
@@ -83,6 +83,12 @@ const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode 
 }
 
 export default function CourseDetailPage() {
+    // Class Schedule State
+    const [classSchedule, setClassSchedule] = useState<Array<{ day: string; start: string; end: string }>>([
+      // Example default, can be empty
+    ])
+    const [editingSchedule, setEditingSchedule] = useState(false)
+    const [newSchedule, setNewSchedule] = useState({ day: '', start: '', end: '' })
   const params = useParams()
   const courseId = Array.isArray(params?.id) ? params.id[0] : params?.id
   const [course, setCourse] = useState<CourseDetail | null>(null)
@@ -100,6 +106,7 @@ export default function CourseDetailPage() {
   const [bulkSaving, setBulkSaving] = useState(false)
   const [mainTab, setMainTab] = useState<'deadlines' | 'study' | 'info'>('deadlines')
   const [deadlineTab, setDeadlineTab] = useState<'unsaved' | 'saved'>('unsaved')
+  const [deadlineTabTouched, setDeadlineTabTouched] = useState(false)
   const [generateFlashcards, setGenerateFlashcards] = useState(true)
   const [generateQuiz, setGenerateQuiz] = useState(true)
   const [generateSummary, setGenerateSummary] = useState(true)
@@ -112,81 +119,70 @@ export default function CourseDetailPage() {
   const studyInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    loadCourse()
-  }, [courseId])
-
-  const loadCourse = async () => {
-    if (!courseId) return
-    try {
-      const res = await fetch(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
-      if (res.ok) {
-        const data = await res.json()
-        setCourse(data)
-        setDeadlines(data.deadlines || [])
-      }
-    } catch (err) {
-      console.error('Failed to load course:', err)
-    }
-  }
-
-  const remainingCount = useMemo(
-    () => deadlines.filter((d) => !d.completed).length,
-    [deadlines]
-  )
-
-  const unsavedDeadlines = useMemo(
-    () => deadlines.filter((d) => !d.saved_to_calendar),
-    [deadlines]
-  )
-
-  const savedDeadlines = useMemo(
-    () => deadlines.filter((d) => d.saved_to_calendar),
-    [deadlines]
-  )
-
-  const unsavedCount = unsavedDeadlines.length
-  const savedCount = savedDeadlines.length
-
-  const toggleComplete = async (deadlineId: string) => {
-    try {
-      const res = await fetch(`${API_URL}/deadlines/${deadlineId}/complete`, {
-        method: 'PATCH',
-        cache: 'no-store',
-      })
-      if (res.ok) {
-        const updated = await res.json()
-        setDeadlines(deadlines.map((d) => (d.id === deadlineId ? { ...d, completed: updated.completed } : d)))
-      }
-    } catch (err) {
-      console.error('Failed to toggle deadline:', err)
-    }
-  }
-
-  const saveToCalendar = async (deadlineId: string) => {
-    setSavingToCalendar(deadlineId)
-    try {
-      const res = await fetch(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
-        method: 'POST',
-        cache: 'no-store',
-      })
-      if (res.ok) {
-        setDeadlines(deadlines.map((d) => (d.id === deadlineId ? { ...d, saved_to_calendar: true } : d)))
-        setCalendarToast('Saved to calendar!')
-        setTimeout(() => setCalendarToast(null), 2000)
-      }
-    } catch (err) {
-      console.error('Failed to save to calendar:', err)
-      setCalendarToast('Failed to save')
-      setTimeout(() => setCalendarToast(null), 2000)
-    } finally {
-      setSavingToCalendar(null)
-    }
-  }
+        {mainTab === 'info' && course && (
+          <div className="mt-10 grid gap-8 md:grid-cols-2">
+            {/* Instructor, Logistics, Grade Breakdown, Policies, Materials */}
+            <div className="space-y-6">
+              {/* ...existing code... */}
+              <div className="rounded-3xl bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-slate-900">Class Schedule</h3>
+                <div className="mt-4 space-y-2 text-sm">
+                  {classSchedule.length === 0 ? (
+                    <span className="italic text-slate-400">No class schedule set.</span>
+                  ) : (
+                    <ul>
+                      {classSchedule.map((item, idx) => (
+                        <li key={idx} className="flex gap-4 items-center">
+                          <span className="font-semibold text-slate-700">{item.day}</span>
+                          <span className="text-slate-600">{item.start} - {item.end}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {editingSchedule ? (
+                    <div className="mt-4 flex flex-col gap-2">
+                      <select value={newSchedule.day} onChange={e => setNewSchedule(s => ({ ...s, day: e.target.value }))} className="rounded border p-1">
+                        <option value="">Select day</option>
+                        <option value="Monday">Monday</option>
+                        <option value="Tuesday">Tuesday</option>
+                        <option value="Wednesday">Wednesday</option>
+                        <option value="Thursday">Thursday</option>
+                        <option value="Friday">Friday</option>
+                        <option value="Saturday">Saturday</option>
+                        <option value="Sunday">Sunday</option>
+                      </select>
+                      <input type="time" value={newSchedule.start} onChange={e => setNewSchedule(s => ({ ...s, start: e.target.value }))} className="rounded border p-1" placeholder="Start time" />
+                      <input type="time" value={newSchedule.end} onChange={e => setNewSchedule(s => ({ ...s, end: e.target.value }))} className="rounded border p-1" placeholder="End time" />
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => {
+                          if (newSchedule.day && newSchedule.start && newSchedule.end) {
+                            setClassSchedule(s => [...s, newSchedule])
+                            setNewSchedule({ day: '', start: '', end: '' })
+                          }
+                        }} className="rounded bg-[#5B8DEF] text-white px-3 py-1">Add</button>
+                        <button onClick={() => setEditingSchedule(false)} className="rounded bg-slate-200 px-3 py-1">Done</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => setEditingSchedule(true)} className="mt-4 rounded bg-[#5B8DEF] text-white px-3 py-1">Edit Schedule</button>
+                  )}
+                  {classSchedule.length > 0 && (
+                    <button onClick={() => alert('TODO: Add to calendar logic here!')} className="mt-4 rounded bg-[#4ADE80] text-white px-3 py-1">Add Schedule to Calendar</button>
+                  )}
+                </div>
+              </div>
+              {/* ...existing code... */}
+            </div>
+            <div className="space-y-6">
+              {/* ...existing code... */}
+            </div>
+          </div>
+        )}
 
   const removeFromCalendar = async (deadlineId: string) => {
     setSavingToCalendar(deadlineId)
     try {
-      const res = await fetch(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
+      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
         method: 'DELETE',
         cache: 'no-store',
       })
@@ -194,10 +190,13 @@ export default function CourseDetailPage() {
         setDeadlines(deadlines.map((d) => (d.id === deadlineId ? { ...d, saved_to_calendar: false } : d)))
         setCalendarToast('Removed from calendar')
         setTimeout(() => setCalendarToast(null), 2000)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Failed to remove')
       }
     } catch (err) {
       console.error('Failed to remove from calendar:', err)
-      setCalendarToast('Failed to remove')
+      setCalendarToast(err instanceof Error ? err.message : 'Failed to remove')
       setTimeout(() => setCalendarToast(null), 2000)
     } finally {
       setSavingToCalendar(null)
@@ -211,10 +210,14 @@ export default function CourseDetailPage() {
     setBulkSaving(true)
     try {
       for (const deadline of unsaved) {
-        await fetch(`${API_URL}/deadlines/${deadline.id}/save-to-calendar`, {
+        const res = await authFetch(`${API_URL}/deadlines/${deadline.id}/save-to-calendar`, {
           method: 'POST',
           cache: 'no-store',
         })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.detail || 'Failed to save some deadlines')
+        }
       }
       setDeadlines(deadlines.map(d => ({ ...d, saved_to_calendar: true })))
       setCalendarToast(`Saved ${unsaved.length} deadlines to calendar!`)
@@ -239,7 +242,7 @@ export default function CourseDetailPage() {
 
     try {
       const url = `${API_URL}/courses/${courseId}/syllabus`
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method: 'POST',
         body: formData,
         cache: 'no-store',
@@ -251,7 +254,15 @@ export default function CourseDetailPage() {
       }
       setSyllabusSuccess(true)
       setSyllabusFile(null)
+      setDeadlineTabTouched(false)
       await loadCourse()
+      // Debug: check deadlines after upload
+      setTimeout(() => {
+        console.log('[Debug] Deadlines after syllabus upload:', deadlines)
+        if (deadlines.length === 0) {
+          alert('No deadlines were extracted. Check backend response or extraction logic.')
+        }
+      }, 1000)
     } catch (err) {
       console.error('Failed to upload syllabus:', err)
       setSyllabusError(err instanceof Error ? err.message : 'Failed to upload syllabus')
@@ -279,7 +290,7 @@ export default function CourseDetailPage() {
       const upload = (endpoint: string) => {
         const formData = new FormData()
         formData.append('file', studyFile)
-        return fetch(endpoint, {
+        return authFetch(endpoint, {
           method: 'POST',
           body: formData,
           cache: 'no-store',
@@ -330,7 +341,7 @@ export default function CourseDetailPage() {
 
       setFlashcardSuccess(true)
       setStudyFile(null)
-      const refreshed = await fetch(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
+      const refreshed = await authFetch(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
       if (refreshed.ok) {
         const data = await refreshed.json()
         setCourse(data)
@@ -366,7 +377,7 @@ export default function CourseDetailPage() {
     if (!courseId || !editedInfo) return
     setSavingInfo(true)
     try {
-      const res = await fetch(`${API_URL}/courses/${courseId}`, {
+      const res = await authFetch(`${API_URL}/courses/${courseId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ course_info: editedInfo }),
@@ -540,7 +551,10 @@ export default function CourseDetailPage() {
               {/* Deadline Sub-tabs */}
               <div className="mt-4 flex rounded-full bg-slate-100 p-1">
                 <button
-                  onClick={() => setDeadlineTab('unsaved')}
+                  onClick={() => {
+                    setDeadlineTabTouched(true)
+                    setDeadlineTab('unsaved')
+                  }}
                   className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 ${
                     deadlineTab === 'unsaved'
                       ? 'bg-white text-slate-900 shadow-sm'
@@ -550,7 +564,10 @@ export default function CourseDetailPage() {
                   Unsaved ({unsavedCount})
                 </button>
                 <button
-                  onClick={() => setDeadlineTab('saved')}
+                  onClick={() => {
+                    setDeadlineTabTouched(true)
+                    setDeadlineTab('saved')
+                  }}
                   className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 ${
                     deadlineTab === 'saved'
                       ? 'bg-white text-slate-900 shadow-sm'
@@ -649,6 +666,15 @@ export default function CourseDetailPage() {
                       <>
                         <p className="text-[#4ADE80]">All deadlines saved!</p>
                         <p className="mt-1 text-xs text-slate-400">Switch to "In Calendar" to view them.</p>
+                        <button
+                          onClick={() => {
+                            setDeadlineTabTouched(true)
+                            setDeadlineTab('saved')
+                          }}
+                          className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF] hover:text-[#5B8DEF]"
+                        >
+                          View In Calendar
+                        </button>
                       </>
                     )
                   ) : (

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import { jsPDF } from 'jspdf'
-import { API_URL } from '../../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../../hooks/useAuthFetch'
 
 interface SummaryDetail {
   id: string
@@ -34,7 +34,7 @@ export default function SummaryPage() {
       if (!summaryId) return
       try {
         setLoading(true)
-        const res = await fetch(`${API_URL}/summaries/${summaryId}`, { cache: 'no-store' })
+        const res = await authFetch(`${API_URL}/summaries/${summaryId}`, { cache: 'no-store' })
         if (!res.ok) throw new Error('Failed to load summary')
         const data = await res.json()
         setSummary(data)
@@ -71,7 +71,7 @@ export default function SummaryPage() {
     if (!summary) return
     if (!confirm('Delete this summary?')) return
     try {
-      const res = await fetch(`${API_URL}/summaries/${summary.id}`, {
+      const res = await authFetch(`${API_URL}/summaries/${summary.id}`, {
         method: 'DELETE',
         cache: 'no-store',
       })
