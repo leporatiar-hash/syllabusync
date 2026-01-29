@@ -30,6 +30,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 7
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
+ALLOW_ANON = os.getenv("ALLOW_ANON", "true").lower() == "true"
 
 app = FastAPI()
 
@@ -508,6 +509,18 @@ def get_current_user(
     db=Depends(get_db),
 ) -> UserProfile:
     if credentials is None:
+        if ALLOW_ANON:
+            anon = db.query(UserProfile).filter(UserProfile.user_id == "anonymous").first()
+            if not anon:
+                anon = UserProfile(
+                    user_id="anonymous",
+                    email="anonymous@local",
+                    password_hash="anonymous",
+                    full_name="Anonymous",
+                )
+                db.add(anon)
+                db.commit()
+            return anon
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = credentials.credentials
     try:
