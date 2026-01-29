@@ -19,7 +19,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && !token && !isPublicPath(pathname)) {
-      router.replace('/login')
+      window.dispatchEvent(new Event('auth:open'))
     }
   }, [token, isLoading, pathname, router])
 
@@ -31,9 +31,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (!token && !isPublicPath(pathname)) {
-    return null
-  }
+  if (!token && !isPublicPath(pathname)) return null
 
   return <>{children}</>
 }

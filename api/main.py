@@ -31,10 +31,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 7 days
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-bearer_scheme = HTTPBearer(auto_error=False)
-ALLOW_ANON = os.getenv("ALLOW_ANON", "false").lower() == "true"
-REQUIRE_AUTH_FOR_WRITE = os.getenv("REQUIRE_AUTH_FOR_WRITE", "true").lower() == "true"
-DEMO_USER_ID = os.getenv("DEMO_USER_ID", "demo")
+bearer_scheme = HTTPBearer(auto_error=True)
 
 app = FastAPI()
 
@@ -107,7 +104,7 @@ def _safe_db_url(url: str) -> str:
 
 
 print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
-print(f"[AUTH] ALLOW_ANON={ALLOW_ANON} REQUIRE_AUTH_FOR_WRITE={REQUIRE_AUTH_FOR_WRITE} DEMO_USER_ID={DEMO_USER_ID}")
+print("[AUTH] OTP auth enabled; anonymous access disabled")
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -563,16 +560,8 @@ def _get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None,
     db,
-    allow_anon: bool,
 ) -> User:
     if credentials is None:
-        if ALLOW_ANON and allow_anon:
-            demo_user = db.query(User).filter(User.id == DEMO_USER_ID).first()
-            if not demo_user:
-                demo_user = User(id=DEMO_USER_ID, email="demo@local")
-                db.add(demo_user)
-                db.commit()
-            return demo_user
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     token = credentials.credentials
@@ -603,15 +592,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db=Depends(get_db),
 ) -> User:
-    return _get_current_user(request, credentials, db, allow_anon=False)
-
-
-def get_demo_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db=Depends(get_db),
-) -> User:
-    return _get_current_user(request, credentials, db, allow_anon=True)
+    return _get_current_user(request, credentials, db)
 
 
 def parse_json_response(result: str):
