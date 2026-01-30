@@ -169,7 +169,7 @@ def ensure_user_columns():
             conn.execute(text("ALTER TABLE courses ADD COLUMN course_info TEXT"))
 
         profile_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(user_profiles)"))]
-    if profile_cols:
+        if profile_cols:
             if "profile_picture" not in profile_cols:
                 conn.execute(text("ALTER TABLE user_profiles ADD COLUMN profile_picture TEXT"))
             if "email" not in profile_cols:
