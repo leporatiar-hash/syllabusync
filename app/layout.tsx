@@ -38,7 +38,7 @@ export default function RootLayout({
                   priority
                   style={{ height: "32px", width: "auto" }}
                 />
-                <span>ClassMate</span>
+                <span className="text-[#7BB7FF]">ClassMate</span>
               </Link>
               <Nav />
             </div>
