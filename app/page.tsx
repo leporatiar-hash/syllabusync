@@ -2,9 +2,10 @@
 
 import { useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
 import { API_URL, authFetch } from './hooks/useAuthFetch'
-import { useAuth } from './context/AuthContext'
+import { useAuth } from './lib/useAuth'
 
 interface Deadline {
   id: string
@@ -61,9 +62,16 @@ const features = [
 ]
 
 export default function HomePage() {
-  const { token, openLogin } = useAuth()
+  const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
 
   useEffect(() => {
     const loadDeadlines = async () => {
@@ -86,12 +94,12 @@ export default function HomePage() {
       }
     }
 
-    if (token) {
+    if (user) {
       loadDeadlines()
     } else {
       setLoading(false)
     }
-  }, [token])
+  }, [user])
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr + 'T00:00:00')
@@ -118,7 +126,7 @@ export default function HomePage() {
               A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
-              {token ? (
+              {user ? (
                 <Link
                   href="/courses"
                   className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
@@ -126,14 +134,14 @@ export default function HomePage() {
                   Get Started
                 </Link>
               ) : (
-                <button
-                  onClick={openLogin}
+                <Link
+                  href="/login"
                   className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                 >
                   Get Started
-                </button>
+                </Link>
               )}
-              {token ? (
+              {user ? (
                 <Link
                   href="/calendar"
                   className="rounded-full border border-white/70 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { API_URL, authFetch } from '../hooks/useAuthFetch'
+import { useAuth } from '../lib/useAuth'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -28,6 +30,8 @@ const gradients = [
 ]
 
 export default function CoursesPage() {
+  const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -38,6 +42,13 @@ export default function CoursesPage() {
   const [formCode, setFormCode] = useState('')
   const [formSemester, setFormSemester] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
+
   const [creating, setCreating] = useState(false)
   const [courseToDelete, setCourseToDelete] = useState<Course | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -49,6 +60,10 @@ export default function CoursesPage() {
   const [editing, setEditing] = useState(false)
 
   useEffect(() => {
+    if (!user) {
+      setLoading(false)
+      return
+    }
     const loadCourses = async () => {
       try {
         const res = await authFetch(`${API_URL}/courses`, { cache: 'no-store' })
@@ -64,7 +79,23 @@ export default function CoursesPage() {
     }
 
     loadCourses()
-  }, [])
+  }, [user])
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center text-sm text-slate-500">
+        Loading...
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center text-sm text-slate-500">
+        Redirecting to login...
+      </div>
+    )
+  }
 
   const handleCreate = async () => {
     if (!formName.trim()) {
@@ -193,6 +224,18 @@ export default function CoursesPage() {
     } finally {
       setEditing(false)
     }
+  }
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+        <div className="text-sm text-slate-500">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
   }
 
   return (

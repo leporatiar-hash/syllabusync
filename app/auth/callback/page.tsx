@@ -21,6 +21,22 @@ export default function AuthCallbackPage() {
           setMessage(error.message)
           return
         }
+      } else if (typeof window !== 'undefined' && window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1))
+        const accessToken = hashParams.get('access_token')
+        const refreshToken = hashParams.get('refresh_token')
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          })
+          if (error) {
+            setStatus('error')
+            setMessage(error.message)
+            return
+          }
+          window.history.replaceState({}, document.title, window.location.pathname)
+        }
       }
 
       const { data, error } = await supabase.auth.getSession()
