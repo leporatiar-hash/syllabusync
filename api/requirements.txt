@@ -7,5 +7,4 @@ python-docx
 openai
 sqlalchemy
 psycopg2-binary
-passlib[bcrypt]
 python-jose[cryptography]

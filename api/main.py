@@ -4,13 +4,15 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
-from passlib.context import CryptContext
-from jose import JWTError, jwt
+from jose import JWTError, jwt, jwk
+from jose.utils import base64url_decode
 from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, date, timedelta
+from urllib.request import urlopen
+from urllib.error import URLError
 import PyPDF2
 from docx import Document
 import json
@@ -19,18 +21,22 @@ import io
 import os
 import re
 import base64
-import hashlib
-import secrets
+import time
 
 # Load environment variables
 load_dotenv()
 
-# Auth configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 7 days
+# Supabase auth configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or ""
+SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL") or (
+    f"{SUPABASE_URL.rstrip('/')}/auth/v1/certs" if SUPABASE_URL else ""
+)
+SUPABASE_ISSUER = os.getenv("SUPABASE_ISSUER") or (
+    f"{SUPABASE_URL.rstrip('/')}/auth/v1" if SUPABASE_URL else ""
+)
+SUPABASE_JWT_AUD = os.getenv("SUPABASE_JWT_AUD", "authenticated")
+SUPABASE_JWKS_CACHE_TTL = int(os.getenv("SUPABASE_JWKS_CACHE_TTL", "3600"))
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=True)
 
 app = FastAPI()
@@ -48,43 +54,65 @@ app.add_middleware(
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Auth helpers
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def create_access_token(user_id: str) -> tuple[str, datetime]:
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "exp": expire}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM), expire
+# Supabase auth helpers
+_jwks_cache: dict[str, object] = {"fetched_at": 0.0, "keys": {}}
 
 
-def _hash_code(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+def _fetch_jwks() -> dict[str, dict]:
+    if not SUPABASE_JWKS_URL:
+        raise HTTPException(status_code=500, detail="Supabase JWKS URL not configured")
+    try:
+        with urlopen(SUPABASE_JWKS_URL, timeout=5) as resp:
+            payload = json.load(resp)
+    except URLError:
+        raise HTTPException(status_code=503, detail="Failed to fetch Supabase JWKS")
+    keys = {key.get("kid"): key for key in payload.get("keys", []) if key.get("kid")}
+    if not keys:
+        raise HTTPException(status_code=503, detail="Supabase JWKS is empty")
+    _jwks_cache["fetched_at"] = time.time()
+    _jwks_cache["keys"] = keys
+    return keys
 
 
-def _verify_code(code: str, code_hash: str) -> bool:
-    return _hash_code(code) == code_hash
+def _get_jwks() -> dict[str, dict]:
+    fetched_at = float(_jwks_cache.get("fetched_at", 0.0) or 0.0)
+    if not _jwks_cache.get("keys") or (time.time() - fetched_at) > SUPABASE_JWKS_CACHE_TTL:
+        return _fetch_jwks()
+    return _jwks_cache["keys"]  # type: ignore[return-value]
 
 
-_login_rate_limit: dict[str, list[datetime]] = {}
-
-
-def _rate_limit_key(email: str, ip: str | None) -> str:
-    return f"{email}|{ip or 'unknown'}"
-
-
-def _check_rate_limit(email: str, ip: str | None, max_requests: int = 5, window_minutes: int = 10) -> None:
-    now = datetime.utcnow()
-    key = _rate_limit_key(email, ip)
-    window_start = now - timedelta(minutes=window_minutes)
-    timestamps = [t for t in _login_rate_limit.get(key, []) if t > window_start]
-    if len(timestamps) >= max_requests:
-        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
-    timestamps.append(now)
-    _login_rate_limit[key] = timestamps
+def _verify_supabase_token(token: str) -> dict:
+    if not SUPABASE_ISSUER or not SUPABASE_JWKS_URL:
+        raise HTTPException(status_code=500, detail="Supabase auth not configured")
+    try:
+        header = jwt.get_unverified_header(token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token header")
+    kid = header.get("kid")
+    if not kid:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    keys = _get_jwks()
+    key_data = keys.get(kid)
+    if not key_data:
+        keys = _fetch_jwks()
+        key_data = keys.get(kid)
+    if not key_data:
+        raise HTTPException(status_code=401, detail="Invalid token key")
+    public_key = jwk.construct(key_data)
+    message, encoded_sig = token.rsplit(".", 1)
+    decoded_sig = base64url_decode(encoded_sig.encode("utf-8"))
+    if not public_key.verify(message.encode("utf-8"), decoded_sig):
+        raise HTTPException(status_code=401, detail="Invalid token signature")
+    try:
+        return jwt.decode(
+            token,
+            key_data,
+            algorithms=[header.get("alg", "RS256")],
+            audience=SUPABASE_JWT_AUD,
+            issuer=SUPABASE_ISSUER,
+        )
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./railway.db")
@@ -104,7 +132,6 @@ def _safe_db_url(url: str) -> str:
 
 
 print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
-print("[AUTH] OTP auth enabled; anonymous access disabled")
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -142,9 +169,7 @@ def ensure_user_columns():
             conn.execute(text("ALTER TABLE courses ADD COLUMN course_info TEXT"))
 
         profile_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(user_profiles)"))]
-        if profile_cols:
-            if "password_hash" not in profile_cols:
-                conn.execute(text("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT"))
+    if profile_cols:
             if "profile_picture" not in profile_cols:
                 conn.execute(text("ALTER TABLE user_profiles ADD COLUMN profile_picture TEXT"))
             if "email" not in profile_cols:
@@ -152,9 +177,6 @@ def ensure_user_columns():
             # Backfill defaults for legacy rows
             conn.execute(text(
                 "UPDATE user_profiles SET email = user_id || '@legacy.local' WHERE email IS NULL"
-            ))
-            conn.execute(text(
-                "UPDATE user_profiles SET password_hash = 'email-only' WHERE password_hash IS NULL"
             ))
 
         # Backfill user_id from parent relationships when possible
@@ -282,24 +304,12 @@ class UserProfile(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     user_id = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
     school_name = Column(String, nullable=True)
     school_type = Column(String, nullable=True)
     academic_year = Column(String, nullable=True)
     major = Column(String, nullable=True)
     profile_picture = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-class LoginCode(Base):
-    __tablename__ = "login_codes"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    email = Column(String, nullable=False, index=True)
-    code_hash = Column(String, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    attempts = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -344,26 +354,6 @@ class QuizQuestion(Base):
 
     quiz = relationship("Quiz", back_populates="questions")
 
-
-class AuthSession(Base):
-    __tablename__ = "auth_sessions"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    token = Column(Text, unique=True, nullable=False)
-    user_id = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)
-    revoked_at = Column(DateTime, nullable=True)
-
-
-class EmailAuthRequest(BaseModel):
-    email: str
-    full_name: str | None = None
-
-
-class VerifyCodeRequest(BaseModel):
-    email: str
-    code: str
 
 class ProfilePictureRequest(BaseModel):
     image_data: str  # base64-encoded image
@@ -490,31 +480,10 @@ def generate_summary_from_image(content: bytes, filename: str) -> str:
     return response.choices[0].message.content.strip()
 
 
-def ensure_auth_columns():
-    """Add auth columns to user_profiles if they don't exist (Postgres only)."""
-    if engine.dialect.name == "sqlite":
-        return
-    with engine.begin() as conn:
-        result = conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'user_profiles' AND column_name = 'password_hash'"
-        ))
-        if not result.fetchone():
-            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT"))
-            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN profile_picture TEXT"))
-            # Backfill nulls so existing rows don't break NOT NULL constraint
-            conn.execute(text(
-                "UPDATE user_profiles SET email = user_id || '@legacy.local' WHERE email IS NULL"
-            ))
-            conn.execute(text(
-                "UPDATE user_profiles SET password_hash = 'legacy-no-login' WHERE password_hash IS NULL"
-            ))
-
 # Create tables / migrations
 # Ensure schema exists before running column updates
 Base.metadata.create_all(bind=engine)
 ensure_user_columns()
-ensure_auth_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -530,12 +499,8 @@ def ensure_indexes():
         "CREATE INDEX IF NOT EXISTS idx_quizzes_user_id ON quizzes(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_quiz_questions_user_id ON quiz_questions(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_id ON calendar_entries(user_id)",
-        # sessions
-        "CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token)",
         # user email uniqueness
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
-        "CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email)",
     ]
     with engine.begin() as conn:
         for stmt in index_statements:
@@ -565,25 +530,23 @@ def _get_current_user(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     token = credentials.credentials
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    session = db.query(AuthSession).filter(
-        AuthSession.token == token,
-        AuthSession.user_id == user_id,
-        AuthSession.revoked_at.is_(None),
-    ).first()
-    if not session or session.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=401, detail="Session expired")
+    claims = _verify_supabase_token(token)
+    user_id = claims.get("sub")
+    email = claims.get("email")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        user = User(id=user_id, email=email or f"{user_id}@supabase.local")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    elif email and user.email != email:
+        user.email = email
+        db.commit()
+        db.refresh(user)
+
     return user
 
 
@@ -893,164 +856,6 @@ def health():
 
 @app.get("/health")
 def healthcheck():
-    return {"ok": True}
-
-
-# ============= Auth Endpoints =============
-
-def _normalize_email(raw: str) -> str:
-    return raw.lower().strip()
-
-
-def _email_auth_response(user: User, profile: UserProfile | None) -> dict:
-    return {
-        "token_type": "bearer",
-        "user_id": user.id,
-        "profile": {
-            "email": user.email,
-            "full_name": profile.full_name if profile else None,
-            "school_name": profile.school_name if profile else None,
-            "school_type": profile.school_type if profile else None,
-            "academic_year": profile.academic_year if profile else None,
-            "major": profile.major if profile else None,
-            "profile_picture": profile.profile_picture if profile else None,
-        }
-    }
-
-
-def _get_or_create_email_user(db, email: str, full_name: str | None, allow_name_update: bool) -> tuple[User, UserProfile]:
-    normalized = _normalize_email(email)
-    user = db.query(User).filter(User.email == normalized).first()
-    profile = db.query(UserProfile).filter(UserProfile.email == normalized).first()
-
-    if user:
-        if profile and allow_name_update and full_name and not profile.full_name:
-            profile.full_name = full_name
-            db.commit()
-        return user, profile
-
-    user = User(id=generate_uuid(), email=normalized)
-    db.add(user)
-    db.flush()
-
-    profile = UserProfile(
-        user_id=user.id,
-        email=normalized,
-        password_hash="otp",
-        full_name=full_name,
-    )
-    db.add(profile)
-    db.commit()
-    return user, profile
-
-
-def _create_session(db, user_id: str) -> str:
-    token, expires_at = create_access_token(user_id)
-    session = AuthSession(
-        token=token,
-        user_id=user_id,
-        expires_at=expires_at,
-        revoked_at=None,
-    )
-    db.add(session)
-    db.commit()
-    return token
-
-
-@app.post("/auth/register")
-def register_legacy():
-    raise HTTPException(status_code=410, detail="Use /auth/request-code and /auth/verify-code")
-
-
-@app.post("/auth/login")
-def login_legacy():
-    raise HTTPException(status_code=410, detail="Use /auth/request-code and /auth/verify-code")
-
-
-@app.post("/auth/request-code")
-def request_code(payload: EmailAuthRequest, request: Request, db=Depends(get_db)):
-    if not payload.email or "@" not in payload.email:
-        raise HTTPException(status_code=400, detail="Invalid email address")
-
-    email = _normalize_email(payload.email)
-    _check_rate_limit(email, request.client.host if request.client else None)
-
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    code_hash = _hash_code(code)
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
-
-    login_code = LoginCode(
-        email=email,
-        code_hash=code_hash,
-        expires_at=expires_at,
-        attempts=0,
-    )
-    db.add(login_code)
-    db.commit()
-
-    # Dev fallback (replace with provider later)
-    print(f"[DEV] Login code for {email}: {code}")
-    return {"ok": True}
-
-
-@app.post("/auth/verify-code")
-def verify_code(payload: VerifyCodeRequest, db=Depends(get_db)):
-    if not payload.email or "@" not in payload.email:
-        raise HTTPException(status_code=400, detail="Invalid email address")
-
-    email = _normalize_email(payload.email)
-    record = (
-        db.query(LoginCode)
-        .filter(LoginCode.email == email)
-        .order_by(LoginCode.created_at.desc())
-        .first()
-    )
-    if not record or record.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=401, detail="Code expired or invalid")
-    if record.attempts >= 5:
-        raise HTTPException(status_code=401, detail="Too many attempts")
-    if not _verify_code(payload.code, record.code_hash):
-        record.attempts += 1
-        db.commit()
-        raise HTTPException(status_code=401, detail="Invalid code")
-
-    user, profile = _get_or_create_email_user(db, email, None, allow_name_update=False)
-    token = _create_session(db, user.id)
-    response = _email_auth_response(user, profile)
-    response["access_token"] = token
-    return response
-
-
-@app.get("/auth/session")
-def get_session(current_user: User = Depends(get_current_user), db=Depends(get_db)):
-    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-    return {
-        "user": {
-            "id": current_user.id,
-            "email": current_user.email,
-            "created_at": current_user.created_at,
-            "full_name": profile.full_name if profile else None,
-        }
-    }
-
-
-@app.get("/auth/me")
-def get_me_auth(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "email": current_user.email, "created_at": current_user.created_at}
-
-
-@app.post("/auth/logout")
-def logout(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db=Depends(get_db),
-):
-    if credentials is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = credentials.credentials
-    session = db.query(AuthSession).filter(AuthSession.token == token, AuthSession.revoked_at.is_(None)).first()
-    if session:
-        session.revoked_at = datetime.utcnow()
-        db.commit()
     return {"ok": True}
 
 
