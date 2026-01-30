@@ -23,6 +23,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const buildId = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
+  const buildTimestamp = new Date().toISOString();
+  const buildSha =
+    process.env.NEXT_PUBLIC_GIT_SHA ||
+    process.env.GIT_SHA ||
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    "";
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased bg-[#FAFAFA] text-slate-900`}>
@@ -45,7 +51,8 @@ export default function RootLayout({
           </header>
           {children}
           <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
-            Build: {buildId}
+            Build: {buildTimestamp} | id: {buildId}
+            {buildSha ? ` | sha: ${buildSha}` : ""}
             <AuthDebug />
           </footer>
         </AuthWrapper>
