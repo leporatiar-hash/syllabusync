@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import { jsPDF } from 'jspdf'
-import { API_URL, authFetch } from '../../../hooks/useAuthFetch'
+import { API_URL, useAuthFetch } from '../../../hooks/useAuthFetch'
+import { useAuth } from '../../../lib/useAuth'
 
 interface SummaryDetail {
   id: string
@@ -18,8 +19,8 @@ interface SummaryDetail {
 }
 
 export default function SummaryPage() {
-
-
+  const { user, loading: authLoading } = useAuth()
+  const { fetchWithAuth } = useAuthFetch()
   const params = useParams()
   const router = useRouter()
   const summaryId = Array.isArray(params?.id) ? params.id[0] : params?.id
@@ -34,7 +35,7 @@ export default function SummaryPage() {
       if (!summaryId) return
       try {
         setLoading(true)
-        const res = await authFetch(`${API_URL}/summaries/${summaryId}`, { cache: 'no-store' })
+        const res = await fetchWithAuth(`${API_URL}/summaries/${summaryId}`, { cache: 'no-store' })
         if (!res.ok) throw new Error('Failed to load summary')
         const data = await res.json()
         setSummary(data)
@@ -71,7 +72,7 @@ export default function SummaryPage() {
     if (!summary) return
     if (!confirm('Delete this summary?')) return
     try {
-      const res = await authFetch(`${API_URL}/summaries/${summary.id}`, {
+      const res = await fetchWithAuth(`${API_URL}/summaries/${summary.id}`, {
         method: 'DELETE',
         cache: 'no-store',
       })

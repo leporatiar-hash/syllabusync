@@ -4,7 +4,7 @@ import { useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
-import { API_URL, authFetch } from '../hooks/useAuthFetch'
+import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
 
 interface Deadline {
@@ -71,6 +71,7 @@ function formatDate(dateStr: string): string {
 export default function HomePage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
+  const { fetchWithAuth } = useAuthFetch()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -88,7 +89,7 @@ export default function HomePage() {
 
     const loadDeadlines = async () => {
       try {
-        const res = await authFetch(`${API_URL}/calendar-entries`, { cache: 'no-store' })
+        const res = await fetchWithAuth(`${API_URL}/calendar-entries`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           const today = new Date().toISOString().split('T')[0]

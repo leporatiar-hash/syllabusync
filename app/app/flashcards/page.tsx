@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 
 interface Flashcard {
@@ -62,8 +62,7 @@ const deckGradients = [
 ]
 
 function FlashcardsContent() {
-
-
+  const { fetchWithAuth } = useAuthFetch()
   const searchParams = useSearchParams()
   const setIdParam = searchParams.get('set')
 
@@ -95,7 +94,7 @@ function FlashcardsContent() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const res = await authFetch(`${API_URL}/courses`, { cache: 'no-store' })
+      const res = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
       if (res.ok) {
         const data = await res.json()
         setCourses(data)
@@ -105,7 +104,7 @@ function FlashcardsContent() {
         const allSummaries: Summary[] = []
         const allQuizzes: Quiz[] = []
         for (const course of data) {
-          const courseRes = await authFetch(`${API_URL}/courses/${course.id}`, { cache: 'no-store' })
+          const courseRes = await fetchWithAuth(`${API_URL}/courses/${course.id}`, { cache: 'no-store' })
           if (courseRes.ok) {
             const courseData = await courseRes.json()
             if (courseData.flashcard_sets) {
@@ -186,7 +185,7 @@ function FlashcardsContent() {
         setLoadingCards(true)
         setError(null)
         console.log('[Flashcards] Loading set:', selectedSetId)
-        const res = await authFetch(`${API_URL}/flashcard-sets/${selectedSetId}`, { cache: 'no-store' })
+        const res = await fetchWithAuth(`${API_URL}/flashcard-sets/${selectedSetId}`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           console.log('[Flashcards] Loaded:', data.flashcards?.length, 'cards')
@@ -281,7 +280,7 @@ function FlashcardsContent() {
       const upload = (endpoint: string) => {
         const formData = new FormData()
         formData.append('file', uploadFile)
-        return authFetch(endpoint, { method: 'POST', body: formData, cache: 'no-store' })
+        return fetchWithAuth(endpoint, { method: 'POST', body: formData, cache: 'no-store' })
       }
 
       if (generateFlashcards) {
@@ -335,7 +334,7 @@ function FlashcardsContent() {
   const handleDeleteSummary = async (summaryId: string) => {
     if (!confirm('Delete this summary?')) return
     try {
-      const res = await authFetch(`${API_URL}/summaries/${summaryId}`, {
+      const res = await fetchWithAuth(`${API_URL}/summaries/${summaryId}`, {
         method: 'DELETE',
         cache: 'no-store',
       })

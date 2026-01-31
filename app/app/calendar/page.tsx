@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper } from 'lucide-react'
-import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 
 interface Deadline {
@@ -57,6 +57,7 @@ type ViewOption = (typeof viewOptions)[number]
 export default function CalendarPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
+  const { fetchWithAuth } = useAuthFetch()
 
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -101,8 +102,8 @@ export default function CalendarPage() {
       setLoading(true)
       try {
         const [deadlinesRes, coursesRes] = await Promise.all([
-          authFetch(`${API_URL}/deadlines`, { cache: 'no-store' }),
-          authFetch(`${API_URL}/courses`, { cache: 'no-store' })
+          fetchWithAuth(`${API_URL}/deadlines`, { cache: 'no-store' }),
+          fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
         ])
 
         if (deadlinesRes.ok) {
@@ -249,7 +250,7 @@ export default function CalendarPage() {
 
   const toggleComplete = async (deadlineId: string) => {
     try {
-      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/complete`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}/complete`, {
         method: 'PATCH',
         cache: 'no-store',
       })
@@ -274,7 +275,7 @@ export default function CalendarPage() {
     if (deadline.date === newDate) return
 
     try {
-      const res = await authFetch(`${API_URL}/deadlines/${deadline.id}`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadline.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: newDate }),
@@ -300,7 +301,7 @@ export default function CalendarPage() {
     if (!lastMove) return
     const { id, from } = lastMove
     try {
-      const res = await authFetch(`${API_URL}/deadlines/${id}`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: from }),
@@ -326,7 +327,7 @@ export default function CalendarPage() {
 
     setCreating(true)
     try {
-      const res = await authFetch(`${API_URL}/deadlines`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

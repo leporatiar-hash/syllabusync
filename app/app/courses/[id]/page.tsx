@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
-import { API_URL, authFetch } from '../../../hooks/useAuthFetch'
+import { API_URL, useAuthFetch } from '../../../hooks/useAuthFetch'
 import { useAuth } from '../../../lib/useAuth'
 
 interface Deadline {
@@ -87,6 +87,7 @@ const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode 
 export default function CourseDetailPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
+  const { fetchWithAuth } = useAuthFetch()
     // Class Schedule State
     const [classSchedule, setClassSchedule] = useState<Array<{ day: string; start: string; end: string }>>([
       // Example default, can be empty
@@ -138,7 +139,7 @@ export default function CourseDetailPage() {
   const loadCourse = useCallback(async () => {
     if (!courseId) return
     try {
-      const res = await authFetch(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
+      const res = await fetchWithAuth(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
       if (!res.ok) {
         throw new Error('Failed to load course')
       }
@@ -158,7 +159,7 @@ export default function CourseDetailPage() {
   const removeFromCalendar = async (deadlineId: string) => {
     setSavingToCalendar(deadlineId)
     try {
-      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
         method: 'DELETE',
         cache: 'no-store',
       })
@@ -182,7 +183,7 @@ export default function CourseDetailPage() {
   const saveToCalendar = async (deadlineId: string) => {
     setSavingToCalendar(deadlineId)
     try {
-      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
         method: 'POST',
         cache: 'no-store',
       })
@@ -210,7 +211,7 @@ export default function CourseDetailPage() {
     setBulkSaving(true)
     try {
       for (const deadline of unsaved) {
-        const res = await authFetch(`${API_URL}/deadlines/${deadline.id}/save-to-calendar`, {
+        const res = await fetchWithAuth(`${API_URL}/deadlines/${deadline.id}/save-to-calendar`, {
           method: 'POST',
           cache: 'no-store',
         })
@@ -233,7 +234,7 @@ export default function CourseDetailPage() {
 
   const toggleComplete = async (deadlineId: string) => {
     try {
-      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/complete`, {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}/complete`, {
         method: 'PATCH',
         cache: 'no-store',
       })
@@ -257,7 +258,7 @@ export default function CourseDetailPage() {
 
     try {
       const url = `${API_URL}/courses/${courseId}/syllabus`
-      const res = await authFetch(url, {
+      const res = await fetchWithAuth(url, {
         method: 'POST',
         body: formData,
         cache: 'no-store',
@@ -305,7 +306,7 @@ export default function CourseDetailPage() {
       const upload = (endpoint: string) => {
         const formData = new FormData()
         formData.append('file', studyFile)
-        return authFetch(endpoint, {
+        return fetchWithAuth(endpoint, {
           method: 'POST',
           body: formData,
           cache: 'no-store',
@@ -356,7 +357,7 @@ export default function CourseDetailPage() {
 
       setFlashcardSuccess(true)
       setStudyFile(null)
-      const refreshed = await authFetch(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
+      const refreshed = await fetchWithAuth(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
       if (refreshed.ok) {
         const data = await refreshed.json()
         setCourse(data)
@@ -392,7 +393,7 @@ export default function CourseDetailPage() {
     if (!courseId || !editedInfo) return
     setSavingInfo(true)
     try {
-      const res = await authFetch(`${API_URL}/courses/${courseId}`, {
+      const res = await fetchWithAuth(`${API_URL}/courses/${courseId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ course_info: editedInfo }),
