@@ -1,52 +1,66 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '../context/AuthContext'
-import { API_URL, authFetch } from '../hooks/useAuthFetch'
+import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/useAuth'
 
 const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
 const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
 
 export default function SettingsPage() {
-  const { profile, updateProfile, logout } = useAuth()
   const router = useRouter()
+  const { user, loading: authLoading, signOut } = useAuth()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [fullName, setFullName] = useState(profile?.full_name || '')
-  const [schoolName, setSchoolName] = useState(profile?.school_name || '')
-  const [schoolType, setSchoolType] = useState(profile?.school_type || '')
-  const [academicYear, setAcademicYear] = useState(profile?.academic_year || '')
-  const [major, setMajor] = useState(profile?.major || '')
+  const [fullName, setFullName] = useState('')
+  const [schoolName, setSchoolName] = useState('')
+  const [schoolType, setSchoolType] = useState('')
+  const [academicYear, setAcademicYear] = useState('')
+  const [major, setMajor] = useState('')
+  const [profilePicture, setProfilePicture] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [uploadingPic, setUploadingPic] = useState(false)
 
-  const initials = (
-    profile?.full_name?.[0] ||
-    profile?.email?.[0] ||
-    'U'
-  ).toUpperCase()
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
+
+  useEffect(() => {
+    if (!user) return
+    const metadata = user.user_metadata || {}
+    setFullName((metadata.full_name as string) || '')
+    setSchoolName((metadata.school_name as string) || '')
+    setSchoolType((metadata.school_type as string) || '')
+    setAcademicYear((metadata.academic_year as string) || '')
+    setMajor((metadata.major as string) || '')
+    setProfilePicture((metadata.profile_picture as string) || null)
+  }, [user])
+
+  if (authLoading || !user) {
+    return null
+  }
+
+  const initials = (fullName?.[0] || user.email?.[0] || 'U').toUpperCase()
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     setSaved(false)
     try {
-      const res = await authFetch(`${API_URL}/me/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { error } = await supabase.auth.updateUser({
+        data: {
           full_name: fullName || undefined,
           school_name: schoolName || undefined,
           school_type: schoolType || undefined,
           academic_year: academicYear || undefined,
           major: major || undefined,
-        }),
+        },
       })
-      if (res.ok) {
-        const data = await res.json()
-        updateProfile(data.profile)
+      if (!error) {
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
       }
@@ -64,14 +78,11 @@ export default function SettingsPage() {
       // Resize and compress image
       const dataUrl = await resizeImage(file, 200, 200)
 
-      const res = await authFetch(`${API_URL}/me/profile-picture`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_data: dataUrl }),
+      const { error } = await supabase.auth.updateUser({
+        data: { profile_picture: dataUrl },
       })
-      if (res.ok) {
-        const data = await res.json()
-        updateProfile({ profile_picture: data.profile_picture })
+      if (!error) {
+        setProfilePicture(dataUrl)
       }
     } finally {
       setUploadingPic(false)
@@ -80,7 +91,7 @@ export default function SettingsPage() {
   }
 
   const handleLogout = () => {
-    logout()
+    signOut()
     router.push('/login')
   }
 
@@ -94,8 +105,8 @@ export default function SettingsPage() {
           className="relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#A78BFA] text-2xl font-bold text-white shadow-md transition-transform hover:scale-105"
           onClick={() => fileInputRef.current?.click()}
         >
-          {profile?.profile_picture ? (
-            <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+          {profilePicture ? (
+            <img src={profilePicture} alt="" className="h-full w-full object-cover" />
           ) : (
             initials
           )}
@@ -106,8 +117,8 @@ export default function SettingsPage() {
           </div>
         </div>
         <div>
-          <p className="font-medium text-slate-900">{profile?.full_name || 'Your Name'}</p>
-          <p className="text-sm text-slate-500">{profile?.email}</p>
+          <p className="font-medium text-slate-900">{fullName || 'Your Name'}</p>
+          <p className="text-sm text-slate-500">{user.email}</p>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -149,7 +160,7 @@ export default function SettingsPage() {
             id="email"
             type="email"
             disabled
-            value={profile?.email || ''}
+            value={user.email || ''}
             className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
           />
           <p className="mt-1 text-xs text-slate-400">Email cannot be changed</p>

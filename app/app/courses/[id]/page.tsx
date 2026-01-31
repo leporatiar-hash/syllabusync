@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
-import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../../../hooks/useAuthFetch'
+import { useAuth } from '../../../lib/useAuth'
 
 interface Deadline {
   id: string
@@ -22,6 +23,7 @@ interface FlashcardSet {
   id: string
   name: string
   card_count: number
+  progress?: number
 }
 
 interface Summary {
@@ -83,6 +85,8 @@ const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode 
 }
 
 export default function CourseDetailPage() {
+  const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
     // Class Schedule State
     const [classSchedule, setClassSchedule] = useState<Array<{ day: string; start: string; end: string }>>([
       // Example default, can be empty
@@ -118,66 +122,38 @@ export default function CourseDetailPage() {
   const syllabusInputRef = useRef<HTMLInputElement>(null)
   const studyInputRef = useRef<HTMLInputElement>(null)
 
+  // Computed values
+  const unsavedDeadlines = deadlines.filter(d => !d.saved_to_calendar)
+  const savedDeadlines = deadlines.filter(d => d.saved_to_calendar)
+  const unsavedCount = unsavedDeadlines.length
+  const savedCount = savedDeadlines.length
+  const remainingCount = deadlines.filter(d => !d.completed).length
+
   useEffect(() => {
-        {mainTab === 'info' && course && (
-          <div className="mt-10 grid gap-8 md:grid-cols-2">
-            {/* Instructor, Logistics, Grade Breakdown, Policies, Materials */}
-            <div className="space-y-6">
-              {/* ...existing code... */}
-              <div className="rounded-3xl bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-slate-900">Class Schedule</h3>
-                <div className="mt-4 space-y-2 text-sm">
-                  {classSchedule.length === 0 ? (
-                    <span className="italic text-slate-400">No class schedule set.</span>
-                  ) : (
-                    <ul>
-                      {classSchedule.map((item, idx) => (
-                        <li key={idx} className="flex gap-4 items-center">
-                          <span className="font-semibold text-slate-700">{item.day}</span>
-                          <span className="text-slate-600">{item.start} - {item.end}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {editingSchedule ? (
-                    <div className="mt-4 flex flex-col gap-2">
-                      <select value={newSchedule.day} onChange={e => setNewSchedule(s => ({ ...s, day: e.target.value }))} className="rounded border p-1">
-                        <option value="">Select day</option>
-                        <option value="Monday">Monday</option>
-                        <option value="Tuesday">Tuesday</option>
-                        <option value="Wednesday">Wednesday</option>
-                        <option value="Thursday">Thursday</option>
-                        <option value="Friday">Friday</option>
-                        <option value="Saturday">Saturday</option>
-                        <option value="Sunday">Sunday</option>
-                      </select>
-                      <input type="time" value={newSchedule.start} onChange={e => setNewSchedule(s => ({ ...s, start: e.target.value }))} className="rounded border p-1" placeholder="Start time" />
-                      <input type="time" value={newSchedule.end} onChange={e => setNewSchedule(s => ({ ...s, end: e.target.value }))} className="rounded border p-1" placeholder="End time" />
-                      <div className="flex gap-2 mt-2">
-                        <button onClick={() => {
-                          if (newSchedule.day && newSchedule.start && newSchedule.end) {
-                            setClassSchedule(s => [...s, newSchedule])
-                            setNewSchedule({ day: '', start: '', end: '' })
-                          }
-                        }} className="rounded bg-[#5B8DEF] text-white px-3 py-1">Add</button>
-                        <button onClick={() => setEditingSchedule(false)} className="rounded bg-slate-200 px-3 py-1">Done</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={() => setEditingSchedule(true)} className="mt-4 rounded bg-[#5B8DEF] text-white px-3 py-1">Edit Schedule</button>
-                  )}
-                  {classSchedule.length > 0 && (
-                    <button onClick={() => alert('TODO: Add to calendar logic here!')} className="mt-4 rounded bg-[#4ADE80] text-white px-3 py-1">Add Schedule to Calendar</button>
-                  )}
-                </div>
-              </div>
-              {/* ...existing code... */}
-            </div>
-            <div className="space-y-6">
-              {/* ...existing code... */}
-            </div>
-          </div>
-        )}
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
+
+  const loadCourse = useCallback(async () => {
+    if (!courseId) return
+    try {
+      const res = await authFetch(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
+      if (!res.ok) {
+        throw new Error('Failed to load course')
+      }
+      const data = await res.json()
+      setCourse(data)
+      setDeadlines(data.deadlines || [])
+    } catch (err) {
+      console.error('Failed to load course:', err)
+    }
+  }, [courseId])
+
+  useEffect(() => {
+    if (!user || !courseId) return
+    loadCourse()
+  }, [user, courseId, loadCourse])
 
   const removeFromCalendar = async (deadlineId: string) => {
     setSavingToCalendar(deadlineId)
@@ -197,6 +173,30 @@ export default function CourseDetailPage() {
     } catch (err) {
       console.error('Failed to remove from calendar:', err)
       setCalendarToast(err instanceof Error ? err.message : 'Failed to remove')
+      setTimeout(() => setCalendarToast(null), 2000)
+    } finally {
+      setSavingToCalendar(null)
+    }
+  }
+
+  const saveToCalendar = async (deadlineId: string) => {
+    setSavingToCalendar(deadlineId)
+    try {
+      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/save-to-calendar`, {
+        method: 'POST',
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        setDeadlines(deadlines.map((d) => (d.id === deadlineId ? { ...d, saved_to_calendar: true } : d)))
+        setCalendarToast('Saved to calendar')
+        setTimeout(() => setCalendarToast(null), 2000)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Failed to save')
+      }
+    } catch (err) {
+      console.error('Failed to save to calendar:', err)
+      setCalendarToast(err instanceof Error ? err.message : 'Failed to save')
       setTimeout(() => setCalendarToast(null), 2000)
     } finally {
       setSavingToCalendar(null)
@@ -228,6 +228,21 @@ export default function CourseDetailPage() {
       setTimeout(() => setCalendarToast(null), 2000)
     } finally {
       setBulkSaving(false)
+    }
+  }
+
+  const toggleComplete = async (deadlineId: string) => {
+    try {
+      const res = await authFetch(`${API_URL}/deadlines/${deadlineId}/complete`, {
+        method: 'PATCH',
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setDeadlines(deadlines.map((d) => (d.id === deadlineId ? { ...d, completed: updated.completed } : d)))
+      }
+    } catch (err) {
+      console.error('Failed to toggle deadline:', err)
     }
   }
 
@@ -442,6 +457,18 @@ export default function CourseDetailPage() {
       breakdown.splice(index, 1)
       return { ...prev, grade_breakdown: breakdown }
     })
+  }
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+        <div className="text-sm text-slate-500">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
   }
 
   return (
@@ -665,7 +692,7 @@ export default function CourseDetailPage() {
                     ) : (
                       <>
                         <p className="text-[#4ADE80]">All deadlines saved!</p>
-                        <p className="mt-1 text-xs text-slate-400">Switch to "In Calendar" to view them.</p>
+                        <p className="mt-1 text-xs text-slate-400">Switch to &quot;In Calendar&quot; to view them.</p>
                         <button
                           onClick={() => {
                             setDeadlineTabTouched(true)
@@ -680,7 +707,7 @@ export default function CourseDetailPage() {
                   ) : (
                     <>
                       <p>No deadlines in calendar yet.</p>
-                      <p className="mt-1 text-xs text-slate-400">Save deadlines from the "Unsaved" tab.</p>
+                      <p className="mt-1 text-xs text-slate-400">Save deadlines from the &quot;Unsaved&quot; tab.</p>
                     </>
                   )}
                 </div>
@@ -888,13 +915,13 @@ export default function CourseDetailPage() {
                             <div className="mt-1 text-xs text-slate-500">{set.card_count} cards</div>
                           </div>
                         </div>
-                        {'progress' in set && typeof (set as any).progress === 'number' && (
+                        {typeof set.progress === 'number' && (
                           <div className="mt-3">
                             <div className="h-px w-full bg-slate-100" />
                             <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100">
                               <div
                                 className="h-full rounded-full bg-[#5B8DEF]"
-                                style={{ width: `${Math.min(100, Math.max(0, (set as any).progress))}%` }}
+                                style={{ width: `${Math.min(100, Math.max(0, set.progress))}%` }}
                               />
                             </div>
                           </div>
@@ -1169,6 +1196,92 @@ export default function CourseDetailPage() {
               </div>
             ) : (
               <div className="grid gap-6 lg:grid-cols-2">
+                {/* Class Schedule */}
+                <div className="rounded-3xl bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-900">Class Schedule</h3>
+                  <div className="mt-4 space-y-2 text-sm">
+                    {classSchedule.length === 0 ? (
+                      <span className="italic text-slate-400">No class schedule set.</span>
+                    ) : (
+                      <ul>
+                        {classSchedule.map((item, idx) => (
+                          <li key={idx} className="flex gap-4 items-center">
+                            <span className="font-semibold text-slate-700">{item.day}</span>
+                            <span className="text-slate-600">
+                              {item.start} - {item.end}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {editingSchedule ? (
+                      <div className="mt-4 flex flex-col gap-2">
+                        <select
+                          value={newSchedule.day}
+                          onChange={(e) => setNewSchedule((s) => ({ ...s, day: e.target.value }))}
+                          className="rounded border p-1"
+                        >
+                          <option value="">Select day</option>
+                          <option value="Monday">Monday</option>
+                          <option value="Tuesday">Tuesday</option>
+                          <option value="Wednesday">Wednesday</option>
+                          <option value="Thursday">Thursday</option>
+                          <option value="Friday">Friday</option>
+                          <option value="Saturday">Saturday</option>
+                          <option value="Sunday">Sunday</option>
+                        </select>
+                        <input
+                          type="time"
+                          value={newSchedule.start}
+                          onChange={(e) => setNewSchedule((s) => ({ ...s, start: e.target.value }))}
+                          className="rounded border p-1"
+                          placeholder="Start time"
+                        />
+                        <input
+                          type="time"
+                          value={newSchedule.end}
+                          onChange={(e) => setNewSchedule((s) => ({ ...s, end: e.target.value }))}
+                          className="rounded border p-1"
+                          placeholder="End time"
+                        />
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => {
+                              if (newSchedule.day && newSchedule.start && newSchedule.end) {
+                                setClassSchedule((s) => [...s, newSchedule])
+                                setNewSchedule({ day: '', start: '', end: '' })
+                              }
+                            }}
+                            className="rounded bg-[#5B8DEF] px-3 py-1 text-white"
+                          >
+                            Add
+                          </button>
+                          <button
+                            onClick={() => setEditingSchedule(false)}
+                            className="rounded bg-slate-200 px-3 py-1"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingSchedule(true)}
+                        className="mt-4 rounded bg-[#5B8DEF] px-3 py-1 text-white"
+                      >
+                        Edit Schedule
+                      </button>
+                    )}
+                    {classSchedule.length > 0 && (
+                      <button
+                        onClick={() => alert('TODO: Add to calendar logic here!')}
+                        className="mt-4 rounded bg-[#4ADE80] px-3 py-1 text-white"
+                      >
+                        Add Schedule to Calendar
+                      </button>
+                    )}
+                  </div>
+                </div>
                 {/* Instructor Section */}
                 <div className="rounded-3xl bg-white p-6 shadow-sm">
                   <div className="flex items-center gap-3 mb-4">

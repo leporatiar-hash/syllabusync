@@ -1,40 +1,53 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '../context/AuthContext'
-import { API_URL, authFetch } from '../hooks/useAuthFetch'
+import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/useAuth'
 
 const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
 const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
 
 export default function OnboardingPage() {
-  const { profile, updateProfile } = useAuth()
   const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
   const [schoolName, setSchoolName] = useState('')
   const [schoolType, setSchoolType] = useState('')
   const [academicYear, setAcademicYear] = useState('')
   const [major, setMajor] = useState('')
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
+
+  useEffect(() => {
+    if (!user) return
+    const metadata = user.user_metadata || {}
+    setSchoolName((metadata.school_name as string) || '')
+    setSchoolType((metadata.school_type as string) || '')
+    setAcademicYear((metadata.academic_year as string) || '')
+    setMajor((metadata.major as string) || '')
+  }, [user])
+
+  if (authLoading || !user) {
+    return null
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      const res = await authFetch(`${API_URL}/me/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await supabase.auth.updateUser({
+        data: {
           school_name: schoolName || undefined,
           school_type: schoolType || undefined,
           academic_year: academicYear || undefined,
           major: major || undefined,
-        }),
+        },
       })
-      if (res.ok) {
-        const data = await res.json()
-        updateProfile(data.profile)
-      }
       router.push('/courses')
     } catch {
       router.push('/courses')
@@ -48,7 +61,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-slate-900">
-            Welcome{profile?.full_name ? `, ${profile.full_name}` : ''}!
+            Welcome{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name}` : ''}!
           </h1>
           <p className="mt-1 text-sm text-slate-500">Tell us a bit about yourself to personalize your experience</p>
         </div>

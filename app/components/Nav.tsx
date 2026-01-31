@@ -1,9 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { useAuth } from '../context/AuthContext'
-import AuthModal from './AuthModal'
+import { usePathname, useRouter } from 'next/navigation'
+import { useAuth } from '../lib/useAuth'
 
 const navItems = [
   { href: '/', label: 'Home' },
@@ -14,20 +13,12 @@ const navItems = [
 
 export default function Nav() {
   const pathname = usePathname()
-  const { token, profile, logout, openLogin, closeLogin, isLoginOpen } = useAuth()
+  const router = useRouter()
+  const { user, loading, signOut } = useAuth()
 
-  const handleProtectedNav = (e: React.MouseEvent) => {
-    if (!token) {
-      e.preventDefault()
-      openLogin()
-    }
-  }
-
-  const initials = (
-    profile?.full_name?.[0] ||
-    profile?.email?.[0] ||
-    'U'
-  ).toUpperCase()
+  const fullName = user?.user_metadata?.full_name as string | undefined
+  const profilePicture = user?.user_metadata?.profile_picture as string | undefined
+  const initials = (fullName?.[0] || user?.email?.[0] || 'U').toUpperCase()
 
   return (
     <>
@@ -38,7 +29,6 @@ export default function Nav() {
             <Link
               key={item.href}
               href={item.href}
-              onClick={handleProtectedNav}
               className={`relative pb-1 transition-all duration-300 hover:text-slate-900 ${
                 isActive ? 'text-slate-900' : ''
               }`}
@@ -53,9 +43,9 @@ export default function Nav() {
           )
         })}
 
-        {!token ? (
+        {loading ? null : !user ? (
           <button
-            onClick={openLogin}
+            onClick={() => router.push('/login')}
             className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-white font-semibold shadow hover:bg-[#3b6ed6] transition-colors"
           >
             Log In
@@ -66,14 +56,14 @@ export default function Nav() {
               href="/settings"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#A78BFA] text-xs font-bold text-white overflow-hidden transition-transform hover:scale-105"
             >
-              {profile?.profile_picture ? (
-                <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+              {profilePicture ? (
+                <img src={profilePicture} alt="" className="h-full w-full object-cover" />
               ) : (
                 initials
               )}
             </Link>
             <button
-              onClick={logout}
+              onClick={() => signOut()}
               className="text-xs text-slate-500 hover:text-slate-700"
             >
               Log out
@@ -81,7 +71,6 @@ export default function Nav() {
           </div>
         )}
       </nav>
-      <AuthModal open={isLoginOpen} onClose={closeLogin} />
     </>
   )
 }

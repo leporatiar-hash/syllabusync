@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { API_URL, authFetch } from '../hooks/useAuthFetch'
-import { useAuth } from '../lib/useAuth'
+import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { useAuth } from '../../lib/useAuth'
 
 interface CourseInfo {
   instructor?: { name?: string | null }

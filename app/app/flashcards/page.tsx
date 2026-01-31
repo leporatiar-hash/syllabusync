@@ -2,8 +2,9 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { API_URL, authFetch } from '../hooks/useAuthFetch'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { useAuth } from '../../lib/useAuth'
 
 interface Flashcard {
   id: string
@@ -863,6 +864,27 @@ function FlashcardsContent() {
 }
 
 export default function FlashcardsPage() {
+  const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+        <div className="text-sm text-slate-500">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
   return (
     <Suspense fallback={<div className="min-h-screen px-4 pb-20 pt-10"><div className="mx-auto max-w-5xl"><div className="rounded-3xl bg-white p-8 shadow-sm"><p className="text-slate-500">Loading...</p></div></div></div>}>
       <FlashcardsContent />

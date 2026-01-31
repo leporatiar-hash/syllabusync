@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import { jsPDF } from 'jspdf'
-import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../../../hooks/useAuthFetch'
 
 interface SummaryDetail {
   id: string

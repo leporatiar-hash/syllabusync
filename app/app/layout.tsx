@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
-import Nav from "./components/Nav";
-import AuthWrapper from "./components/AuthWrapper";
-import AuthDebug from "./components/AuthDebug";
+import Nav from "../components/Nav";
+import AuthWrapper from "../components/AuthWrapper";
+import AuthDebug from "../components/AuthDebug";
+import BuildVerifier from "../components/BuildVerifier";
 import "./globals.css";
 
 const inter = Inter({
@@ -32,6 +33,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased bg-[#FAFAFA] text-slate-900`}>
+        <BuildVerifier />
         <AuthWrapper>
           <header className="sticky top-0 z-50 border-b border-white/60 bg-white/70 backdrop-blur">
             <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">

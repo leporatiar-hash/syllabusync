@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState, ReactNode } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper } from 'lucide-react'
-import { API_URL, authFetch } from '../hooks/useAuthFetch'
+import { API_URL, authFetch } from '../../hooks/useAuthFetch'
+import { useAuth } from '../../lib/useAuth'
 
 interface Deadline {
   id: string
@@ -53,11 +55,18 @@ const viewOptions = ['Month', 'Week', 'Day'] as const
 type ViewOption = (typeof viewOptions)[number]
 
 export default function CalendarPage() {
-
+  const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
 
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
   const [filterCourse, setFilterCourse] = useState<string>('all')
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login')
+    }
+  }, [authLoading, user, router])
   const [courses, setCourses] = useState<Course[]>([])
   const [view, setView] = useState<ViewOption>('Month')
   const [selectedDeadline, setSelectedDeadline] = useState<Deadline | null>(null)
@@ -84,6 +93,10 @@ export default function CalendarPage() {
   }, [courses, newDeadline.course_id])
 
   useEffect(() => {
+    if (!user) {
+      setLoading(false)
+      return
+    }
     const loadData = async () => {
       setLoading(true)
       try {
@@ -108,7 +121,7 @@ export default function CalendarPage() {
     }
 
     loadData()
-  }, [])
+  }, [user])
 
   // Map course IDs to colors
   const courseColors = useMemo(() => {
@@ -349,6 +362,18 @@ export default function CalendarPage() {
     } finally {
       setCreating(false)
     }
+  }
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+        <div className="text-sm text-slate-500">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
   }
 
   return (
