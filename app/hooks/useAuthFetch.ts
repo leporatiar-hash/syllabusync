@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/useAuth'
 import { API_BASE_URL } from '../lib/config'
@@ -38,13 +38,23 @@ export async function authFetch(
 
 /**
  * Hook that returns an authenticated fetch function using the session from AuthContext
+ * Uses a ref to always get the current token, avoiding stale closure issues
  */
 export function useAuthFetch() {
   const { session } = useAuth()
 
+  // Use ref to always have access to the current session
+  const sessionRef = useRef(session)
+
+  // Keep the ref updated
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
+
   const fetchWithAuth = useCallback(
     async (url: string, options: RequestInit = {}): Promise<Response> => {
-      const token = session?.access_token
+      // Get token from ref to avoid stale closure
+      const token = sessionRef.current?.access_token
 
       if (!token) {
         console.error('[useAuthFetch] No session token available. User is not authenticated.')
@@ -56,7 +66,7 @@ export function useAuthFetch() {
 
       return fetch(url, { ...options, headers })
     },
-    [session]
+    [] // No dependencies - uses ref instead
   )
 
   return { fetchWithAuth, token: session?.access_token }
