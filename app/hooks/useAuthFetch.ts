@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/useAuth'
 import { API_BASE_URL } from '../lib/config'
@@ -8,56 +8,55 @@ const API_URL = API_BASE_URL || 'http://localhost:8000'
 export { API_URL }
 
 /**
- * Legacy authFetch - tries to get session from Supabase client
- * May fail if cookies aren't accessible. Prefer useAuthFetch hook instead.
+ * Standalone authFetch - gets session directly from Supabase at call time
  */
 export async function authFetch(
   url: string,
-  options: RequestInit = {},
-  providedToken?: string
+  options: RequestInit = {}
 ): Promise<Response> {
-  const headers = new Headers(options.headers)
+  // Always get fresh session at call time
+  const { data, error } = await supabase.auth.getSession()
 
-  let token = providedToken
-
-  // If no token provided, try to get it from Supabase
-  if (!token) {
-    const { data } = await supabase.auth.getSession()
-    token = data.session?.access_token
+  if (error) {
+    console.error('[authFetch] Error getting session:', error)
+    throw new Error('Failed to get session')
   }
 
+  const token = data.session?.access_token
+
   if (!token) {
-    console.error('[authFetch] No session token available. User is not authenticated.')
+    console.error('[authFetch] No session token available')
     throw new Error('Not authenticated')
   }
 
+  const headers = new Headers(options.headers)
   headers.set('Authorization', `Bearer ${token}`)
 
   return fetch(url, { ...options, headers })
 }
 
 /**
- * Hook that returns an authenticated fetch function using the session from AuthContext
- * Uses a ref to always get the current token, avoiding stale closure issues
+ * Hook that returns an authenticated fetch function
+ * The function gets fresh session from Supabase at each call
  */
 export function useAuthFetch() {
   const { session } = useAuth()
 
-  // Use ref to always have access to the current session
-  const sessionRef = useRef(session)
-
-  // Keep the ref updated
-  useEffect(() => {
-    sessionRef.current = session
-  }, [session])
-
+  // fetchWithAuth gets the session fresh at each call
   const fetchWithAuth = useCallback(
     async (url: string, options: RequestInit = {}): Promise<Response> => {
-      // Get token from ref to avoid stale closure
-      const token = sessionRef.current?.access_token
+      // Get fresh session from Supabase at call time
+      const { data, error } = await supabase.auth.getSession()
+
+      if (error) {
+        console.error('[fetchWithAuth] Error getting session:', error)
+        throw new Error('Failed to get session')
+      }
+
+      const token = data.session?.access_token
 
       if (!token) {
-        console.error('[useAuthFetch] No session token available. User is not authenticated.')
+        console.error('[fetchWithAuth] No session token. Session data:', data)
         throw new Error('Not authenticated')
       }
 
@@ -66,7 +65,7 @@ export function useAuthFetch() {
 
       return fetch(url, { ...options, headers })
     },
-    [] // No dependencies - uses ref instead
+    []
   )
 
   return { fetchWithAuth, token: session?.access_token }

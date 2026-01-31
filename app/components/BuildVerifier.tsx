@@ -3,8 +3,8 @@
 import { useEffect } from 'react'
 
 // This timestamp is updated at build time
-const BUILD_TIMESTAMP = '2026-01-31T13:15:00Z'
-const BUILD_ID = '20260131-structure-fix'
+const BUILD_TIMESTAMP = '2026-01-31T14:30:00Z'
+const BUILD_ID = '20260131-ssr-auth-fix'
 
 export default function BuildVerifier() {
   useEffect(() => {
