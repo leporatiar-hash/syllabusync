@@ -10,9 +10,12 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
   const { data } = await supabase.auth.getSession()
   const token = data.session?.access_token
 
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
+  if (!token) {
+    console.error('[authFetch] No session token available. User is not authenticated.')
+    throw new Error('Not authenticated')
   }
+
+  headers.set('Authorization', `Bearer ${token}`)
 
   return fetch(url, { ...options, headers })
 }
