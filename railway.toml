@@ -1,6 +1,5 @@
-[build]
-builder = "NIXPACKS"
-buildCommand = "cd app && npm ci && npm run build"
+[services.frontend]
+source = "app"
 
-[deploy]
-startCommand = "cd app && npm run start"
+[services.backend]
+source = "api"
