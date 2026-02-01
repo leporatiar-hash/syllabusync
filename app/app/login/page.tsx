@@ -1,16 +1,22 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, loading } = useAuth()
   const [email, setEmail] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
+
+  // Check for error from auth callback
+  const errorParam = searchParams.get('error')
+  const isCrossDeviceError = errorParam?.toLowerCase().includes('pkce') ||
+    errorParam?.toLowerCase().includes('code verifier')
 
   useEffect(() => {
     if (!loading && user) {
@@ -71,7 +77,32 @@ export default function LoginPage() {
             Check your inbox for the login link.
           </div>
         )}
+
+        {errorParam && (
+          <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p className="font-medium">
+              {isCrossDeviceError ? 'Different device detected' : 'Login failed'}
+            </p>
+            <p className="mt-1">
+              {isCrossDeviceError
+                ? 'The login link was opened on a different device. Please request a new link below.'
+                : errorParam}
+            </p>
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center text-sm text-slate-500">
+        Loading...
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   )
 }
