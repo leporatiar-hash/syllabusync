@@ -37,7 +37,7 @@ export default function RootLayout({
         <AuthWrapper>
           <header className="sticky top-0 z-50 border-b border-white/60 bg-white/70 backdrop-blur">
             <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-              <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
+              <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight shrink-0">
                 <Image
                   src="/brand/classmate-owl.png"
                   alt="Classmate"
@@ -46,7 +46,7 @@ export default function RootLayout({
                   priority
                   style={{ height: "32px", width: "auto" }}
                 />
-                <span className="text-[#7BB7FF]">ClassMate</span>
+                <span className="text-[#7BB7FF] hidden sm:inline">ClassMate</span>
               </Link>
               <Nav />
             </div>

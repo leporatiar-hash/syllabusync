@@ -22,14 +22,14 @@ export default function Nav() {
 
   return (
     <>
-      <nav className="flex items-center gap-6 text-sm text-slate-600">
+      <nav className="flex items-center gap-2 sm:gap-6 text-[11px] sm:text-sm text-slate-600">
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`relative pb-1 transition-all duration-300 hover:text-slate-900 ${
+              className={`relative pb-1 transition-all duration-300 hover:text-slate-900 whitespace-nowrap ${
                 isActive ? 'text-slate-900' : ''
               }`}
             >

@@ -12,7 +12,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Use createBrowserClient from @supabase/ssr for proper cookie-based auth in Next.js
+// Using implicit flow to support cross-device magic link authentication
 export const supabase = createBrowserClient(
   supabaseUrl || PLACEHOLDER_URL,
-  supabaseAnonKey || PLACEHOLDER_KEY
+  supabaseAnonKey || PLACEHOLDER_KEY,
+  {
+    auth: {
+      flowType: 'implicit',
+      detectSessionInUrl: true,
+      autoRefreshToken: true,
+      persistSession: true,
+    },
+  }
 )
