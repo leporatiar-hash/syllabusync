@@ -721,42 +721,63 @@ def extract_deadlines_with_context(text: str, metadata: dict):
 
     system_prompt = f"""You are parsing a college course syllabus. The course runs from {start_date} to {end_date} ({semester}).
 
-EXTRACT THESE TYPES OF DEADLINES:
+EXTRACT THESE TYPES OF DEADLINES (be thorough - extract ALL you find):
 
-1. EXAMS - Midterms, finals with SPECIFIC DATES
-2. MAJOR ASSIGNMENTS - Papers, projects, case studies with DUE DATES
-3. PRESENTATIONS - With specific dates
-4. RECURRING ASSESSMENTS - Weekly quizzes, homework, reading checks (mark as recurring)
-5. IMPORTANT ADMIN DATES - Add/drop deadline, final exam date
+1. EXAMS & TESTS - Midterms, finals, tests with SPECIFIC DATES (look for "Test 1", "Exam 2", "Final Exam", "Final Test")
+2. QUIZZES - Pop quizzes, scheduled quizzes with dates (look for "Quiz 1", "Quiz 2", etc.)
+3. MAJOR ASSIGNMENTS - Papers, projects, case studies with DUE DATES
+4. HOMEWORK - HW assignments with due dates (look for "HW 1 DUE", "Homework due", etc.)
+5. PRESENTATIONS - Pitches, presentations with specific dates (look for "Pitch 1", "Mini Pitch", "Presentation")
+6. RECURRING ASSESSMENTS - Weekly quizzes, homework, reading checks (mark as recurring)
+7. IMPORTANT ADMIN DATES - Add/drop deadline, makeup day, last day of class, final assignment deadline
+
+IMPORTANT - LOOK FOR THESE SECTIONS:
+- "IMPORTANT DAYS" or "IMPORTANT DATES" sections - these list key deadlines
+- Schedule tables with columns like "Session", "Day", "Topic", "Notes" - extract quiz/test/HW dates from these
+- "TENTATIVE SCHEDULE" sections with dated items
+- Lines like "Session 11 Quiz 1 01/30/2026" or "Quiz 1: 01/30/2026"
+- Homework assignments with dates like "HW 1 IS GIVEN" followed by "HW 1 DUE"
+- Final exam schedules with dates and times
+- "All assignments due by [date]" - this is a major deadline
+
+DATE FORMATS TO RECOGNIZE:
+- MM/DD/YYYY (e.g., 01/30/2026)
+- Month DD, YYYY (e.g., January 30, 2026)
+- DD-Mon (e.g., 30-Jan)
+- Dates in tables (look for patterns like "7-Jan", "9-Jan", etc.)
 
 DO NOT EXTRACT:
-- Regular class meeting times
+- Regular class meeting times (unless it's also an exam/quiz day)
 - Office hours
 - Reading assignments without assessments
 - Topic lists without deliverables
+- Spring break, holidays (unless they're makeup days)
 
 HANDLING RECURRING ITEMS:
-If you see patterns like "Quiz every Monday", "Weekly homework due Fridays", or "Reading quiz each Tuesday":
+If you see patterns like "Quiz every Monday", "Weekly homework due Fridays":
 - Create ONE entry with recurring=true
 - Set frequency="weekly" and day_of_week to the specific day
-- Use the FIRST occurrence date (or first Monday/Tuesday/etc after semester start)
+- Use the FIRST occurrence date
 
 Return ONLY a valid JSON array. Each item must have:
 {{
     "date": "YYYY-MM-DD (first occurrence for recurring, or specific date)",
-    "type": "Exam|Assignment|Project|Quiz|Homework|Admin",
-    "title": "Descriptive name (e.g., 'Midterm Exam', 'Weekly Quiz', 'Homework')",
+    "type": "Exam|Assignment|Project|Quiz|Homework|Presentation|Admin",
+    "title": "Descriptive name (e.g., 'Test 1', 'Quiz 1', 'Mini Pitch 1', 'HW 1 Due')",
     "context": "Brief description from syllabus",
-    "time": "Due time if mentioned (e.g., '11:59pm'), or null",
+    "time": "Due time if mentioned (e.g., '11:59pm', '7:00 AM'), or null",
     "recurring": true/false (true if it repeats weekly),
     "frequency": "weekly" or null,
     "day_of_week": "Monday|Tuesday|...|Sunday" or null
 }}
 
 Examples of GOOD entries:
-- {{"date": "2026-02-15", "type": "Exam", "title": "Midterm Exam", "context": "Covers chapters 1-5", "time": "10:00am", "recurring": false}}
-- {{"date": "2026-01-20", "type": "Quiz", "title": "Weekly Quiz", "context": "Online quiz on reading material", "time": "11:59pm", "recurring": true, "frequency": "weekly", "day_of_week": "Monday"}}
-- {{"date": "2026-01-17", "type": "Homework", "title": "Problem Set", "context": "Weekly problem sets due every Friday", "time": "5:00pm", "recurring": true, "frequency": "weekly", "day_of_week": "Friday"}}
+- {{"date": "2026-01-30", "type": "Quiz", "title": "Quiz 1", "context": "Covers chapters 1-2-3", "time": null, "recurring": false}}
+- {{"date": "2026-02-09", "type": "Exam", "title": "Test 1", "context": "Covers chapters 1-2-3-4", "time": null, "recurring": false}}
+- {{"date": "2026-01-29", "type": "Presentation", "title": "Mini Pitch 1", "context": "Customer discovery results presentation", "time": null, "recurring": false}}
+- {{"date": "2026-04-22", "type": "Admin", "title": "Final Assignment Due", "context": "All assignments due, no extensions", "time": "7:00 AM", "recurring": false}}
+- {{"date": "2026-04-24", "type": "Exam", "title": "Final Exam", "context": "Final test for section 6", "time": "8:00 AM", "recurring": false}}
+- {{"date": "2026-01-16", "type": "Homework", "title": "HW 1 Due", "context": "First homework assignment due", "time": "11:59pm", "recurring": false}}
 
 Return [] if no deadlines found."""
 
@@ -765,10 +786,10 @@ Return [] if no deadlines found."""
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract ONLY specific deadlines with real dates from this syllabus:\n\n{text}"}
+                {"role": "user", "content": f"Extract ALL deadlines, quizzes, tests, exams, homework due dates, presentations, and important dates from this syllabus. Pay special attention to 'IMPORTANT DAYS' sections, schedule tables, and any dates with Quiz/Test/Exam/HW/Pitch/Presentation labels:\n\n{text}"}
             ],
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=6000
         )
 
         result = response.choices[0].message.content
