@@ -46,7 +46,8 @@ export default function RootLayout({
                   priority
                   style={{ height: "32px", width: "auto" }}
                 />
-                <span className="text-[#7BB7FF] hidden sm:inline">ClassMate</span>
+                {/* Hidden on mobile to prevent overlap with nav */}
+                <span className="text-[#7BB7FF] hidden md:inline">ClassMate</span>
               </Link>
               <Nav />
             </div>

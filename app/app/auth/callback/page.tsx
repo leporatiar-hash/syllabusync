@@ -67,18 +67,26 @@ function AuthCallbackContent() {
     )
   }
 
+  // Check if this is a cross-device/PKCE error
+  const isCrossDeviceError = message?.toLowerCase().includes('pkce') ||
+    message?.toLowerCase().includes('code verifier')
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-        <h1 className="text-lg font-semibold text-slate-900">Login failed</h1>
+        <h1 className="text-lg font-semibold text-slate-900">
+          {isCrossDeviceError ? 'Different device detected' : 'Login failed'}
+        </h1>
         <p className="mt-2 text-sm text-slate-600">
-          {message || 'Something went wrong. Please try again.'}
+          {isCrossDeviceError
+            ? 'This login link was opened on a different device than where you requested it. Please request a new magic link on this device.'
+            : (message || 'Something went wrong. Please try again.')}
         </p>
         <button
           onClick={() => router.replace('/login')}
           className="mt-4 rounded-lg bg-[#5B8DEF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3b6ed6]"
         >
-          Back to login
+          {isCrossDeviceError ? 'Request new link' : 'Back to login'}
         </button>
       </div>
     </div>
