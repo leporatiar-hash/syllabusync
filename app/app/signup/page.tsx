@@ -47,7 +47,8 @@ export default function SignupPage() {
       setError(error.message)
       setSubmitting(false)
     } else {
-      router.replace('/onboarding')
+      // Use hard redirect for more reliable navigation after auth state change
+      window.location.href = '/onboarding'
     }
   }
 
