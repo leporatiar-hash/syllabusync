@@ -89,11 +89,10 @@ export default function CourseDetailPage() {
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
     // Class Schedule State
-    const [classSchedule, setClassSchedule] = useState<Array<{ day: string; start: string; end: string }>>([
-      // Example default, can be empty
-    ])
+    const [classSchedule, setClassSchedule] = useState<Array<{ day: string; start: string; end: string }>>([])
     const [editingSchedule, setEditingSchedule] = useState(false)
-    const [newSchedule, setNewSchedule] = useState({ day: '', start: '', end: '' })
+    const [selectedDays, setSelectedDays] = useState<string[]>([])
+    const [scheduleTime, setScheduleTime] = useState({ start: '', end: '' })
   const params = useParams()
   const courseId = Array.isArray(params?.id) ? params.id[0] : params?.id
   const [course, setCourse] = useState<CourseDetail | null>(null)
@@ -1216,61 +1215,93 @@ export default function CourseDetailPage() {
                       </ul>
                     )}
                     {editingSchedule ? (
-                      <div className="mt-4 flex flex-col gap-2">
-                        <select
-                          value={newSchedule.day}
-                          onChange={(e) => setNewSchedule((s) => ({ ...s, day: e.target.value }))}
-                          className="rounded border p-1"
-                        >
-                          <option value="">Select day</option>
-                          <option value="Monday">Monday</option>
-                          <option value="Tuesday">Tuesday</option>
-                          <option value="Wednesday">Wednesday</option>
-                          <option value="Thursday">Thursday</option>
-                          <option value="Friday">Friday</option>
-                          <option value="Saturday">Saturday</option>
-                          <option value="Sunday">Sunday</option>
-                        </select>
-                        <input
-                          type="time"
-                          value={newSchedule.start}
-                          onChange={(e) => setNewSchedule((s) => ({ ...s, start: e.target.value }))}
-                          className="rounded border p-1"
-                          placeholder="Start time"
-                        />
-                        <input
-                          type="time"
-                          value={newSchedule.end}
-                          onChange={(e) => setNewSchedule((s) => ({ ...s, end: e.target.value }))}
-                          className="rounded border p-1"
-                          placeholder="End time"
-                        />
-                        <div className="mt-2 flex gap-2">
+                      <div className="mt-4 space-y-4">
+                        <div>
+                          <p className="text-xs font-medium text-slate-500 mb-2">Select class days:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((day) => (
+                              <button
+                                key={day}
+                                onClick={() => {
+                                  setSelectedDays((prev) =>
+                                    prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+                                  )
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                                  selectedDays.includes(day)
+                                    ? 'bg-[#5B8DEF] text-white'
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                              >
+                                {day.slice(0, 3)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-medium text-slate-500">Start time</label>
+                            <input
+                              type="time"
+                              value={scheduleTime.start}
+                              onChange={(e) => setScheduleTime((s) => ({ ...s, start: e.target.value }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-slate-500">End time</label>
+                            <input
+                              type="time"
+                              value={scheduleTime.end}
+                              onChange={(e) => setScheduleTime((s) => ({ ...s, end: e.target.value }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
                           <button
                             onClick={() => {
-                              if (newSchedule.day && newSchedule.start && newSchedule.end) {
-                                setClassSchedule((s) => [...s, newSchedule])
-                                setNewSchedule({ day: '', start: '', end: '' })
+                              if (selectedDays.length > 0 && scheduleTime.start && scheduleTime.end) {
+                                const newEntries = selectedDays.map((day) => ({
+                                  day,
+                                  start: scheduleTime.start,
+                                  end: scheduleTime.end,
+                                }))
+                                setClassSchedule(newEntries)
+                                setEditingSchedule(false)
                               }
                             }}
-                            className="rounded bg-[#5B8DEF] px-3 py-1 text-white"
+                            disabled={selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end}
+                            className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                           >
-                            Add
+                            Save
                           </button>
                           <button
-                            onClick={() => setEditingSchedule(false)}
-                            className="rounded bg-slate-200 px-3 py-1"
+                            onClick={() => {
+                              setEditingSchedule(false)
+                              setSelectedDays(classSchedule.map((s) => s.day))
+                              if (classSchedule.length > 0) {
+                                setScheduleTime({ start: classSchedule[0].start, end: classSchedule[0].end })
+                              }
+                            }}
+                            className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600"
                           >
-                            Done
+                            Cancel
                           </button>
                         </div>
                       </div>
                     ) : (
                       <button
-                        onClick={() => setEditingSchedule(true)}
-                        className="mt-4 rounded bg-[#5B8DEF] px-3 py-1 text-white"
+                        onClick={() => {
+                          setEditingSchedule(true)
+                          setSelectedDays(classSchedule.map((s) => s.day))
+                          if (classSchedule.length > 0) {
+                            setScheduleTime({ start: classSchedule[0].start, end: classSchedule[0].end })
+                          }
+                        }}
+                        className="mt-4 rounded-lg bg-[#5B8DEF] px-4 py-2 text-sm font-medium text-white"
                       >
-                        Edit Schedule
+                        {classSchedule.length > 0 ? 'Edit Schedule' : 'Set Schedule'}
                       </button>
                     )}
                     {classSchedule.length > 0 && (

@@ -558,15 +558,18 @@ function FlashcardsContent() {
                 <p className="mt-2 text-sm text-slate-500 max-w-sm mx-auto">
                   Upload study materials to a course and generate flashcards with AI to start studying.
                 </p>
-                <Link
-                  href="/courses"
+                <button
+                  onClick={() => {
+                    window.scrollTo({ top: 0, behavior: 'smooth' })
+                    setTimeout(() => uploadInputRef.current?.click(), 300)
+                  }}
                   className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                   </svg>
                   Generate Flashcards
-                </Link>
+                </button>
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
