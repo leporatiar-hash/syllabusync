@@ -29,13 +29,18 @@ load_dotenv()
 # Supabase auth configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or ""
 SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL") or (
-    f"{SUPABASE_URL.rstrip('/')}/auth/v1/certs" if SUPABASE_URL else ""
+    f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
 )
 SUPABASE_ISSUER = os.getenv("SUPABASE_ISSUER") or (
     f"{SUPABASE_URL.rstrip('/')}/auth/v1" if SUPABASE_URL else ""
 )
 SUPABASE_JWT_AUD = os.getenv("SUPABASE_JWT_AUD", "authenticated")
 SUPABASE_JWKS_CACHE_TTL = int(os.getenv("SUPABASE_JWKS_CACHE_TTL", "3600"))
+
+# Log Supabase auth configuration at startup
+print(f"[Auth] SUPABASE_URL={'SET (' + SUPABASE_URL[:40] + '...)' if SUPABASE_URL else 'NOT SET'}")
+print(f"[Auth] SUPABASE_JWKS_URL={'SET' if SUPABASE_JWKS_URL else 'NOT SET'}")
+print(f"[Auth] SUPABASE_ISSUER={'SET' if SUPABASE_ISSUER else 'NOT SET'}")
 
 bearer_scheme = HTTPBearer(auto_error=True)
 
@@ -55,49 +60,98 @@ app.add_middleware(
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Supabase auth helpers
-_jwks_cache: dict[str, object] = {"fetched_at": 0.0, "keys": {}}
+_jwks_cache: dict[str, object] = {"fetched_at": 0.0, "keys": {}, "last_fetch_error": None}
 
 
-def _fetch_jwks() -> dict[str, dict]:
+def _fetch_jwks(retries: int = 2) -> dict[str, dict] | None:
+    """Fetch JWKS from Supabase. Returns None on failure instead of raising."""
     if not SUPABASE_JWKS_URL:
-        raise HTTPException(status_code=500, detail="Supabase JWKS URL not configured")
-    try:
-        with urlopen(SUPABASE_JWKS_URL, timeout=5) as resp:
-            payload = json.load(resp)
-    except URLError:
-        raise HTTPException(status_code=503, detail="Failed to fetch Supabase JWKS")
-    keys = {key.get("kid"): key for key in payload.get("keys", []) if key.get("kid")}
-    if not keys:
-        raise HTTPException(status_code=503, detail="Supabase JWKS is empty")
-    _jwks_cache["fetched_at"] = time.time()
-    _jwks_cache["keys"] = keys
-    return keys
+        print("[Auth] ERROR: SUPABASE_JWKS_URL is not configured")
+        _jwks_cache["last_fetch_error"] = "JWKS URL not configured"
+        return None
+
+    last_error = None
+    for attempt in range(retries):
+        try:
+            print(f"[Auth] Fetching JWKS from {SUPABASE_JWKS_URL} (attempt {attempt + 1}/{retries})")
+            with urlopen(SUPABASE_JWKS_URL, timeout=10) as resp:
+                payload = json.load(resp)
+            keys = {key.get("kid"): key for key in payload.get("keys", []) if key.get("kid")}
+            if not keys:
+                print("[Auth] WARNING: JWKS response contained no valid keys")
+                _jwks_cache["last_fetch_error"] = "JWKS empty"
+                return None
+            _jwks_cache["fetched_at"] = time.time()
+            _jwks_cache["keys"] = keys
+            _jwks_cache["last_fetch_error"] = None
+            print(f"[Auth] Successfully fetched {len(keys)} keys from JWKS")
+            return keys
+        except URLError as e:
+            last_error = str(e)
+            print(f"[Auth] JWKS fetch attempt {attempt + 1} failed: {e}")
+            if attempt < retries - 1:
+                time.sleep(0.5)  # Brief wait before retry
+        except json.JSONDecodeError as e:
+            print(f"[Auth] ERROR: Failed to parse JWKS response as JSON: {e}")
+            _jwks_cache["last_fetch_error"] = f"JSON parse error: {e}"
+            return None
+
+    print(f"[Auth] WARNING: All {retries} JWKS fetch attempts failed. Last error: {last_error}")
+    _jwks_cache["last_fetch_error"] = last_error
+    return None
 
 
 def _get_jwks() -> dict[str, dict]:
+    """Get JWKS, using stale cache if fresh fetch fails."""
+    cached_keys = _jwks_cache.get("keys", {})
     fetched_at = float(_jwks_cache.get("fetched_at", 0.0) or 0.0)
-    if not _jwks_cache.get("keys") or (time.time() - fetched_at) > SUPABASE_JWKS_CACHE_TTL:
-        return _fetch_jwks()
-    return _jwks_cache["keys"]  # type: ignore[return-value]
+    cache_expired = (time.time() - fetched_at) > SUPABASE_JWKS_CACHE_TTL
+
+    # If cache is fresh, use it
+    if cached_keys and not cache_expired:
+        return cached_keys  # type: ignore[return-value]
+
+    # Try to fetch fresh keys
+    fresh_keys = _fetch_jwks()
+    if fresh_keys:
+        return fresh_keys
+
+    # Fetch failed - use stale cache if available
+    if cached_keys:
+        print("[Auth] WARNING: Using stale JWKS cache due to fetch failure")
+        return cached_keys  # type: ignore[return-value]
+
+    # No cache and fetch failed - return empty (will cause auth to fail gracefully)
+    return {}
 
 
 def _verify_supabase_token(token: str) -> dict:
     if not SUPABASE_ISSUER or not SUPABASE_JWKS_URL:
-        raise HTTPException(status_code=500, detail="Supabase auth not configured")
+        print("[Auth] ERROR: Supabase auth not configured - ISSUER or JWKS_URL missing")
+        raise HTTPException(status_code=500, detail="Supabase auth not configured. Check SUPABASE_URL env var.")
     try:
         header = jwt.get_unverified_header(token)
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token header")
     kid = header.get("kid")
     if not kid:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid token - missing key ID")
+
     keys = _get_jwks()
+    if not keys:
+        # No keys available at all - this is an auth infrastructure issue
+        last_error = _jwks_cache.get("last_fetch_error", "Unknown")
+        print(f"[Auth] ERROR: No JWKS keys available. Last fetch error: {last_error}")
+        raise HTTPException(status_code=503, detail=f"Auth service temporarily unavailable: {last_error}")
+
     key_data = keys.get(kid)
     if not key_data:
-        keys = _fetch_jwks()
-        key_data = keys.get(kid)
+        # Key not in cache - try one more fresh fetch
+        fresh_keys = _fetch_jwks()
+        if fresh_keys:
+            key_data = fresh_keys.get(kid)
     if not key_data:
-        raise HTTPException(status_code=401, detail="Invalid token key")
+        raise HTTPException(status_code=401, detail="Invalid token - unknown key ID")
     public_key = jwk.construct(key_data)
     message, encoded_sig = token.rsplit(".", 1)
     decoded_sig = base64url_decode(encoded_sig.encode("utf-8"))
@@ -849,6 +903,19 @@ def validate_deadlines(deadlines: list) -> list:
     return validated
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Pre-fetch JWKS at startup to cache keys and surface config issues early."""
+    print("[Startup] Pre-fetching JWKS...")
+    keys = _fetch_jwks()
+    if keys:
+        print(f"[Startup] JWKS pre-fetch successful: {len(keys)} keys cached")
+    else:
+        print("[Startup] WARNING: JWKS pre-fetch failed - auth may not work until keys can be fetched")
+        print(f"[Startup] SUPABASE_URL = {SUPABASE_URL or 'NOT SET'}")
+        print(f"[Startup] SUPABASE_JWKS_URL = {SUPABASE_JWKS_URL or 'NOT SET'}")
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}
@@ -857,6 +924,22 @@ def health():
 @app.get("/health")
 def healthcheck():
     return {"ok": True}
+
+
+@app.get("/auth-status")
+def auth_status():
+    """Debug endpoint to check auth configuration status."""
+    cached_keys = _jwks_cache.get("keys", {})
+    fetched_at = _jwks_cache.get("fetched_at", 0)
+    last_error = _jwks_cache.get("last_fetch_error")
+    return {
+        "supabase_url_configured": bool(SUPABASE_URL),
+        "jwks_url_configured": bool(SUPABASE_JWKS_URL),
+        "issuer_configured": bool(SUPABASE_ISSUER),
+        "jwks_keys_cached": len(cached_keys),
+        "jwks_cache_age_seconds": int(time.time() - float(fetched_at)) if fetched_at else None,
+        "last_fetch_error": last_error,
+    }
 
 
 @app.post("/courses")

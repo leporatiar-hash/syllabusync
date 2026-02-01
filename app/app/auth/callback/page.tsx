@@ -12,16 +12,16 @@ function AuthCallbackContent() {
 
   useEffect(() => {
     const finalize = async () => {
-      const code = searchParams.get('code')
+      // Check for error from server-side route handler
+      const errorParam = searchParams.get('error')
+      if (errorParam) {
+        setStatus('error')
+        setMessage(errorParam)
+        return
+      }
 
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code)
-        if (error) {
-          setStatus('error')
-          setMessage(error.message)
-          return
-        }
-      } else if (typeof window !== 'undefined' && window.location.hash) {
+      // Handle hash-based auth (implicit flow fallback)
+      if (typeof window !== 'undefined' && window.location.hash) {
         const hashParams = new URLSearchParams(window.location.hash.slice(1))
         const accessToken = hashParams.get('access_token')
         const refreshToken = hashParams.get('refresh_token')
@@ -39,6 +39,7 @@ function AuthCallbackContent() {
         }
       }
 
+      // Check if we have an active session
       const { data, error } = await supabase.auth.getSession()
       if (error) {
         setStatus('error')
