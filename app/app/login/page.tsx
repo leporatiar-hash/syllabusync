@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 
@@ -10,13 +11,13 @@ function LoginContent() {
   const searchParams = useSearchParams()
   const { user, loading } = useAuth()
   const [email, setEmail] = useState('')
-  const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // Check for error from auth callback
+  // Check for error or success message from URL
   const errorParam = searchParams.get('error')
-  const isCrossDeviceError = errorParam?.toLowerCase().includes('pkce') ||
-    errorParam?.toLowerCase().includes('code verifier')
+  const message = searchParams.get('message')
 
   useEffect(() => {
     if (!loading && user) {
@@ -26,23 +27,20 @@ function LoginContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSending(true)
-    setSent(false)
+    setSubmitting(true)
+    setError(null)
 
-    const origin = window.location.origin
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      options: {
-        emailRedirectTo: `${origin}/auth/callback`,
-      },
+      password,
     })
 
     if (error) {
-      alert(error.message)
+      setError(error.message)
+      setSubmitting(false)
     } else {
-      setSent(true)
+      router.replace('/courses')
     }
-    setSending(false)
   }
 
   return (
@@ -50,44 +48,67 @@ function LoginContent() {
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-slate-900">Log in</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Enter your email and we’ll send you a magic link.
+          Enter your email and password to continue.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-            placeholder="you@school.edu"
-          />
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+              placeholder="you@school.edu"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+              placeholder="Enter your password"
+            />
+          </div>
 
           <button
             type="submit"
-            disabled={sending}
+            disabled={submitting}
             className="w-full rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {sending ? 'Sending...' : 'Send login link'}
+            {submitting ? 'Logging in...' : 'Log in'}
           </button>
         </form>
 
-        {sent && (
-          <div className="mt-4 rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-            Check your inbox for the login link.
+        <div className="mt-4 flex items-center justify-between text-sm">
+          <Link href="/signup" className="text-[#5B8DEF] hover:underline">
+            Create an account
+          </Link>
+          <Link href="/forgot-password" className="text-slate-500 hover:text-slate-700">
+            Forgot password?
+          </Link>
+        </div>
+
+        {(error || errorParam) && (
+          <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error || errorParam}
           </div>
         )}
 
-        {errorParam && (
-          <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            <p className="font-medium">
-              {isCrossDeviceError ? 'Different device detected' : 'Login failed'}
-            </p>
-            <p className="mt-1">
-              {isCrossDeviceError
-                ? 'The login link was opened on a different device. Please request a new link below.'
-                : errorParam}
-            </p>
+        {message && (
+          <div className="mt-4 rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+            {message}
           </div>
         )}
       </div>
