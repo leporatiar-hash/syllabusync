@@ -7,18 +7,12 @@ const PUBLIC_ROUTES = ['/', '/login', '/signup', '/auth/callback']
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (PUBLIC_ROUTES.includes(pathname)) {
-    return NextResponse.next()
-  }
-
-  if (
-    pathname.startsWith('/_next/') ||
-    pathname.startsWith('/api/') ||
-    pathname.startsWith('/brand/') ||
-    pathname === '/favicon.ico'
-  ) {
-    return NextResponse.next()
-  }
+  // Create a response that we can modify
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,18 +22,62 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll() {},
+        setAll(cookiesToSet) {
+          // Set cookies on the request for downstream use
+          cookiesToSet.forEach(({ name, value }) => {
+            request.cookies.set(name, value)
+          })
+          // Create new response with updated request
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          })
+          // Set cookies on the response to persist them
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options)
+          })
+        },
       },
     }
   )
 
+  // Refresh the session - this is important for keeping the session alive
+  // and for storing/retrieving the PKCE code verifier
   const { data: { session } } = await supabase.auth.getSession()
 
+  // Skip auth check for public routes and static assets
+  if (PUBLIC_ROUTES.includes(pathname)) {
+    return response
+  }
+
+  if (
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/brand/') ||
+    pathname === '/favicon.ico'
+  ) {
+    return response
+  }
+
+  // Redirect to login if no session on protected routes
   if (!session) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  return NextResponse.next()
+  return response
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     */
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
 }
