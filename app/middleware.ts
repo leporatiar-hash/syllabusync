@@ -44,7 +44,15 @@ export async function middleware(request: NextRequest) {
 
   // Refresh the session - this is important for keeping the session alive
   // and for storing/retrieving the PKCE code verifier
-  const { data: { session } } = await supabase.auth.getSession()
+  let session = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    session = data.session
+  } catch (error) {
+    // If Supabase is unreachable, continue without session
+    // This prevents the entire site from crashing during Supabase outages
+    console.error('Failed to get session:', error)
+  }
 
   // Skip auth check for public routes and static assets
   if (PUBLIC_ROUTES.includes(pathname)) {
