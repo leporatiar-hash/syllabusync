@@ -54,6 +54,7 @@ export default function Nav() {
           <div className="flex items-center gap-3">
             <Link
               href="/settings"
+              prefetch={false}
               className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#A78BFA] text-xs font-bold text-white overflow-hidden transition-transform hover:scale-105"
             >
               {profilePicture ? (

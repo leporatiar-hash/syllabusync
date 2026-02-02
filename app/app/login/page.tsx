@@ -20,27 +20,38 @@ function LoginContent() {
   const message = searchParams.get('message')
 
   useEffect(() => {
-    if (!loading && user) {
+    // Only redirect if user is already logged in when page loads
+    // Don't redirect during active login (submitting) to avoid conflicts with the hard redirect
+    if (!loading && user && !submitting) {
       router.replace('/courses')
     }
-  }, [loading, user, router])
+  }, [loading, user, router, submitting])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-    if (error) {
-      setError(error.message)
+      if (error) {
+        setError(error.message)
+        setSubmitting(false)
+      } else {
+        // Small delay to ensure cookies are fully set before navigation
+        // This helps prevent race conditions with middleware session checks
+        setTimeout(() => {
+          window.location.href = '/courses'
+        }, 100)
+      }
+    } catch (err) {
+      setError('An unexpected error occurred. Please try again.')
       setSubmitting(false)
-    } else {
-      // Use hard redirect for more reliable navigation after auth state change
-      window.location.href = '/courses'
+      console.error('Login error:', err)
     }
   }
 
