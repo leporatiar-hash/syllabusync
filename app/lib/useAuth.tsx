@@ -20,38 +20,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let isMounted = true
+    let listenerUnsubscribe: (() => void) | null = null
 
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!isMounted) return
-      if (error) {
-        console.error('Supabase session load failed', error)
-      } else {
-        console.info('Supabase getSession()', {
-          hasSession: !!data.session,
-          userId: data.session?.user?.id || null,
-        })
+    // Initialize auth with comprehensive error handling
+    const initAuth = async () => {
+      try {
+        console.log('[Auth] Initializing session...')
+        const { data, error } = await supabase.auth.getSession()
+
+        if (!isMounted) return
+
+        if (error) {
+          console.error('[Auth] Session load failed:', error.message)
+          // Don't crash - continue with null session
+        } else {
+          console.log('[Auth] Session loaded:', {
+            hasSession: !!data.session,
+            userId: data.session?.user?.id?.slice(0, 8) || null,
+          })
+        }
+
+        setSession(data.session || null)
+        setUser(data.session?.user || null)
+      } catch (err) {
+        console.error('[Auth] Unexpected error during session init:', err)
+        // Don't crash - just set to logged out state
+        setSession(null)
+        setUser(null)
+      } finally {
+        if (isMounted) {
+          setLoading(false)
+        }
       }
-      setSession(data.session || null)
-      setUser(data.session?.user || null)
-      setLoading(false)
-      console.info('Auth provider: Supabase', { user: !!data.session?.user })
-    })
+    }
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      console.info('Supabase onAuthStateChange', {
-        event: _event,
-        hasSession: !!newSession,
-        userId: newSession?.user?.id || null,
+    initAuth()
+
+    // Set up auth state listener with error handling
+    try {
+      const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+        if (!isMounted) return
+
+        console.log('[Auth] State change:', _event, {
+          hasSession: !!newSession,
+          userId: newSession?.user?.id?.slice(0, 8) || null,
+        })
+
+        setSession(newSession)
+        setUser(newSession?.user || null)
+        setLoading(false)
       })
-      setSession(newSession)
-      setUser(newSession?.user || null)
-      setLoading(false)
-      console.info('Auth provider: Supabase', { user: !!newSession?.user })
-    })
+      listenerUnsubscribe = () => listener.subscription.unsubscribe()
+    } catch (err) {
+      console.error('[Auth] Failed to set up auth listener:', err)
+    }
 
     return () => {
       isMounted = false
-      listener.subscription.unsubscribe()
+      if (listenerUnsubscribe) {
+        try {
+          listenerUnsubscribe()
+        } catch (err) {
+          console.error('[Auth] Failed to unsubscribe:', err)
+        }
+      }
     }
   }, [])
 

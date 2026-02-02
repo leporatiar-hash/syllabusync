@@ -66,43 +66,48 @@ export default function CoursesPage() {
       setLoading(false)
       return
     }
-    const loadCourses = async () => {
+
+    const loadCourses = async (isRetry = false) => {
       setError(null)
+      console.log(`[Courses] Loading courses... (retry: ${isRetry})`)
+
       try {
         const res = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
+        console.log(`[Courses] Response status: ${res.status}`)
+
         if (res.ok) {
           const data = await res.json()
+          console.log(`[Courses] Loaded ${data.length} courses`)
           setCourses(data)
-        } else {
-          const errData = await res.json().catch(() => ({}))
-          setError(errData.detail || `Failed to load courses (${res.status})`)
+          setLoading(false)
+          return
         }
+
+        // Handle 401 - session might not be ready yet
+        if (res.status === 401 && !isRetry) {
+          console.log('[Courses] Got 401, retrying in 500ms...')
+          setTimeout(() => loadCourses(true), 500)
+          return // Don't set loading false yet
+        }
+
+        // Other errors - show to user
+        const errData = await res.json().catch(() => ({}))
+        const errorMsg = errData.detail || `Failed to load courses (${res.status})`
+        console.error('[Courses] Error:', errorMsg)
+        setError(errorMsg)
+        setLoading(false)
       } catch (err) {
-        console.error('Failed to load courses:', err)
-        const message = err instanceof Error ? err.message : 'Failed to load courses'
-        // Handle "Not authenticated" gracefully - session may not be ready yet
-        if (message.includes('Not authenticated') || message.includes('session')) {
-          // Wait a moment and retry once - session might still be initializing
-          setTimeout(async () => {
-            try {
-              const retryRes = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
-              if (retryRes.ok) {
-                const data = await retryRes.json()
-                setCourses(data)
-                setError(null)
-              } else {
-                setError('Failed to load courses. Please try refreshing the page.')
-              }
-            } catch (retryErr) {
-              setError('Unable to connect. Please check your connection and try again.')
-            } finally {
-              setLoading(false)
-            }
-          }, 500)
-          return // Don't set loading to false yet - retry is pending
+        console.error('[Courses] Network error:', err)
+        const message = err instanceof Error ? err.message : 'Network error'
+
+        // Retry once on network errors if not already retrying
+        if (!isRetry) {
+          console.log('[Courses] Network error, retrying in 500ms...')
+          setTimeout(() => loadCourses(true), 500)
+          return
         }
-        setError(message)
-      } finally {
+
+        setError(`Unable to connect: ${message}`)
         setLoading(false)
       }
     }
