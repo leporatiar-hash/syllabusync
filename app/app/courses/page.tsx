@@ -35,6 +35,7 @@ export default function CoursesPage() {
   const { fetchWithAuth } = useAuthFetch()
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [showToast, setShowToast] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
@@ -66,14 +67,41 @@ export default function CoursesPage() {
       return
     }
     const loadCourses = async () => {
+      setError(null)
       try {
         const res = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           setCourses(data)
+        } else {
+          const errData = await res.json().catch(() => ({}))
+          setError(errData.detail || `Failed to load courses (${res.status})`)
         }
       } catch (err) {
         console.error('Failed to load courses:', err)
+        const message = err instanceof Error ? err.message : 'Failed to load courses'
+        // Handle "Not authenticated" gracefully - session may not be ready yet
+        if (message.includes('Not authenticated') || message.includes('session')) {
+          // Wait a moment and retry once - session might still be initializing
+          setTimeout(async () => {
+            try {
+              const retryRes = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
+              if (retryRes.ok) {
+                const data = await retryRes.json()
+                setCourses(data)
+                setError(null)
+              } else {
+                setError('Failed to load courses. Please try refreshing the page.')
+              }
+            } catch (retryErr) {
+              setError('Unable to connect. Please check your connection and try again.')
+            } finally {
+              setLoading(false)
+            }
+          }, 500)
+          return // Don't set loading to false yet - retry is pending
+        }
+        setError(message)
       } finally {
         setLoading(false)
       }
@@ -344,6 +372,26 @@ export default function CoursesPage() {
 
         {loading && (
           <div className="mt-6 text-sm text-slate-500">Loading courses...</div>
+        )}
+
+        {error && !loading && (
+          <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4">
+            <div className="flex items-start gap-3">
+              <svg className="h-5 w-5 text-red-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-red-800">Error loading courses</p>
+                <p className="mt-1 text-sm text-red-600">{error}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="mt-3 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-200 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
