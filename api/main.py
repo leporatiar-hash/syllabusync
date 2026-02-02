@@ -46,7 +46,12 @@ bearer_scheme = HTTPBearer(auto_error=True)
 
 app = FastAPI()
 
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Parse ALLOWED_ORIGINS - strip whitespace from each origin
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+
+# Log CORS configuration at module load
+print(f"[CORS] Configured origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -926,7 +931,24 @@ def validate_deadlines(deadlines: list) -> list:
 
 @app.on_event("startup")
 async def startup_event():
-    """Pre-fetch JWKS at startup to cache keys and surface config issues early."""
+    """Initialize app: test DB, pre-fetch JWKS, log configuration."""
+    print("=" * 50)
+    print("[Startup] ClassMate Backend API starting...")
+    print("=" * 50)
+
+    # Log CORS configuration
+    print(f"[Startup] CORS enabled for origins: {ALLOWED_ORIGINS}")
+
+    # Test database connection
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print(f"[Startup] Database connection successful")
+        print(f"[Startup] Database URL: {_safe_db_url(DATABASE_URL)}")
+    except Exception as e:
+        print(f"[Startup] ERROR: Database connection failed: {e}")
+
+    # Pre-fetch JWKS
     print("[Startup] Pre-fetching JWKS...")
     keys = _fetch_jwks()
     if keys:
@@ -936,15 +958,31 @@ async def startup_event():
         print(f"[Startup] SUPABASE_URL = {SUPABASE_URL or 'NOT SET'}")
         print(f"[Startup] SUPABASE_JWKS_URL = {SUPABASE_JWKS_URL or 'NOT SET'}")
 
+    print("=" * 50)
+    print("[Startup] ClassMate Backend API ready!")
+    print("=" * 50)
+
 
 @app.get("/")
-def health():
-    return {"status": "ok"}
+def root():
+    """Root endpoint - service status."""
+    return {
+        "service": "ClassMate Backend API",
+        "status": "running",
+        "version": "1.0.0"
+    }
 
 
 @app.get("/health")
-def healthcheck():
-    return {"ok": True}
+def health():
+    """Health check endpoint."""
+    return {"status": "healthy"}
+
+
+@app.get("/api/health")
+def api_health():
+    """API health check endpoint."""
+    return {"status": "healthy"}
 
 
 @app.get("/auth-status")
