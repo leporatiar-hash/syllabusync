@@ -14,14 +14,27 @@ export async function middleware(request: NextRequest) {
     },
   })
 
+  // Skip auth check for public routes and static assets
+  if (PUBLIC_ROUTES.includes(pathname)) {
+    return response
+  }
+
+  if (
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/brand/') ||
+    pathname === '/favicon.ico'
+  ) {
+    return response
+  }
+
   try {
     // Check if Supabase env vars are available
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
     if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Supabase environment variables not configured')
-      // Allow request to proceed without auth check
+      // Allow request to proceed - client-side will handle auth
       return response
     }
 
@@ -31,17 +44,14 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          // Set cookies on the request for downstream use
           cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value)
           })
-          // Create new response with updated request
           response = NextResponse.next({
             request: {
               headers: request.headers,
             },
           })
-          // Set cookies on the response to persist them
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options)
           })
@@ -49,63 +59,23 @@ export async function middleware(request: NextRequest) {
       },
     })
 
-    // Refresh the session - this is important for keeping the session alive
-    // and for storing/retrieving the PKCE code verifier
-    let session = null
+    // Just refresh session to keep it alive - don't block on failure
     try {
-      const { data } = await supabase.auth.getSession()
-      session = data.session
-    } catch (error) {
-      // If Supabase is unreachable, continue without session
-      // This prevents the entire site from crashing during Supabase outages
-      console.error('Failed to get session:', error)
+      await supabase.auth.getSession()
+    } catch {
+      // Ignore session errors - client-side will handle auth
     }
 
-    // Skip auth check for public routes and static assets
-    if (PUBLIC_ROUTES.includes(pathname)) {
-      return response
-    }
-
-    if (
-      pathname.startsWith('/_next/') ||
-      pathname.startsWith('/api/') ||
-      pathname.startsWith('/brand/') ||
-      pathname === '/favicon.ico'
-    ) {
-      return response
-    }
-
-    // Redirect to login if no session on protected routes
-    if (!session) {
-      // For RSC prefetch requests, return 401 instead of redirect
-      // This prevents breaking the RSC response format and allows client-side handling
-      const isRscRequest = request.nextUrl.searchParams.has('_rsc')
-      if (isRscRequest) {
-        return new NextResponse(null, { status: 401 })
-      }
-
-      const url = request.nextUrl.clone()
-      url.pathname = '/login'
-      return NextResponse.redirect(url)
-    }
-
+    // Always allow request to proceed - client-side handles auth protection
     return response
-  } catch (error) {
-    // Catch any unexpected errors to prevent server crash
-    console.error('Middleware error:', error)
-    // Allow request to proceed to avoid breaking the site
+  } catch {
+    // On any error, just let the request through
     return response
   }
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
     '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 }
