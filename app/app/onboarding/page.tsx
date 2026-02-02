@@ -48,9 +48,9 @@ export default function OnboardingPage() {
           major: major || undefined,
         },
       })
-      router.push('/courses')
+      router.push('/home')
     } catch {
-      router.push('/courses')
+      router.push('/home')
     } finally {
       setLoading(false)
     }
@@ -132,7 +132,7 @@ export default function OnboardingPage() {
           <div className="flex gap-3 pt-2">
             <button
               type="button"
-              onClick={() => router.push('/courses')}
+              onClick={() => router.push('/home')}
               className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
             >
               Skip for now

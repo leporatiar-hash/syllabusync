@@ -1,5 +1,0 @@
-[services.frontend]
-source = "app"
-
-[services.backend]
-source = "api"

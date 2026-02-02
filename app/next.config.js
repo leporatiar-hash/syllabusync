@@ -1,6 +1,7 @@
 const path = require('path')
 
 module.exports = {
+  output: 'standalone',
   outputFileTracingRoot: __dirname,
   turbopack: {
     root: __dirname,

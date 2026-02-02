@@ -17,7 +17,7 @@ export default function SignupPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace('/courses')
+      router.replace('/home')
     }
   }, [loading, user, router])
 
@@ -48,7 +48,7 @@ export default function SignupPage() {
       setSubmitting(false)
     } else {
       // Use hard redirect for more reliable navigation after auth state change
-      window.location.href = '/onboarding'
+      window.location.href = '/home'
     }
   }
 

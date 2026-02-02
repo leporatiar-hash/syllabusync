@@ -23,7 +23,7 @@ function LoginContent() {
     // Only redirect if user is already logged in when page loads
     // Don't redirect during active login (submitting) to avoid conflicts with the hard redirect
     if (!loading && user && !submitting) {
-      router.replace('/courses')
+      router.replace('/home')
     }
   }, [loading, user, router, submitting])
 
@@ -45,7 +45,7 @@ function LoginContent() {
         // Small delay to ensure cookies are fully set before navigation
         // This helps prevent race conditions with middleware session checks
         setTimeout(() => {
-          window.location.href = '/courses'
+          window.location.href = '/home'
         }, 100)
       }
     } catch (err) {
