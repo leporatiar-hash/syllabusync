@@ -7,8 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
-    "start": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "build": "next build --webpack && npm run copy-assets",
+    "copy-assets": "cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/",
+    "start": "node .next/standalone/server.js",
     "lint": "eslint"
   },
   "dependencies": {

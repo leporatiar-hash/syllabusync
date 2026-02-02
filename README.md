@@ -13,8 +13,8 @@ A calm, organized workspace for students to parse syllabi, track deadlines, and 
 
 ```
 classmate/
-├── api/          # FastAPI backend
-└── app/          # Next.js frontend
+├── Backend/      # FastAPI backend
+└── Frontend/     # Next.js frontend
 ```
 
 ## Local Development
@@ -22,7 +22,7 @@ classmate/
 ### Backend
 
 ```bash
-cd api
+cd Backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -34,7 +34,7 @@ Backend runs at http://localhost:8000
 ### Frontend
 
 ```bash
-cd app
+cd Frontend
 npm install
 npm run dev
 ```
@@ -47,7 +47,7 @@ Create two Railway services from the same GitHub repo.
 
 ### Service 1: API (FastAPI)
 
-- **Root Directory**: `api`
+- **Root Directory**: `Backend`
 - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 - **Variables**:
   - `DATABASE_URL` (Railway Postgres URL or sqlite for testing)
@@ -58,7 +58,7 @@ Generate a public domain for the API service (e.g., `https://your-api.up.railway
 
 ### Service 2: App (Next.js)
 
-- **Root Directory**: `app`
+- **Root Directory**: `Frontend`
 - **Start Command**: `npm run start`
 - **Variables**:
   - `NEXT_PUBLIC_API_URL` (set to your API domain)
@@ -89,14 +89,14 @@ Generate a public domain for the App service (e.g., `https://your-app.up.railway
 
 ## Environment Variables
 
-### Backend (`api/.env`)
+### Backend (`Backend/.env`)
 ```
 OPENAI_API_KEY=your-openai-api-key
 DATABASE_URL=sqlite:///./railway.db  # or PostgreSQL URL
 ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-### Frontend (`app/.env.local`)
+### Frontend (`Frontend/.env.local`)
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
