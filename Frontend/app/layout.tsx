@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import Nav from "../components/Nav";
 import AuthWrapper from "../components/AuthWrapper";
@@ -32,12 +31,9 @@ export default function RootLayout({
           <header className="sticky top-0 z-50 border-b border-white/60 bg-white/70 backdrop-blur">
             <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
               <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight shrink-0">
-                <Image
+                <img
                   src="/brand/classmate-owl.png"
                   alt="Classmate"
-                  width={160}
-                  height={48}
-                  priority
                   style={{ height: "32px", width: "auto" }}
                 />
                 {/* Hidden on mobile to prevent overlap with nav */}
