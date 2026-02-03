@@ -101,3 +101,4 @@ ALLOWED_ORIGINS=http://localhost:3000
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 # Deploy trigger Sat Jan 31 13:26:59 EST 2026
+# Force rebuild Tue Feb  3 12:52:30 EST 2026
