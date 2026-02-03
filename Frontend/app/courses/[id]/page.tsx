@@ -1306,10 +1306,13 @@ export default function CourseDetailPage() {
                     )}
                     {classSchedule.length > 0 && (
                       <button
-                        onClick={() => alert('TODO: Add to calendar logic here!')}
-                        className="mt-4 rounded bg-[#4ADE80] px-3 py-1 text-white"
+                        onClick={() => {
+                          // Navigate to calendar page - calendar integration can be implemented there
+                          window.location.href = '/calendar';
+                        }}
+                        className="mt-4 rounded bg-[#4ADE80] px-3 py-1 text-white hover:bg-[#3fbb6b] transition-colors"
                       >
-                        Add Schedule to Calendar
+                        View in Calendar
                       </button>
                     )}
                   </div>

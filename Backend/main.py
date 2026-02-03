@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -13,6 +14,9 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, date, timedelta
 from urllib.request import urlopen
 from urllib.error import URLError
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import PyPDF2
 from docx import Document
 import json
@@ -22,6 +26,15 @@ import os
 import re
 import base64
 import time
+import asyncio
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -46,20 +59,35 @@ bearer_scheme = HTTPBearer(auto_error=True)
 
 app = FastAPI()
 
+# Rate limiting setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Parse ALLOWED_ORIGINS - strip whitespace from each origin
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
 
 # Log CORS configuration at module load
-print(f"[CORS] Configured origins: {ALLOWED_ORIGINS}")
+logger.info(f"[CORS] Configured origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
+
+
+# Request timeout middleware
+@app.middleware("http")
+async def timeout_middleware(request: Request, call_next):
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=60.0)
+    except asyncio.TimeoutError:
+        return JSONResponse({"detail": "Request timeout"}, status_code=504)
+
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -617,6 +645,46 @@ def get_current_user(
     return _get_current_user(request, credentials, db)
 
 
+async def validate_file_upload(file: UploadFile, allowed_extensions: list[str], max_size_mb: int = 10):
+    """
+    Validate uploaded file for security and size constraints.
+
+    Args:
+        file: The uploaded file
+        allowed_extensions: List of allowed file extensions (e.g., ['.pdf', '.docx'])
+        max_size_mb: Maximum file size in megabytes
+
+    Raises:
+        HTTPException: If validation fails
+    """
+    # Validate file is provided
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    # Validate file extension
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+        )
+
+    # Read file content to check size
+    content = await file.read()
+    file_size_mb = len(content) / (1024 * 1024)
+
+    if file_size_mb > max_size_mb:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {max_size_mb}MB, uploaded: {file_size_mb:.2f}MB"
+        )
+
+    # Reset file pointer for subsequent reads
+    await file.seek(0)
+
+    return content
+
+
 def parse_json_response(result: str):
     """Parse JSON from OpenAI response, handling markdown code blocks."""
     if result.startswith("```"):
@@ -931,36 +999,43 @@ def validate_deadlines(deadlines: list) -> list:
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize app: test DB, pre-fetch JWKS, log configuration."""
-    print("=" * 50)
-    print("[Startup] ClassMate Backend API starting...")
-    print("=" * 50)
+    """Initialize app: validate env vars, test DB, pre-fetch JWKS, log configuration."""
+    logger.info("=" * 50)
+    logger.info("[Startup] ClassMate Backend API starting...")
+    logger.info("=" * 50)
+
+    # Validate required environment variables
+    required_vars = ["OPENAI_API_KEY", "SUPABASE_URL"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        logger.error(f"[Startup] FATAL: Missing required env vars: {missing}")
+        raise RuntimeError(f"Missing required environment variables: {missing}")
 
     # Log CORS configuration
-    print(f"[Startup] CORS enabled for origins: {ALLOWED_ORIGINS}")
+    logger.info(f"[Startup] CORS enabled for origins: {ALLOWED_ORIGINS}")
 
     # Test database connection
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        print(f"[Startup] Database connection successful")
-        print(f"[Startup] Database URL: {_safe_db_url(DATABASE_URL)}")
+        logger.info("[Startup] Database connection successful")
+        logger.info(f"[Startup] Database URL: {_safe_db_url(DATABASE_URL)}")
     except Exception as e:
-        print(f"[Startup] ERROR: Database connection failed: {e}")
+        logger.error(f"[Startup] ERROR: Database connection failed: {e}")
 
     # Pre-fetch JWKS
-    print("[Startup] Pre-fetching JWKS...")
+    logger.info("[Startup] Pre-fetching JWKS...")
     keys = _fetch_jwks()
     if keys:
-        print(f"[Startup] JWKS pre-fetch successful: {len(keys)} keys cached")
+        logger.info(f"[Startup] JWKS pre-fetch successful: {len(keys)} keys cached")
     else:
-        print("[Startup] WARNING: JWKS pre-fetch failed - auth may not work until keys can be fetched")
-        print(f"[Startup] SUPABASE_URL = {SUPABASE_URL or 'NOT SET'}")
-        print(f"[Startup] SUPABASE_JWKS_URL = {SUPABASE_JWKS_URL or 'NOT SET'}")
+        logger.warning("[Startup] JWKS pre-fetch failed - auth may not work until keys can be fetched")
+        logger.warning(f"[Startup] SUPABASE_URL = {SUPABASE_URL or 'NOT SET'}")
+        logger.warning(f"[Startup] SUPABASE_JWKS_URL = {SUPABASE_JWKS_URL or 'NOT SET'}")
 
-    print("=" * 50)
-    print("[Startup] ClassMate Backend API ready!")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("[Startup] ClassMate Backend API ready!")
+    logger.info("=" * 50)
 
 
 @app.get("/")
@@ -1546,13 +1621,13 @@ def update_course(course_id: str, payload: UpdateCourseRequest, current_user: Us
 
 
 @app.post("/courses/{course_id}/syllabus")
-async def upload_course_syllabus(course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+@limiter.limit("5/minute")
+async def upload_course_syllabus(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     """Upload a syllabus PDF and attach extracted deadlines to an existing course."""
-    print(f"[DEBUG] /courses/{course_id}/syllabus request received")
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must be a PDF")
+    logger.info(f"[DEBUG] /courses/{course_id}/syllabus request received")
 
-    content = await file.read()
+    # Validate file upload
+    content = await validate_file_upload(file, allowed_extensions=['.pdf'], max_size_mb=10)
     pdf = PyPDF2.PdfReader(io.BytesIO(content))
 
     text = ""
@@ -1611,9 +1686,10 @@ async def upload_course_syllabus(course_id: str, file: UploadFile = File(...), c
 
 
 @app.post("/courses/{course_id}/summaries")
-async def generate_summary(course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def generate_summary(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     """Upload notes and generate a study summary attached to a course."""
-    print(f"[DEBUG] /courses/{course_id}/summaries request received")
+    logger.info(f"[DEBUG] /courses/{course_id}/summaries request received")
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -1621,7 +1697,8 @@ async def generate_summary(course_id: str, file: UploadFile = File(...), current
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        content = await file.read()
+        # Validate file upload - allow PDF, TXT, and DOCX files
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx'], max_size_mb=10)
         filename = file.filename.lower()
 
         if filename.endswith(".pdf"):
@@ -1705,9 +1782,10 @@ def get_summary(summary_id: str, current_user: User = Depends(get_current_user))
 
 # Flashcard endpoints
 @app.post("/courses/{course_id}/flashcards")
-async def generate_flashcards(course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def generate_flashcards(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     """Upload study material and generate flashcards using AI."""
-    print(f"[DEBUG] /courses/{course_id}/flashcards request received")
+    logger.info(f"[DEBUG] /courses/{course_id}/flashcards request received")
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -1715,8 +1793,8 @@ async def generate_flashcards(course_id: str, file: UploadFile = File(...), curr
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Extract text from file
-        content = await file.read()
+        # Validate and extract text from file
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx'], max_size_mb=10)
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
@@ -1820,10 +1898,10 @@ Make questions clear and answers concise but complete."""
         print(f"[ERROR] Failed to parse flashcards JSON: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate flashcards")
     except Exception as e:
-        print(f"[ERROR] {str(e)}")
+        print(f"[ERROR] Error generating flashcards: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error generating flashcards: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred while generating flashcards. Please try again.")
     finally:
         db.close()
 
@@ -1869,15 +1947,16 @@ def delete_flashcard_set(set_id: str, current_user: User = Depends(get_current_u
 
 
 @app.post("/upload")
-async def upload_syllabus(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    print("[DEBUG] /upload request received")
+@limiter.limit("5/minute")
+async def upload_syllabus(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    logger.info("[DEBUG] /upload request received")
     user_id = current_user.id
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    # Validate file upload
+    content = await validate_file_upload(file, allowed_extensions=['.pdf'], max_size_mb=10)
 
     try:
         print(f"[DEBUG] Processing file: {file.filename}")
-        content = await file.read()
         pdf = PyPDF2.PdfReader(io.BytesIO(content))
 
         text = ""
@@ -1968,16 +2047,17 @@ async def upload_syllabus(file: UploadFile = File(...), current_user: User = Dep
             db.close()
 
     except Exception as e:
-        print(f"[ERROR] {str(e)}")
+        print(f"[ERROR] Error processing PDF: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred while processing the PDF. Please try again.")
 
 
 # ============= Quiz Endpoints =============
 
 @app.post("/courses/{course_id}/generate-quiz")
-async def generate_quiz(course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def generate_quiz(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     """Generate a multiple-choice quiz from study materials."""
     db = SessionLocal()
     try:
@@ -1986,8 +2066,8 @@ async def generate_quiz(course_id: str, file: UploadFile = File(...), current_us
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Extract text from file
-        content = await file.read()
+        # Validate and extract text from file
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx'], max_size_mb=10)
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
@@ -2112,10 +2192,10 @@ Guidelines:
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] {str(e)}")
+        print(f"[ERROR] Error generating quiz: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error generating quiz: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred while generating the quiz. Please try again.")
     finally:
         db.close()
 
@@ -2134,7 +2214,8 @@ def get_quiz(quiz_id: str, current_user: User = Depends(get_current_user)):
         for q in sorted(quiz.questions, key=lambda x: x.order_num):
             try:
                 options = json.loads(q.options)
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                print(f"[WARNING] Failed to parse options for question {q.id}: {str(e)}")
                 options = []
 
             questions.append({
@@ -2178,7 +2259,8 @@ def submit_quiz(quiz_id: str, submission: QuizSubmission, current_user: User = D
 
             try:
                 options = json.loads(q.options)
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                print(f"[WARNING] Failed to parse options for question {q.id}: {str(e)}")
                 options = []
 
             results.append({
