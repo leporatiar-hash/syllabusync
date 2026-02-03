@@ -18,6 +18,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Safety net: if Supabase is unreachable for any reason, stop spinning after 5 s
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setLoading(false)
+    }, 5000)
+    return () => clearTimeout(timeout)
+  }, [])
+
   useEffect(() => {
     let isMounted = true
     let listenerUnsubscribe: (() => void) | null = null
