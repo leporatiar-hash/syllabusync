@@ -20,12 +20,10 @@ function LoginContent() {
   const message = searchParams.get('message')
 
   useEffect(() => {
-    // Only redirect if user is already logged in when page loads
-    // Don't redirect during active login (submitting) to avoid conflicts with the hard redirect
-    if (!loading && user && !submitting) {
+    if (!loading && user) {
       router.replace('/home')
     }
-  }, [loading, user, router, submitting])
+  }, [loading, user, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,11 +40,10 @@ function LoginContent() {
         setError(error.message)
         setSubmitting(false)
       } else {
-        // Small delay to ensure cookies are fully set before navigation
-        // This helps prevent race conditions with middleware session checks
-        setTimeout(() => {
-          window.location.href = '/home'
-        }, 100)
+        // Client-side navigation keeps the existing HTTP/2 connection alive;
+        // a hard reload (window.location.href) opens a new TCP stream that
+        // can hit a RST from the Railway edge proxy after an idle period.
+        router.push('/home')
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.')

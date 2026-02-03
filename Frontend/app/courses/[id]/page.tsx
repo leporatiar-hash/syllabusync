@@ -1307,8 +1307,7 @@ export default function CourseDetailPage() {
                     {classSchedule.length > 0 && (
                       <button
                         onClick={() => {
-                          // Navigate to calendar page - calendar integration can be implemented there
-                          window.location.href = '/calendar';
+                          router.push('/calendar')
                         }}
                         className="mt-4 rounded bg-[#4ADE80] px-3 py-1 text-white hover:bg-[#3fbb6b] transition-colors"
                       >

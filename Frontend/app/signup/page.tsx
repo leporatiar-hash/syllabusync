@@ -47,8 +47,7 @@ export default function SignupPage() {
       setError(error.message)
       setSubmitting(false)
     } else {
-      // Use hard redirect for more reliable navigation after auth state change
-      window.location.href = '/home'
+      router.push('/home')
     }
   }
 
