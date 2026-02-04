@@ -1,39 +1,19 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  })
+  const response = NextResponse.next({ request })
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
+  // Clear any old Supabase auth cookies to prevent REQUEST_HEADER_TOO_LARGE errors.
+  // The browser client now uses localStorage instead of cookies, so these are stale.
+  const cookiesToClear = request.cookies
+    .getAll()
+    .filter((c) => c.name.startsWith('sb-') && c.name.includes('-auth-token'))
 
-  // IMPORTANT: DO NOT remove this. It refreshes the auth token and removes
-  // stale cookie chunks, preventing REQUEST_HEADER_TOO_LARGE errors on Vercel.
-  // The user object is intentionally not used here, but getUser() must be called
-  // to trigger the cookie refresh/cleanup.
-  await supabase.auth.getUser()
+  for (const cookie of cookiesToClear) {
+    response.cookies.set(cookie.name, '', { maxAge: 0, path: '/' })
+  }
 
-  return supabaseResponse
+  return response
 }
 
 export const config = {

@@ -1,15 +1,17 @@
-import { createBrowserClient } from '@supabase/ssr'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-// Lazy singleton — createBrowserClient is only called on first access, which
+// Lazy singleton — createClient is only called on first access, which
 // always happens inside a useEffect / event handler (i.e. in the browser).
 // This avoids the throw that occurs when Next.js pre-renders pages server-side
 // and process.env.NEXT_PUBLIC_* is undefined during the build.
+//
+// Uses localStorage (default) instead of cookies to avoid REQUEST_HEADER_TOO_LARGE
+// errors on Vercel. The middleware handles server-side auth token refresh.
 let _client: SupabaseClient | null = null
 
 function getSupabaseClient(): SupabaseClient {
   if (!_client) {
-    _client = createBrowserClient(
+    _client = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
