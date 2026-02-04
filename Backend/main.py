@@ -1689,23 +1689,22 @@ def update_course(course_id: str, payload: UpdateCourseRequest, current_user: Us
 @app.post("/courses/{course_id}/syllabus")
 @limiter.limit("5/minute")
 async def upload_course_syllabus(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    """Upload a syllabus PDF and attach extracted deadlines to an existing course."""
+    """Upload a syllabus PDF or Word doc and attach extracted deadlines to an existing course."""
     logger.info(f"[DEBUG] /courses/{course_id}/syllabus request received")
 
-    # Validate file upload
-    content = await validate_file_upload(file, allowed_extensions=['.pdf'], max_size_mb=10)
-    pdf = PyPDF2.PdfReader(io.BytesIO(content))
+    # Validate file upload — PDF and DOCX both supported
+    content = await validate_file_upload(file, allowed_extensions=['.pdf', '.docx'], max_size_mb=10)
+    filename = (file.filename or "").lower()
 
-    text = ""
-    for i, page in enumerate(pdf.pages):
-        page_text = page.extract_text() or ""
-        print(f"[DEBUG] Page {i+1}: {len(page_text)} characters extracted")
-        text += page_text + "\n"
+    if filename.endswith(".docx"):
+        text = extract_text_from_docx(content)
+    else:
+        text = extract_text_from_pdf(content)
 
     print(f"[DEBUG] Total text extracted: {len(text)} characters")
 
     if len(text.strip()) < 50:
-        raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+        raise HTTPException(status_code=400, detail="Could not extract text from the uploaded file. Make sure it contains readable text.")
 
     metadata = extract_course_metadata(text)
     deadlines_data = extract_deadlines_with_context(text, metadata)
@@ -2019,18 +2018,17 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
     logger.info("[DEBUG] /upload request received")
     user_id = current_user.id
 
-    # Validate file upload
-    content = await validate_file_upload(file, allowed_extensions=['.pdf'], max_size_mb=10)
+    # Validate file upload — PDF and DOCX both supported
+    content = await validate_file_upload(file, allowed_extensions=['.pdf', '.docx'], max_size_mb=10)
+    filename = (file.filename or "").lower()
 
     try:
         print(f"[DEBUG] Processing file: {file.filename}")
-        pdf = PyPDF2.PdfReader(io.BytesIO(content))
 
-        text = ""
-        for i, page in enumerate(pdf.pages):
-            page_text = page.extract_text() or ""
-            print(f"[DEBUG] Page {i+1}: {len(page_text)} characters extracted")
-            text += page_text + "\n"
+        if filename.endswith(".docx"):
+            text = extract_text_from_docx(content)
+        else:
+            text = extract_text_from_pdf(content)
 
         print(f"[DEBUG] Total text extracted: {len(text)} characters")
 
@@ -2041,7 +2039,7 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
                 "debug": {
                     "text_length": len(text),
                     "dates_found": 0,
-                    "message": "Could not extract text from PDF. The PDF might be scanned/image-based."
+                    "message": "Could not extract text from the uploaded file. Make sure it contains readable text."
                 }
             }
 

@@ -764,13 +764,13 @@ export default function CourseDetailPage() {
             <div className="rounded-3xl bg-white p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Upload syllabus</h3>
               <p className="mt-2 text-sm text-slate-600">
-                Add a syllabus PDF to extract deadlines automatically.
+                Add a syllabus PDF or Word doc to extract deadlines automatically.
               </p>
 
               <input
                 ref={syllabusInputRef}
                 type="file"
-                accept=".pdf"
+                accept=".pdf,.docx"
                 onChange={(e) => setSyllabusFile(e.target.files?.[0] || null)}
                 className="hidden"
                 id="syllabus-upload"
@@ -788,7 +788,7 @@ export default function CourseDetailPage() {
                     </svg>
                   </div>
                   <p className="mt-4 text-sm font-medium text-slate-700">Click to upload syllabus</p>
-                  <p className="mt-1 text-xs text-slate-400">PDF only, max 10MB</p>
+                  <p className="mt-1 text-xs text-slate-400">PDF or Word doc, max 10MB</p>
                 </label>
               ) : (
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
