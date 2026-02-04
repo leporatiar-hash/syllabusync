@@ -87,6 +87,7 @@ function FlashcardsContent() {
   const [generateQuiz, setGenerateQuiz] = useState(true)
   const [generateSummary, setGenerateSummary] = useState(true)
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const reviewSectionRef = useRef<HTMLElement>(null)
 
   const current = useMemo(() => cards[currentIndex], [cards, currentIndex])
 
@@ -184,11 +185,9 @@ function FlashcardsContent() {
       try {
         setLoadingCards(true)
         setError(null)
-        console.log('[Flashcards] Loading set:', selectedSetId)
         const res = await fetchWithAuth(`${API_URL}/flashcard-sets/${selectedSetId}`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
-          console.log('[Flashcards] Loaded:', data.flashcards?.length, 'cards')
           setCards(data.flashcards || [])
           setCurrentIndex(0)
           setFlipped(false)
@@ -205,6 +204,13 @@ function FlashcardsContent() {
     }
 
     loadFlashcards()
+  }, [selectedSetId])
+
+  // Auto-scroll to the review section when a deck is selected
+  useEffect(() => {
+    if (selectedSetId && reviewSectionRef.current) {
+      reviewSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
   }, [selectedSetId])
 
   const handleShuffle = () => {
@@ -406,7 +412,7 @@ function FlashcardsContent() {
             </div>
           </div>
 
-          {mode === 'study' && (
+          {mode === 'browse' && (
           <>
           {/* Upload Area */}
           <div className="mt-6">
@@ -617,7 +623,7 @@ function FlashcardsContent() {
             )}
           </div>
 
-          {mode === 'study' && (summaries.length > 0 || quizzes.length > 0) && (
+          {mode === 'browse' && (summaries.length > 0 || quizzes.length > 0) && (
             <div className="mt-8">
               <h3 className="text-sm font-semibold text-slate-700 mb-4">Your Study Tools</h3>
               <div className="space-y-4">
@@ -679,7 +685,7 @@ function FlashcardsContent() {
 
         {/* Review Section */}
         {mode === 'study' && selectedSetId && (
-          <section className="rounded-3xl bg-white p-8 shadow-sm">
+          <section ref={reviewSectionRef} className="rounded-3xl bg-white p-8 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-semibold text-slate-900">
