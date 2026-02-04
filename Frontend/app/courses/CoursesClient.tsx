@@ -69,15 +69,12 @@ export default function CoursesClient() {
 
     const loadCourses = async (isRetry = false) => {
       setError(null)
-      console.log(`[Courses] Loading courses... (retry: ${isRetry})`)
 
       try {
         const res = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
-        console.log(`[Courses] Response status: ${res.status}`)
 
         if (res.ok) {
           const data = await res.json()
-          console.log(`[Courses] Loaded ${data.length} courses`)
           setCourses(data)
           setLoading(false)
           return
@@ -85,24 +82,19 @@ export default function CoursesClient() {
 
         // Handle 401 - session might not be ready yet
         if (res.status === 401 && !isRetry) {
-          console.log('[Courses] Got 401, retrying in 500ms...')
           setTimeout(() => loadCourses(true), 500)
           return // Don't set loading false yet
         }
 
         // Other errors - show to user
         const errData = await res.json().catch(() => ({}))
-        const errorMsg = errData.detail || `Failed to load courses (${res.status})`
-        console.error('[Courses] Error:', errorMsg)
-        setError(errorMsg)
+        setError(errData.detail || `Failed to load courses (${res.status})`)
         setLoading(false)
       } catch (err) {
-        console.error('[Courses] Network error:', err)
         const message = err instanceof Error ? err.message : 'Network error'
 
         // Retry once on network errors if not already retrying
         if (!isRetry) {
-          console.log('[Courses] Network error, retrying in 500ms...')
           setTimeout(() => loadCourses(true), 500)
           return
         }
@@ -139,9 +131,7 @@ export default function CoursesClient() {
     setFormError(null)
     setCreating(true)
     try {
-      const url = `${API_URL}/courses`
-      console.log('[Create Course] Sending request to:', url)
-      const res = await fetchWithAuth(url, {
+      const res = await fetchWithAuth(`${API_URL}/courses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -152,15 +142,12 @@ export default function CoursesClient() {
         cache: 'no-store',
       })
 
-      console.log('[Create Course] Response status:', res.status)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        console.error('[Create Course] Error response:', data)
         throw new Error(data.detail || 'Failed to create course')
       }
 
       const created = await res.json()
-      console.log('[Create Course] Created:', created)
       setCourses([created, ...courses])
       setFormName('')
       setFormCode('')
@@ -171,7 +158,6 @@ export default function CoursesClient() {
       setShowToast(true)
       setTimeout(() => setShowToast(false), 2500)
     } catch (err) {
-      console.error('[Create Course] Error:', err)
       const errorMsg = err instanceof Error ? err.message : 'Failed to create course'
       setFormError(errorMsg)
       // Also show a toast for network errors
@@ -204,8 +190,7 @@ export default function CoursesClient() {
       setShowToast(true)
       setTimeout(() => setShowToast(false), 2500)
       setCourseToDelete(null)
-    } catch (err) {
-      console.error('[Delete Course] Error:', err)
+    } catch {
       setToastMessage('Failed to delete course.')
       setToastType('error')
       setShowToast(true)
