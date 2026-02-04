@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
 from jose import JWTError, jwt, jwk
 from jose.utils import base64url_decode
 from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text
@@ -94,6 +94,22 @@ async def timeout_middleware(request: Request, call_next):
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+def _raise_if_openai_error(e: Exception) -> None:
+    """If *e* is a known OpenAI SDK error, raise an HTTPException with a
+    clear, user-facing message and log it so Railway picks it up.
+    For anything else, do nothing — let the caller handle it."""
+    if isinstance(e, OAIAuthError):
+        logger.error("[OpenAI] Authentication error — API key is invalid or revoked: %s", e)
+        raise HTTPException(status_code=503, detail="AI service is temporarily unavailable. Please try again later.")
+    if isinstance(e, OAIRateLimitError):
+        logger.warning("[OpenAI] Rate-limit hit: %s", e)
+        raise HTTPException(status_code=503, detail="AI service is busy right now. Please wait a moment and try again.")
+    if isinstance(e, OAIAPIStatusError):
+        logger.error("[OpenAI] API error (status %s): %s", e.status_code, e)
+        raise HTTPException(status_code=503, detail="AI service returned an error. Please try again later.")
+
 
 # Supabase auth helpers
 _jwks_cache: dict[str, object] = {"fetched_at": 0.0, "keys": {}, "last_fetch_error": None}
@@ -528,17 +544,20 @@ Return 5-8 bullet points plus a short 1-2 sentence overview.
 Focus on key concepts, definitions, and important facts.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": text[:15000]}
-        ],
-        temperature=0.3,
-        max_tokens=900
-    )
-
-    return response.choices[0].message.content.strip()
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text[:15000]}
+            ],
+            temperature=0.3,
+            max_tokens=900
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        _raise_if_openai_error(e)
+        raise
 
 
 def generate_summary_from_image(content: bytes, filename: str) -> str:
@@ -552,20 +571,24 @@ def generate_summary_from_image(content: bytes, filename: str) -> str:
 
     prompt = "Summarize the handwritten notes or study material in this image. Return 5-8 bullet points plus a short 1-2 sentence overview."
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}}
-                ],
-            }
-        ],
-        temperature=0.3,
-        max_tokens=900
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}}
+                    ],
+                }
+            ],
+            temperature=0.3,
+            max_tokens=900
+        )
+    except Exception as e:
+        _raise_if_openai_error(e)
+        raise
 
     return response.choices[0].message.content.strip()
 
@@ -770,6 +793,7 @@ IMPORTANT: For any field where information is not found in the syllabus, use nul
         return metadata
 
     except Exception as e:
+        _raise_if_openai_error(e)  # don't silently swallow auth / rate-limit errors
         print(f"[ERROR] Metadata extraction failed: {e}")
         return {
             "course_name": "Unknown Course",
@@ -888,6 +912,7 @@ Return [] if no deadlines found."""
         print(f"[ERROR] Failed to parse deadlines JSON: {e}")
         return []
     except Exception as e:
+        _raise_if_openai_error(e)
         print(f"[ERROR] Deadline extraction failed: {e}")
         raise
 
@@ -1860,6 +1885,7 @@ Make questions clear and answers concise but complete."""
                 flashcards_data = parse_json_response(result)
                 print(f"[DEBUG] Generated {len(flashcards_data)} flashcards")
             except Exception as e:
+                _raise_if_openai_error(e)  # don't silently fall back on auth / rate-limit
                 print(f"[WARN] OpenAI flashcard generation failed: {e}")
                 flashcards_data = generate_flashcards_fallback(text)
         else:
@@ -2150,6 +2176,7 @@ Guidelines:
             print(f"[DEBUG] Generated {len(questions)} quiz questions")
 
         except Exception as e:
+            _raise_if_openai_error(e)
             print(f"[ERROR] Quiz generation failed: {e}")
             raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
 
