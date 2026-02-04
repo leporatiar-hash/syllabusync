@@ -64,9 +64,12 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Parse ALLOWED_ORIGINS - strip whitespace from each origin
+# Parse ALLOWED_ORIGINS - strip whitespace and quotes from each origin
+# Railway/Vercel env vars sometimes include literal quotes that need to be removed
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
-ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+# Strip outer quotes from the entire string first (in case it's wrapped in quotes)
+allowed_origins_str = allowed_origins_str.strip().strip('"').strip("'")
+ALLOWED_ORIGINS = [origin.strip().strip('"').strip("'") for origin in allowed_origins_str.split(",") if origin.strip()]
 
 # Log CORS configuration at module load
 logger.info(f"[CORS] Configured origins: {ALLOWED_ORIGINS}")
