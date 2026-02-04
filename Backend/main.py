@@ -1154,16 +1154,37 @@ def create_course(payload: CreateCourseRequest, current_user: User = Depends(get
         db.close()
 
 
+def _resolve_profile(db, user_id: str, email: str | None = None) -> UserProfile | None:
+    """Look up a UserProfile by user_id first, then fall back to email.
+
+    If a profile is found via email but its user_id doesn't match the current
+    JWT sub, we update it in place so that all future lookups (and every other
+    table that references user_id) can be migrated in one go later.  This is a
+    one-time self-heal per profile — after the first successful request the
+    user_id column will already be correct.
+    """
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if profile:
+        return profile
+    # Fallback: match on email and heal the stale user_id
+    if email:
+        profile = db.query(UserProfile).filter(UserProfile.email == email).first()
+        if profile:
+            profile.user_id = user_id
+            db.commit()
+            db.refresh(profile)
+    return profile
+
+
 @app.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
-        user_id = current_user.id
-        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
-            return {"user_id": user_id, "profile": None}
+            return {"user_id": current_user.id, "profile": None}
         return {
-            "user_id": user_id,
+            "user_id": current_user.id,
             "profile": {
                 "email": profile.email,
                 "full_name": profile.full_name,
@@ -1182,8 +1203,7 @@ def get_me(current_user: User = Depends(get_current_user)):
 def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
-        user_id = current_user.id
-        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
 
@@ -1215,8 +1235,7 @@ def upload_profile_picture(payload: ProfilePictureRequest, current_user: User = 
     """Upload a profile picture as base64."""
     db = SessionLocal()
     try:
-        user_id = current_user.id
-        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
 
