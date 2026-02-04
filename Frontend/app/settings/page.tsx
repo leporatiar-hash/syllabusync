@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [profilePicture, setProfilePicture] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [uploadingPic, setUploadingPic] = useState(false)
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export default function SettingsPage() {
     e.preventDefault()
     setSaving(true)
     setSaved(false)
+    setSaveError(null)
     try {
       const { error } = await supabase.auth.updateUser({
         data: {
@@ -60,10 +62,14 @@ export default function SettingsPage() {
           major: major || undefined,
         },
       })
-      if (!error) {
+      if (error) {
+        setSaveError(error.message || 'Failed to save. Please try again.')
+      } else {
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
       }
+    } catch {
+      setSaveError('An unexpected error occurred. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -74,6 +80,7 @@ export default function SettingsPage() {
     if (!file) return
 
     setUploadingPic(true)
+    setSaveError(null)
     try {
       // Resize and compress image
       const dataUrl = await resizeImage(file, 200, 200)
@@ -81,17 +88,22 @@ export default function SettingsPage() {
       const { error } = await supabase.auth.updateUser({
         data: { profile_picture: dataUrl },
       })
-      if (!error) {
+      if (error) {
+        setSaveError('Failed to upload photo. Please try again.')
+      } else {
         setProfilePicture(dataUrl)
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to upload photo.'
+      setSaveError(msg)
     } finally {
       setUploadingPic(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
-  const handleLogout = () => {
-    signOut()
+  const handleLogout = async () => {
+    await signOut()
     router.push('/login')
   }
 
@@ -136,6 +148,12 @@ export default function SettingsPage() {
           onChange={handlePictureUpload}
         />
       </div>
+
+      {saveError && (
+        <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {saveError}
+        </div>
+      )}
 
       {/* Profile Form */}
       <form onSubmit={handleSave} className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -241,6 +259,9 @@ export default function SettingsPage() {
           {saved && (
             <span className="text-sm font-medium text-green-600">Saved!</span>
           )}
+          {saveError && (
+            <span className="text-sm text-red-600">{saveError}</span>
+          )}
         </div>
       </form>
 
@@ -261,10 +282,12 @@ export default function SettingsPage() {
 }
 
 function resizeImage(file: File, maxW: number, maxH: number): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Failed to read the image file.'))
     reader.onload = (e) => {
       const img = new Image()
+      img.onerror = () => reject(new Error('Failed to load the image.'))
       img.onload = () => {
         const canvas = document.createElement('canvas')
         let w = img.width

@@ -413,24 +413,36 @@ export default function CoursesClient() {
               </button>
             </div>
             <div className="mt-6 grid gap-4">
-              <input
-                placeholder="Course name"
-                value={formName}
-                onChange={(event) => setFormName(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              />
-              <input
-                placeholder="Course code"
-                value={formCode}
-                onChange={(event) => setFormCode(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              />
-              <input
-                placeholder="Semester"
-                value={formSemester}
-                onChange={(event) => setFormSemester(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              />
+              <div>
+                <label htmlFor="formName" className="block text-sm font-medium text-slate-700 mb-1">Course name</label>
+                <input
+                  id="formName"
+                  placeholder="e.g. Corporate Finance"
+                  value={formName}
+                  onChange={(event) => setFormName(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="formCode" className="block text-sm font-medium text-slate-700 mb-1">Course code</label>
+                <input
+                  id="formCode"
+                  placeholder="e.g. FINC 313"
+                  value={formCode}
+                  onChange={(event) => setFormCode(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="formSemester" className="block text-sm font-medium text-slate-700 mb-1">Semester</label>
+                <input
+                  id="formSemester"
+                  placeholder="e.g. Spring 2026"
+                  value={formSemester}
+                  onChange={(event) => setFormSemester(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                />
+              </div>
             </div>
             {formError && <div className="mt-3 text-sm text-[#FB7185]">{formError}</div>}
             <button
@@ -491,24 +503,36 @@ export default function CoursesClient() {
               </button>
             </div>
             <div className="mt-6 grid gap-4">
-              <input
-                placeholder="Course name"
-                value={editName}
-                onChange={(event) => setEditName(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              />
-              <input
-                placeholder="Course code"
-                value={editCode}
-                onChange={(event) => setEditCode(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              />
-              <input
-                placeholder="Semester"
-                value={editSemester}
-                onChange={(event) => setEditSemester(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
-              />
+              <div>
+                <label htmlFor="editName" className="block text-sm font-medium text-slate-700 mb-1">Course name</label>
+                <input
+                  id="editName"
+                  placeholder="e.g. Corporate Finance"
+                  value={editName}
+                  onChange={(event) => setEditName(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="editCode" className="block text-sm font-medium text-slate-700 mb-1">Course code</label>
+                <input
+                  id="editCode"
+                  placeholder="e.g. FINC 313"
+                  value={editCode}
+                  onChange={(event) => setEditCode(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="editSemester" className="block text-sm font-medium text-slate-700 mb-1">Semester</label>
+                <input
+                  id="editSemester"
+                  placeholder="e.g. Spring 2026"
+                  value={editSemester}
+                  onChange={(event) => setEditSemester(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                />
+              </div>
             </div>
             {editError && <div className="mt-3 text-sm text-[#FB7185]">{editError}</div>}
             <button

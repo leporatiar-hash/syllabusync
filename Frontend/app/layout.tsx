@@ -44,9 +44,13 @@ export default function RootLayout({
           </header>
           {children}
           <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
-            Build: {buildTimestamp} | id: {buildId}
-            {buildSha ? ` | sha: ${buildSha}` : ""}
-            <AuthDebug />
+            {process.env.NODE_ENV !== "production" && (
+              <>
+                Build: {buildTimestamp} | id: {buildId}
+                {buildSha ? ` | sha: ${buildSha}` : ""}
+                <AuthDebug />
+              </>
+            )}
           </footer>
         </AuthWrapper>
       </body>

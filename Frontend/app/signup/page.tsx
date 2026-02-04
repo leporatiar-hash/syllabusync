@@ -38,16 +38,22 @@ export default function SignupPage() {
       return
     }
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    })
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+      })
 
-    if (error) {
-      setError(error.message)
+      if (error) {
+        setError(error.message)
+        setSubmitting(false)
+      } else {
+        router.push('/onboarding')
+      }
+    } catch (err) {
+      setError('An unexpected error occurred. Please try again.')
       setSubmitting(false)
-    } else {
-      router.push('/home')
+      console.error('Signup error:', err)
     }
   }
 

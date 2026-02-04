@@ -492,7 +492,7 @@ class QuizSubmission(BaseModel):
 
 
 def generate_flashcards_fallback(text: str):
-    sentences = [s.strip() for s in re.split(r"[.!?]\\s+", text) if len(s.strip()) > 20]
+    sentences = [s.strip() for s in re.split(r"[.!?]\s+", text) if len(s.strip()) > 20]
     cards = []
     for sentence in sentences:
         if len(cards) >= 10:

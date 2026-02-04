@@ -8,6 +8,7 @@ const BUILD_ID = '20260131-ssr-auth-fix'
 
 export default function BuildVerifier() {
   useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return
     console.log('=== CLASSMATE BUILD VERIFICATION ===')
     console.log('BUILD_ID:', BUILD_ID)
     console.log('BUILD_TIME:', BUILD_TIMESTAMP)
