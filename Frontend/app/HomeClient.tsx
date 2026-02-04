@@ -27,8 +27,6 @@ const typeStyles: Record<string, { bg: string; text: string; icon: ReactNode }> 
   Admin: { bg: 'bg-slate-100', text: 'text-slate-600', icon: <ClipboardList size={16} /> },
 }
 
-const BUILD_ID = '20260131-fix'
-
 const features = [
   {
     title: 'Parse Syllabi',
@@ -143,7 +141,6 @@ export default function HomeClient() {
               Sign Up
             </Link>
           </div>
-          <p className="mt-4 text-xs text-slate-400">build: {BUILD_ID}</p>
         </section>
       </main>
     )
@@ -251,7 +248,6 @@ export default function HomeClient() {
           ))}
         </div>
       </section>
-      <p className="pb-4 text-center text-xs text-slate-400">build: {BUILD_ID}</p>
     </main>
   )
 }

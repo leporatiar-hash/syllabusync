@@ -271,13 +271,6 @@ export default function CourseDetailPage() {
       setSyllabusFile(null)
       setDeadlineTabTouched(false)
       await loadCourse()
-      // Debug: check deadlines after upload
-      setTimeout(() => {
-        console.log('[Debug] Deadlines after syllabus upload:', deadlines)
-        if (deadlines.length === 0) {
-          alert('No deadlines were extracted. Check backend response or extraction logic.')
-        }
-      }, 1000)
     } catch (err) {
       console.error('Failed to upload syllabus:', err)
       setSyllabusError(err instanceof Error ? err.message : 'Failed to upload syllabus')

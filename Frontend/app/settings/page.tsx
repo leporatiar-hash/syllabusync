@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
+import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 
 const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
 const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
@@ -11,6 +12,7 @@ const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 
 export default function SettingsPage() {
   const router = useRouter()
   const { user, loading: authLoading, signOut } = useAuth()
+  const { fetchWithAuth } = useAuthFetch()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [fullName, setFullName] = useState('')
@@ -30,6 +32,7 @@ export default function SettingsPage() {
     }
   }, [authLoading, user, router])
 
+  // Load text fields from Supabase user_metadata (small, no bloat)
   useEffect(() => {
     if (!user) return
     const metadata = user.user_metadata || {}
@@ -38,7 +41,23 @@ export default function SettingsPage() {
     setSchoolType((metadata.school_type as string) || '')
     setAcademicYear((metadata.academic_year as string) || '')
     setMajor((metadata.major as string) || '')
-    setProfilePicture((metadata.profile_picture as string) || null)
+  }, [user])
+
+  // Load profile picture from backend (not JWT — avoids base64 bloat in every request)
+  useEffect(() => {
+    if (!user) return
+    const loadPic = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/me`)
+        if (res.ok) {
+          const data = await res.json()
+          setProfilePicture(data.profile?.profile_picture || null)
+        }
+      } catch {
+        // non-fatal — avatar just stays as initials
+      }
+    }
+    loadPic()
   }, [user])
 
   if (authLoading || !user) {
@@ -82,14 +101,17 @@ export default function SettingsPage() {
     setUploadingPic(true)
     setSaveError(null)
     try {
-      // Resize and compress image
+      // Resize and compress image to keep it under the 375 KB backend limit
       const dataUrl = await resizeImage(file, 200, 200)
 
-      const { error } = await supabase.auth.updateUser({
-        data: { profile_picture: dataUrl },
+      const res = await fetchWithAuth(`${API_URL}/me/profile-picture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data: dataUrl }),
       })
-      if (error) {
-        setSaveError('Failed to upload photo. Please try again.')
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSaveError(data.detail || 'Failed to upload photo. Please try again.')
       } else {
         setProfilePicture(dataUrl)
       }

@@ -1,8 +1,10 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '../lib/useAuth'
+import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 
 const navItems = [
   { href: '/', label: 'Home' },
@@ -15,10 +17,31 @@ export default function Nav() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, loading, signOut } = useAuth()
+  const { fetchWithAuth } = useAuthFetch()
+  const [profilePicture, setProfilePicture] = useState<string | null>(null)
 
   const fullName = user?.user_metadata?.full_name as string | undefined
-  const profilePicture = user?.user_metadata?.profile_picture as string | undefined
   const initials = (fullName?.[0] || user?.email?.[0] || 'U').toUpperCase()
+
+  // Fetch avatar from backend once — keeps it out of the JWT entirely
+  useEffect(() => {
+    if (!user) {
+      setProfilePicture(null)
+      return
+    }
+    const loadAvatar = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/me`)
+        if (res.ok) {
+          const data = await res.json()
+          setProfilePicture(data.profile?.profile_picture || null)
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+    loadAvatar()
+  }, [user])
 
   return (
     <>

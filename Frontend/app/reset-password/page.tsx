@@ -35,18 +35,23 @@ export default function ResetPasswordPage() {
       return
     }
 
-    const { error } = await supabase.auth.updateUser({
-      password,
-    })
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password,
+      })
 
-    if (error) {
-      setError(error.message)
+      if (error) {
+        setError(error.message)
+      } else {
+        setSuccess(true)
+        setTimeout(() => {
+          router.replace('/login?message=Password updated successfully')
+        }, 2000)
+      }
+    } catch {
+      setError('An unexpected error occurred. Please try again.')
+    } finally {
       setSubmitting(false)
-    } else {
-      setSuccess(true)
-      setTimeout(() => {
-        router.replace('/login?message=Password updated successfully')
-      }, 2000)
     }
   }
 
