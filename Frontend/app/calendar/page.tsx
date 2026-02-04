@@ -39,6 +39,7 @@ const typeColors: Record<string, { bg: string; text: string; icon: ReactNode }> 
   Reading: { bg: 'bg-green-100', text: 'text-green-700', icon: <BookOpenCheck size={12} /> },
   Admin: { bg: 'bg-slate-100', text: 'text-slate-700', icon: <ClipboardList size={12} /> },
   Deadline: { bg: 'bg-slate-100', text: 'text-slate-700', icon: <Clock size={12} /> },
+  Class: { bg: 'bg-[#E0EAFF]', text: 'text-[#5B8DEF]', icon: <Clock size={12} /> },
 }
 
 // Course colors - auto-assigned based on index
@@ -889,6 +890,7 @@ export default function CalendarPage() {
                     <option value="Homework">Homework</option>
                     <option value="Presentation">Presentation</option>
                     <option value="Admin">Admin</option>
+                    <option value="Class">Class</option>
                   </select>
                 </div>
                 <div>

@@ -82,6 +82,7 @@ const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode 
   Reading: { badge: 'bg-[#DCFCE7] text-[#4ADE80]', date: 'bg-[#ECFDF3] text-[#4ADE80]', icon: <BookOpenCheck size={10} className="text-white" /> },
   Admin: { badge: 'bg-slate-100 text-slate-600', date: 'bg-slate-50 text-slate-500', icon: <ClipboardList size={10} className="text-white" /> },
   Deadline: { badge: 'bg-slate-100 text-slate-600', date: 'bg-slate-50 text-slate-500', icon: <Clock size={10} className="text-white" /> },
+  Class: { badge: 'bg-[#E0EAFF] text-[#5B8DEF]', date: 'bg-[#EEF2FF] text-[#5B8DEF]', icon: <Clock size={10} className="text-white" /> },
 }
 
 export default function CourseDetailPage() {
@@ -155,9 +156,32 @@ export default function CourseDetailPage() {
     loadCourse()
   }, [user, courseId, loadCourse])
 
+  // State for "add to calendar" class sessions
+  const [classInCalendar, setClassInCalendar] = useState(false)
+  const [savingClassCalendar, setSavingClassCalendar] = useState(false)
+
+  // Helper: convert "12:30 PM" → "12:30" (24-h for <input type="time">)
+  const parseTimeTo24 = (t: string): string => {
+    if (!t) return ''
+    const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i)
+    if (!match) {
+      // already 24-h?
+      if (/^\d{1,2}:\d{2}$/.test(t)) return t.padStart(5, '0')
+      return ''
+    }
+    let [, h, m, ampm] = match
+    let hour = parseInt(h, 10)
+    if (ampm.toUpperCase() === 'PM' && hour !== 12) hour += 12
+    if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0
+    return `${String(hour).padStart(2, '0')}:${m}`
+  }
+
   // Initialise class-schedule pickers from persisted course_info when course loads
   useEffect(() => {
-    if (!course?.course_info?.logistics?.meeting_times) return
+    if (!course?.course_info?.logistics?.meeting_times) {
+      setClassSchedule([])
+      return
+    }
     const lines = course.course_info.logistics.meeting_times
       .split(/[,\n]/)
       .map((s: string) => s.trim())
@@ -171,10 +195,20 @@ export default function CourseDetailPage() {
       fri: 'Friday', friday: 'Friday',
     }
     for (const line of lines) {
+      // Expected formats: "Monday 2:00 PM - 3:15 PM" or "Mon 14:00 - 15:15"
       const words = line.split(/\s+/)
       const dayKey = words[0]?.toLowerCase().replace(/[^a-z]/g, '')
       const day = dayMap[dayKey]
-      if (day) parsed.push({ day, start: '', end: '' })
+      if (!day) continue
+      // Extract times — find the dash separator and grab what's around it
+      const dashIdx = line.indexOf('-')
+      if (dashIdx === -1) {
+        parsed.push({ day, start: '', end: '' })
+        continue
+      }
+      const beforeDash = line.slice(line.indexOf(' ') + 1, dashIdx).trim()
+      const afterDash = line.slice(dashIdx + 1).trim()
+      parsed.push({ day, start: parseTimeTo24(beforeDash), end: parseTimeTo24(afterDash) })
     }
     if (parsed.length > 0) setClassSchedule(parsed)
   }, [course])
@@ -1207,167 +1241,305 @@ export default function CourseDetailPage() {
             ) : (
               <div className="grid gap-6 lg:grid-cols-2">
                 {/* Class Schedule */}
-                <div className="rounded-3xl bg-white p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold text-slate-900">Class Schedule</h3>
-                  <div className="mt-4 space-y-2 text-sm">
-                    {classSchedule.length === 0 ? (
-                      <span className="italic text-slate-400">No class schedule set.</span>
-                    ) : (
-                      <ul>
-                        {classSchedule.map((item, idx) => (
-                          <li key={idx} className="flex gap-4 items-center">
-                            <span className="font-semibold text-slate-700">{item.day}</span>
-                            <span className="text-slate-600">
-                              {item.start} - {item.end}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {editingSchedule ? (
-                      <div className="mt-4 space-y-4">
-                        <div>
-                          <p className="text-xs font-medium text-slate-500 mb-2">Select class days:</p>
-                          <div className="flex flex-wrap gap-2">
-                            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((day) => (
-                              <button
-                                key={day}
-                                onClick={() => {
-                                  setSelectedDays((prev) =>
-                                    prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
-                                  )
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                  selectedDays.includes(day)
-                                    ? 'bg-[#5B8DEF] text-white'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                }`}
-                              >
-                                {day.slice(0, 3)}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs font-medium text-slate-500">Start time</label>
-                            <input
-                              type="time"
-                              value={scheduleTime.start}
-                              onChange={(e) => setScheduleTime((s) => ({ ...s, start: e.target.value }))}
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-slate-500">End time</label>
-                            <input
-                              type="time"
-                              value={scheduleTime.end}
-                              onChange={(e) => setScheduleTime((s) => ({ ...s, end: e.target.value }))}
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={async () => {
-                              if (selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end) return
-                              const newEntries = selectedDays.map((day) => ({
-                                day,
-                                start: scheduleTime.start,
-                                end: scheduleTime.end,
-                              }))
-                              // Format as human-readable string and persist via PATCH
-                              const formatTime = (t: string) => {
-                                const [h, m] = t.split(':')
-                                const hour = parseInt(h, 10)
-                                const ampm = hour >= 12 ? 'PM' : 'AM'
-                                const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
-                                return `${h12}:${m} ${ampm}`
-                              }
-                              const meetingStr = newEntries
-                                .map((e) => `${e.day} ${formatTime(e.start)} - ${formatTime(e.end)}`)
-                                .join(', ')
+                <div className="rounded-3xl bg-white p-6 shadow-sm lg:col-span-2">
+                  {/* Header row */}
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-slate-900">Class Schedule</h3>
+                    <div className="flex items-center gap-2">
+                      {classSchedule.length > 0 && (
+                        <button
+                          onClick={async () => {
+                            if (classInCalendar) {
+                              // Remove: delete class-session deadlines for this course
+                              setSavingClassCalendar(true)
                               try {
-                                const res = await fetchWithAuth(`${API_URL}/courses/${courseId}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    course_info: {
-                                      ...course?.course_info,
-                                      logistics: {
-                                        ...(course?.course_info?.logistics || {}),
-                                        meeting_times: meetingStr,
-                                      },
-                                    },
-                                  }),
-                                  cache: 'no-store',
-                                })
+                                // Fetch current deadlines to find class sessions
+                                const res = await fetchWithAuth(`${API_URL}/deadlines?course_id=${courseId}`, { cache: 'no-store' })
                                 if (res.ok) {
-                                  setClassSchedule(newEntries)
-                                  setEditingSchedule(false)
-                                  setCourse(prev => prev ? {
-                                    ...prev,
-                                    course_info: {
-                                      ...prev.course_info,
-                                      logistics: { ...prev.course_info?.logistics, meeting_times: meetingStr },
-                                    },
-                                  } : prev)
-                                  setCalendarToast('Schedule saved!')
-                                  setTimeout(() => setCalendarToast(null), 2000)
-                                } else {
-                                  setCalendarToast('Failed to save schedule')
-                                  setTimeout(() => setCalendarToast(null), 2000)
+                                  const allDeadlines = await res.json()
+                                  const classSessions = allDeadlines.filter((d: { type: string }) => d.type === 'Class')
+                                  for (const sess of classSessions) {
+                                    await fetchWithAuth(`${API_URL}/deadlines/${sess.id}`, { method: 'DELETE', cache: 'no-store' })
+                                  }
                                 }
-                              } catch {
-                                setCalendarToast('Failed to save schedule')
+                                setClassInCalendar(false)
+                                setCalendarToast('Removed from calendar')
                                 setTimeout(() => setCalendarToast(null), 2000)
+                              } catch {
+                                setCalendarToast('Failed to remove from calendar')
+                                setTimeout(() => setCalendarToast(null), 2000)
+                              } finally {
+                                setSavingClassCalendar(false)
                               }
-                            }}
-                            disabled={selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end}
-                            className="rounded-lg bg-[#5B8DEF] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingSchedule(false)
-                              setSelectedDays(classSchedule.map((s) => s.day))
-                              if (classSchedule.length > 0) {
-                                setScheduleTime({ start: classSchedule[0].start, end: classSchedule[0].end })
+                            } else {
+                              // Add: create class-session deadlines for next 4 weeks
+                              setSavingClassCalendar(true)
+                              try {
+                                const today = new Date()
+                                // Find the start of this week (Sunday)
+                                const startOfWeek = new Date(today)
+                                startOfWeek.setDate(today.getDate() - today.getDay())
+                                const dayToNum: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 }
+                                const formatTime12 = (t: string) => {
+                                  if (!t) return ''
+                                  const [h, m] = t.split(':')
+                                  const hour = parseInt(h, 10)
+                                  const ampm = hour >= 12 ? 'PM' : 'AM'
+                                  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+                                  return `${h12}:${m} ${ampm}`
+                                }
+                                let created = 0
+                                for (let week = 0; week < 4; week++) {
+                                  for (const entry of classSchedule) {
+                                    const dayNum = dayToNum[entry.day]
+                                    if (dayNum === undefined) continue
+                                    const classDate = new Date(startOfWeek)
+                                    classDate.setDate(startOfWeek.getDate() + dayNum + week * 7)
+                                    // Skip past dates
+                                    if (classDate < today) continue
+                                    const dateStr = classDate.toISOString().split('T')[0]
+                                    const timeStr = entry.start ? formatTime12(entry.start) : null
+                                    const res = await fetchWithAuth(`${API_URL}/deadlines`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        title: `${course?.name || 'Class'}`,
+                                        date: dateStr,
+                                        time: timeStr,
+                                        type: 'Class',
+                                        description: entry.start && entry.end ? `${formatTime12(entry.start)} – ${formatTime12(entry.end)}` : null,
+                                        course_id: courseId,
+                                      }),
+                                      cache: 'no-store',
+                                    })
+                                    if (res.ok) created++
+                                  }
+                                }
+                                // Auto save-to-calendar for created deadlines
+                                const listRes = await fetchWithAuth(`${API_URL}/deadlines?course_id=${courseId}`, { cache: 'no-store' })
+                                if (listRes.ok) {
+                                  const updated = await listRes.json()
+                                  const classSessions = updated.filter((d: { type: string; saved_to_calendar?: boolean }) => d.type === 'Class' && !d.saved_to_calendar)
+                                  for (const sess of classSessions) {
+                                    await fetchWithAuth(`${API_URL}/deadlines/${sess.id}/save-to-calendar`, { method: 'POST', cache: 'no-store' })
+                                  }
+                                }
+                                setClassInCalendar(true)
+                                setCalendarToast(`Added ${created} class sessions to calendar`)
+                                setTimeout(() => setCalendarToast(null), 2500)
+                              } catch {
+                                setCalendarToast('Failed to add to calendar')
+                                setTimeout(() => setCalendarToast(null), 2000)
+                              } finally {
+                                setSavingClassCalendar(false)
                               }
-                            }}
-                            className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
+                            }
+                          }}
+                          disabled={savingClassCalendar}
+                          className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all duration-300 disabled:opacity-50 ${
+                            classInCalendar
+                              ? 'bg-[#ECFDF3] text-[#16A34A] hover:bg-[#DCFCE7]'
+                              : 'bg-[#E0EAFF] text-[#5B8DEF] hover:bg-[#D0DEFF]'
+                          }`}
+                        >
+                          <Calendar size={13} />
+                          {savingClassCalendar ? 'Saving…' : classInCalendar ? 'In Calendar' : 'Add to Calendar'}
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setEditingSchedule(true)
                           setSelectedDays(classSchedule.map((s) => s.day))
                           if (classSchedule.length > 0) {
                             setScheduleTime({ start: classSchedule[0].start, end: classSchedule[0].end })
+                          } else {
+                            setScheduleTime({ start: '', end: '' })
                           }
                         }}
-                        className="mt-4 rounded-lg bg-[#5B8DEF] px-4 py-2 text-sm font-medium text-white"
+                        className="flex items-center gap-1.5 rounded-full bg-slate-100 px-4 py-1.5 text-xs font-semibold text-slate-600 transition-all duration-300 hover:bg-slate-200"
                       >
-                        {classSchedule.length > 0 ? 'Edit Schedule' : 'Set Schedule'}
+                        <Pencil size={13} />
+                        {classSchedule.length > 0 ? 'Edit' : 'Set Schedule'}
                       </button>
-                    )}
-                    {classSchedule.length > 0 && (
-                      <button
-                        onClick={() => {
-                          router.push('/calendar')
-                        }}
-                        className="mt-4 rounded bg-[#4ADE80] px-3 py-1 text-white hover:bg-[#3fbb6b] transition-colors"
-                      >
-                        View in Calendar
-                      </button>
-                    )}
+                    </div>
                   </div>
+
+                  {/* Weekly grid */}
+                  {classSchedule.length === 0 && !editingSchedule ? (
+                    <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 py-10 text-center">
+                      <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#E0EAFF]">
+                        <Clock size={20} className="text-[#5B8DEF]" />
+                      </div>
+                      <p className="text-sm text-slate-500">No class schedule set yet.</p>
+                      <p className="mt-1 text-xs text-slate-400">Click <span className="font-semibold">Set Schedule</span> to add your class times.</p>
+                    </div>
+                  ) : !editingSchedule ? (
+                    <div className="mt-5">
+                      {/* Day headers */}
+                      <div className="grid grid-cols-5 gap-2">
+                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((label) => (
+                          <div key={label} className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                            {label}
+                          </div>
+                        ))}
+                      </div>
+                      {/* Day columns */}
+                      <div className="mt-2 grid grid-cols-5 gap-2">
+                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((day) => {
+                          const entry = classSchedule.find((s) => s.day === day)
+                          const formatDisplay = (t: string) => {
+                            if (!t) return ''
+                            const [h, m] = t.split(':')
+                            const hour = parseInt(h, 10)
+                            const ampm = hour >= 12 ? 'PM' : 'AM'
+                            const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+                            return `${h12}:${m}`
+                          }
+                          return (
+                            <div key={day} className="rounded-xl bg-slate-50 border border-slate-100 min-h-[90px] flex flex-col items-center justify-center p-2 text-center">
+                              {entry ? (
+                                <div className="w-full rounded-lg bg-gradient-to-b from-[#5B8DEF] to-[#7C9BF6] px-2 py-2.5 shadow-sm">
+                                  <p className="text-[11px] font-semibold text-white">{course?.name || 'Class'}</p>
+                                  {entry.start && entry.end && (
+                                    <p className="mt-1 text-[10px] text-blue-100">
+                                      {formatDisplay(entry.start)} – {formatDisplay(entry.end)}
+                                      <span className="block text-[9px] opacity-70">
+                                        {parseInt(entry.end?.split(':')[0] || '0', 10) >= 12 ? 'PM' : 'AM'}
+                                      </span>
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-300 text-xs">—</span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Schedule picker / editor */
+                    <div className="mt-5 space-y-4">
+                      <div>
+                        <p className="text-xs font-medium text-slate-500 mb-2">Select class days</p>
+                        <div className="flex flex-wrap gap-2">
+                          {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((day) => (
+                            <button
+                              key={day}
+                              onClick={() => {
+                                setSelectedDays((prev) =>
+                                  prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+                                )
+                              }}
+                              className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                                selectedDays.includes(day)
+                                  ? 'bg-[#5B8DEF] text-white shadow-sm'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              {day.slice(0, 3)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-medium text-slate-500">Start time</label>
+                          <input
+                            type="time"
+                            value={scheduleTime.start}
+                            onChange={(e) => setScheduleTime((s) => ({ ...s, start: e.target.value }))}
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition-colors focus:border-[#5B8DEF] focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-slate-500">End time</label>
+                          <input
+                            type="time"
+                            value={scheduleTime.end}
+                            onChange={(e) => setScheduleTime((s) => ({ ...s, end: e.target.value }))}
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition-colors focus:border-[#5B8DEF] focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            if (selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end) return
+                            const newEntries = selectedDays.map((day) => ({
+                              day,
+                              start: scheduleTime.start,
+                              end: scheduleTime.end,
+                            }))
+                            const formatTime = (t: string) => {
+                              const [h, m] = t.split(':')
+                              const hour = parseInt(h, 10)
+                              const ampm = hour >= 12 ? 'PM' : 'AM'
+                              const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+                              return `${h12}:${m} ${ampm}`
+                            }
+                            const meetingStr = newEntries
+                              .map((e) => `${e.day} ${formatTime(e.start)} - ${formatTime(e.end)}`)
+                              .join(', ')
+                            try {
+                              const res = await fetchWithAuth(`${API_URL}/courses/${courseId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  course_info: {
+                                    ...course?.course_info,
+                                    logistics: {
+                                      ...(course?.course_info?.logistics || {}),
+                                      meeting_times: meetingStr,
+                                    },
+                                  },
+                                }),
+                                cache: 'no-store',
+                              })
+                              if (res.ok) {
+                                setClassSchedule(newEntries)
+                                setEditingSchedule(false)
+                                setCourse(prev => prev ? {
+                                  ...prev,
+                                  course_info: {
+                                    ...prev.course_info,
+                                    logistics: { ...prev.course_info?.logistics, meeting_times: meetingStr },
+                                  },
+                                } : prev)
+                                // If class was in calendar, remove old sessions so user can re-add
+                                if (classInCalendar) setClassInCalendar(false)
+                                setCalendarToast('Schedule saved!')
+                                setTimeout(() => setCalendarToast(null), 2000)
+                              } else {
+                                const errData = await res.json().catch(() => ({}))
+                                setCalendarToast(errData.detail || 'Failed to save schedule')
+                                setTimeout(() => setCalendarToast(null), 2000)
+                              }
+                            } catch {
+                              setCalendarToast('Failed to save schedule')
+                              setTimeout(() => setCalendarToast(null), 2000)
+                            }
+                          }}
+                          disabled={selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end}
+                          className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Save Schedule
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingSchedule(false)
+                            setSelectedDays(classSchedule.map((s) => s.day))
+                            if (classSchedule.length > 0) {
+                              setScheduleTime({ start: classSchedule[0].start, end: classSchedule[0].end })
+                            }
+                          }}
+                          className="rounded-full bg-slate-100 px-5 py-2 text-sm font-semibold text-slate-600 transition-all duration-300 hover:bg-slate-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {/* Instructor Section */}
                 <div className="rounded-3xl bg-white p-6 shadow-sm">
