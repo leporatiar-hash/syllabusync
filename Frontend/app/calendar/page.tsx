@@ -378,16 +378,16 @@ export default function CalendarPage() {
   }
 
   return (
-    <main className="min-h-screen px-4 pb-16 pt-6">
+    <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6">
       <div className="mx-auto w-full max-w-[1600px]">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <div className="flex rounded-full bg-white p-1 shadow-sm">
               {viewOptions.map((option) => (
                 <button
                   key={option}
                   onClick={() => setView(option)}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold transition-all duration-300 ${
+                  className={`rounded-full px-3 py-1.5 md:px-4 md:py-2 text-xs font-semibold transition-all duration-300 ${
                     view === option ? 'bg-[#5B8DEF] text-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
@@ -398,7 +398,7 @@ export default function CalendarPage() {
             <select
               value={filterCourse}
               onChange={(event) => setFilterCourse(event.target.value)}
-              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 md:px-4 md:py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
             >
               <option value="all">All courses</option>
               {courses.map((course) => (
@@ -410,9 +410,9 @@ export default function CalendarPage() {
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+            className="flex items-center gap-1.5 md:gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-3 py-1.5 md:px-5 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
           >
-            <span className="text-lg">+</span>
+            <span className="text-base md:text-lg">+</span>
             <span>New Deadline</span>
           </button>
         </div>
@@ -421,45 +421,45 @@ export default function CalendarPage() {
           <div className="mt-8 text-sm text-slate-500">Loading calendar...</div>
         ) : (
           <div className="mt-8 grid gap-8 lg:grid-cols-[4fr_1fr]">
-            <div className="rounded-3xl bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between">
+            <div className="rounded-3xl bg-white p-4 md:p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-1">
                 <button
                   onClick={() => navigate('prev')}
-                  className="rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
+                  className="rounded-full border border-slate-200 px-2.5 py-1.5 md:px-5 md:py-3 text-xs md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
                 >
-                  ← Prev
+                  ← <span className="hidden sm:inline">Prev</span>
                 </button>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3 min-w-0">
                   <button
                     onClick={goToToday}
-                    className="rounded-full border border-[#5B8DEF] px-4 py-2 text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:bg-[#5B8DEF] hover:text-white"
+                    className="rounded-full border border-[#5B8DEF] px-2.5 py-1 md:px-4 md:py-2 text-xs md:text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:bg-[#5B8DEF] hover:text-white"
                   >
                     Today
                   </button>
-                  <span className="text-xl font-semibold text-slate-900">
+                  <span className="truncate text-base md:text-xl font-semibold text-slate-900">
                     {view === 'Month' ? monthName : view === 'Week' ? weekRangeLabel : dayLabel}
                   </span>
                 </div>
                 <button
                   onClick={() => navigate('next')}
-                  className="rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
+                  className="rounded-full border border-slate-200 px-2.5 py-1.5 md:px-5 md:py-3 text-xs md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
                 >
-                  Next →
+                  <span className="hidden sm:inline">Next </span>→
                 </button>
               </div>
 
               {view === 'Month' ? (
-                <div className="mt-6">
-                  <div className="grid grid-cols-7 gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="mt-4 md:mt-6">
+                  <div className="grid grid-cols-7 gap-0.5 md:gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
                       <div key={day} className="text-center py-1">
-                        {day}
+                        {day.slice(0, 1)}<span className="hidden sm:inline">{day.slice(1)}</span>
                       </div>
                     ))}
                   </div>
-                  <div className="mt-4 grid grid-cols-7 gap-2">
+                  <div className="mt-2 md:mt-4 grid grid-cols-7 gap-0.5 md:gap-2">
                     {Array.from({ length: startingDay }).map((_, i) => (
-                      <div key={`empty-${i}`} className="min-h-[100px] rounded-xl bg-slate-50" />
+                      <div key={`empty-${i}`} className="min-h-[70px] md:min-h-[100px] rounded-lg md:rounded-xl bg-slate-50" />
                     ))}
 
                     {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -485,7 +485,7 @@ export default function CalendarPage() {
                             if (deadline) moveDeadline(deadline, dateStr)
                           }}
                           onClick={() => openCreateModal(dateStr)}
-                          className={`group relative min-h-[100px] cursor-pointer rounded-xl border border-slate-100 p-2 transition-all duration-300 hover:shadow-md ${
+                          className={`group relative min-h-[70px] md:min-h-[100px] cursor-pointer rounded-lg md:rounded-xl border border-slate-100 p-1.5 md:p-2 transition-all duration-300 hover:shadow-md ${
                             isToday ? 'ring-2 ring-[#5B8DEF]/40' : ''
                           } ${isWeekend ? 'bg-slate-50' : 'bg-white'} ${
                             dropTarget === dateStr ? 'border-[#5B8DEF] ring-2 ring-[#5B8DEF]/20' : ''
@@ -495,8 +495,8 @@ export default function CalendarPage() {
                           <div className={`text-sm ${isToday ? 'font-semibold text-[#5B8DEF]' : 'text-slate-400'}`}>
                             {day}
                           </div>
-                          <div className="mt-1 space-y-1">
-                            {dayDeadlines.slice(0, 3).map((deadline) => {
+                          <div className="mt-0.5 md:mt-1 space-y-0.5 md:space-y-1">
+                            {dayDeadlines.slice(0, 3).map((deadline, idx) => {
                               const color = typeColors[deadline.type] || typeColors.Deadline
                               const courseColor = courseColors[deadline.course_id]
                               return (
@@ -523,9 +523,9 @@ export default function CalendarPage() {
                                     }
                                   }}
                                   title={`${deadline.title} • ${deadline.course_name}${deadline.time ? ` • ${deadline.time}` : ''}`}
-                                  className={`group/badge relative w-full cursor-pointer rounded-lg border-l-2 px-2 py-1 text-left ${color.bg} ${courseColor?.border || 'border-slate-300'} shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
+                                  className={`group/badge relative w-full cursor-pointer rounded-md md:rounded-lg border-l-2 px-1.5 md:px-2 py-0.5 md:py-1 text-left ${color.bg} ${courseColor?.border || 'border-slate-300'} shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
                                     deadline.completed ? 'opacity-50' : ''
-                                  } ${draggingId === deadline.id ? 'opacity-50' : ''}`}
+                                  } ${draggingId === deadline.id ? 'opacity-50' : ''} ${idx === 2 ? 'hidden sm:block' : ''}`}
                                 >
                                   <div className="flex items-center gap-1">
                                     <span className={color.text}>{color.icon}</span>
@@ -536,8 +536,8 @@ export default function CalendarPage() {
                                   {deadline.time && (
                                     <div className="text-[9px] text-slate-400 ml-4">{deadline.time}</div>
                                   )}
-                                  {/* Hover tooltip */}
-                                  <div className="absolute left-0 top-full z-30 mt-1 hidden w-52 rounded-lg bg-slate-900 p-2.5 text-white shadow-xl group-hover/badge:block">
+                                  {/* Hover tooltip — hidden on mobile (tap opens detail modal instead) */}
+                                  <div className="absolute left-0 top-full z-30 mt-1 hidden w-52 rounded-lg bg-slate-900 p-2.5 text-white shadow-xl md:group-hover/badge:block">
                                     <div className="flex items-center gap-1.5">
                                       <span className={`h-2.5 w-2.5 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} />
                                       <span className="text-[11px] font-semibold">{deadline.title}</span>
@@ -551,7 +551,7 @@ export default function CalendarPage() {
                                 </div>
                               )
                             })}
-                            {dayDeadlines.length > 3 && (
+                            {dayDeadlines.length > 2 && (
                               <button
                                 type="button"
                                 onClick={(event) => {
@@ -560,7 +560,8 @@ export default function CalendarPage() {
                                 }}
                                 className="text-[10px] text-slate-400 hover:text-[#5B8DEF] transition-colors"
                               >
-                                +{dayDeadlines.length - 3} more
+                                <span className="inline sm:hidden">+{dayDeadlines.length - 2} more</span>
+                                <span className="hidden sm:inline">{dayDeadlines.length > 3 ? `+${dayDeadlines.length - 3} more` : ''}</span>
                               </button>
                             )}
                           </div>
@@ -571,8 +572,8 @@ export default function CalendarPage() {
                 </div>
               ) : view === 'Week' ? (
                 /* Week View */
-                <div className="mt-6">
-                  <div className="grid grid-cols-7 gap-2">
+                <div className="mt-4 md:mt-6">
+                  <div className="grid grid-cols-7 gap-0.5 md:gap-2">
                     {weekDates.map((d) => {
                       const dateStr = formatFullDate(d)
                       const isToday = todayStr === dateStr
@@ -583,7 +584,7 @@ export default function CalendarPage() {
                       return (
                         <div
                           key={dateStr}
-                          className={`min-h-[200px] rounded-2xl border p-3 transition-all duration-300 ${
+                          className={`min-h-[140px] md:min-h-[200px] rounded-lg md:rounded-2xl border p-1.5 md:p-3 transition-all duration-300 ${
                             isToday ? 'border-[#5B8DEF] bg-[#F8FAFF] ring-2 ring-[#5B8DEF]/20' : 'border-slate-100 bg-white'
                           }`}
                         >
@@ -601,14 +602,14 @@ export default function CalendarPage() {
                                 <button
                                   key={deadline.id}
                                   onClick={() => setSelectedDeadline(deadline)}
-                                  className={`w-full rounded-xl px-2 py-1.5 text-left text-xs transition-all duration-200 hover:scale-[1.02] ${
+                                  className={`w-full rounded-md md:rounded-xl px-1.5 md:px-2 py-1 md:py-1.5 text-left text-xs transition-all duration-200 hover:scale-[1.02] ${
                                     courseColors[deadline.course_id]?.light || 'bg-slate-100'
                                   } ${deadline.completed ? 'opacity-50' : ''}`}
                                 >
                                   <div className={`font-semibold text-slate-700 truncate ${deadline.completed ? 'line-through' : ''}`}>
                                     {deadline.title}
                                   </div>
-                                  {deadline.time && <div className="text-[10px] text-slate-500">{deadline.time}</div>}
+                                  {deadline.time && <div className="hidden sm:block text-[10px] text-slate-500">{deadline.time}</div>}
                                 </button>
                               ))
                             )}
