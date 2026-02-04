@@ -381,14 +381,14 @@ export default function CalendarPage() {
   return (
     <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6">
       <div className="mx-auto w-full max-w-[1600px]">
-        <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
-          <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <div className="flex rounded-full bg-white p-1 shadow-sm">
+        <div className="flex items-center justify-between gap-2 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="flex rounded-full bg-white p-0.5 md:p-1 shadow-sm">
               {viewOptions.map((option) => (
                 <button
                   key={option}
                   onClick={() => setView(option)}
-                  className={`rounded-full px-3 py-1.5 md:px-4 md:py-2 text-xs font-semibold transition-all duration-300 ${
+                  className={`rounded-full px-2.5 py-1 md:px-4 md:py-2 text-xs font-semibold transition-all duration-300 ${
                     view === option ? 'bg-[#5B8DEF] text-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
@@ -399,7 +399,7 @@ export default function CalendarPage() {
             <select
               value={filterCourse}
               onChange={(event) => setFilterCourse(event.target.value)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 md:px-4 md:py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 md:px-4 md:py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
             >
               <option value="all">All courses</option>
               {courses.map((course) => (
@@ -421,36 +421,36 @@ export default function CalendarPage() {
         {loading ? (
           <div className="mt-8 text-sm text-slate-500">Loading calendar...</div>
         ) : (
-          <div className="mt-8 grid gap-8 lg:grid-cols-[4fr_1fr]">
-            <div className="rounded-3xl bg-white p-4 md:p-6 shadow-sm">
+          <div className="mt-4 md:mt-8 grid gap-4 md:gap-8 lg:grid-cols-[4fr_1fr]">
+            <div className="rounded-3xl bg-white p-3 md:p-6 shadow-sm">
               <div className="flex items-center justify-between gap-1">
                 <button
                   onClick={() => navigate('prev')}
-                  className="rounded-full border border-slate-200 px-2.5 py-1.5 md:px-5 md:py-3 text-xs md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
+                  className="rounded-full border border-slate-200 px-2 py-1 md:px-5 md:py-3 text-sm md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
                 >
-                  ← <span className="hidden sm:inline">Prev</span>
+                  ←
                 </button>
-                <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
                   <button
                     onClick={goToToday}
-                    className="rounded-full border border-[#5B8DEF] px-2.5 py-1 md:px-4 md:py-2 text-xs md:text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:bg-[#5B8DEF] hover:text-white"
+                    className="rounded-full border border-[#5B8DEF] px-2 py-0.5 md:px-4 md:py-2 text-[11px] md:text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:bg-[#5B8DEF] hover:text-white"
                   >
                     Today
                   </button>
-                  <span className="truncate text-base md:text-xl font-semibold text-slate-900">
+                  <span className="truncate text-sm md:text-xl font-semibold text-slate-900">
                     {view === 'Month' ? monthName : view === 'Week' ? weekRangeLabel : dayLabel}
                   </span>
                 </div>
                 <button
                   onClick={() => navigate('next')}
-                  className="rounded-full border border-slate-200 px-2.5 py-1.5 md:px-5 md:py-3 text-xs md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
+                  className="rounded-full border border-slate-200 px-2 py-1 md:px-5 md:py-3 text-sm md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
                 >
-                  <span className="hidden sm:inline">Next </span>→
+                  →
                 </button>
               </div>
 
               {view === 'Month' ? (
-                <div className="mt-4 md:mt-6">
+                <div className="mt-3 md:mt-6">
                   <div className="grid grid-cols-7 gap-0.5 md:gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
                       <div key={day} className="text-center py-1">
@@ -458,9 +458,9 @@ export default function CalendarPage() {
                       </div>
                     ))}
                   </div>
-                  <div className="mt-2 md:mt-4 grid grid-cols-7 gap-0.5 md:gap-2">
+                  <div className="mt-1 md:mt-4 grid grid-cols-7 gap-0.5 md:gap-2">
                     {Array.from({ length: startingDay }).map((_, i) => (
-                      <div key={`empty-${i}`} className="min-h-[70px] md:min-h-[100px] rounded-lg md:rounded-xl bg-slate-50" />
+                      <div key={`empty-${i}`} className="min-h-[58px] md:min-h-[100px] rounded-lg md:rounded-xl bg-slate-50" />
                     ))}
 
                     {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -469,6 +469,9 @@ export default function CalendarPage() {
                       const dayDeadlines = getDeadlinesForDate(day)
                       const isToday = todayStr === dateStr
                       const isWeekend = [0, 6].includes(new Date(dateStr).getDay())
+                      // mobile: show 2 badges max; desktop (sm+): show 3
+                      const mobileMax = 2
+                      const desktopMax = 3
 
                       return (
                         <div
@@ -486,18 +489,48 @@ export default function CalendarPage() {
                             if (deadline) moveDeadline(deadline, dateStr)
                           }}
                           onClick={() => openCreateModal(dateStr)}
-                          className={`group relative min-h-[70px] md:min-h-[100px] cursor-pointer rounded-lg md:rounded-xl border border-slate-100 p-1.5 md:p-2 transition-all duration-300 hover:shadow-md ${
+                          className={`group relative min-h-[58px] md:min-h-[100px] cursor-pointer rounded-lg md:rounded-xl border border-slate-100 p-1 md:p-2 transition-all duration-300 hover:shadow-md ${
                             isToday ? 'ring-2 ring-[#5B8DEF]/40' : ''
                           } ${isWeekend ? 'bg-slate-50' : 'bg-white'} ${
                             dropTarget === dateStr ? 'border-[#5B8DEF] ring-2 ring-[#5B8DEF]/20' : ''
                           }`}
                         >
-                          <div className="absolute right-2 top-2 text-slate-300 opacity-0 transition-opacity duration-300 group-hover:opacity-100">+</div>
-                          <div className={`text-sm ${isToday ? 'font-semibold text-[#5B8DEF]' : 'text-slate-400'}`}>
+                          <div className="hidden md:block absolute right-2 top-2 text-slate-300 opacity-0 transition-opacity duration-300 group-hover:opacity-100">+</div>
+                          <div className={`text-[11px] md:text-sm ${isToday ? 'font-semibold text-[#5B8DEF]' : 'text-slate-400'}`}>
                             {day}
                           </div>
                           <div className="mt-0.5 md:mt-1 space-y-0.5 md:space-y-1">
-                            {dayDeadlines.slice(0, 3).map((deadline, idx) => {
+                            {/* Mobile badges: simple solid-color rounded pills, no icons */}
+                            {dayDeadlines.slice(0, mobileMax).map((deadline) => {
+                              const courseColor = courseColors[deadline.course_id]
+                              return (
+                                <div
+                                  key={deadline.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setSelectedDeadline(deadline)
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      setSelectedDeadline(deadline)
+                                    }
+                                  }}
+                                  className={`sm:hidden w-full cursor-pointer rounded-full px-1.5 py-0.5 text-left transition-all duration-200 ${
+                                    courseColor?.light || 'bg-slate-100'
+                                  } ${deadline.completed ? 'opacity-50' : ''}`}
+                                >
+                                  <span className={`truncate block text-[10px] font-semibold ${courseColor?.text || 'text-slate-600'} ${deadline.completed ? 'line-through' : ''}`}>
+                                    {deadline.title}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                            {/* Desktop badges: border-left style with icon + title + time + tooltip */}
+                            {dayDeadlines.slice(0, desktopMax).map((deadline) => {
                               const color = typeColors[deadline.type] || typeColors.Deadline
                               const courseColor = courseColors[deadline.course_id]
                               return (
@@ -524,9 +557,9 @@ export default function CalendarPage() {
                                     }
                                   }}
                                   title={`${deadline.title} • ${deadline.course_name}${deadline.time ? ` • ${deadline.time}` : ''}`}
-                                  className={`group/badge relative w-full cursor-pointer rounded-md md:rounded-lg border-l-2 px-1.5 md:px-2 py-0.5 md:py-1 text-left ${color.bg} ${courseColor?.border || 'border-slate-300'} shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
+                                  className={`group/badge relative hidden sm:block w-full cursor-pointer rounded-lg border-l-2 px-2 py-1 text-left ${color.bg} ${courseColor?.border || 'border-slate-300'} shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
                                     deadline.completed ? 'opacity-50' : ''
-                                  } ${draggingId === deadline.id ? 'opacity-50' : ''} ${idx === 2 ? 'hidden sm:block' : ''}`}
+                                  } ${draggingId === deadline.id ? 'opacity-50' : ''}`}
                                 >
                                   <div className="flex items-center gap-1">
                                     <span className={color.text}>{color.icon}</span>
@@ -537,8 +570,8 @@ export default function CalendarPage() {
                                   {deadline.time && (
                                     <div className="text-[9px] text-slate-400 ml-4">{deadline.time}</div>
                                   )}
-                                  {/* Hover tooltip — hidden on mobile (tap opens detail modal instead) */}
-                                  <div className="absolute left-0 top-full z-30 mt-1 hidden w-52 rounded-lg bg-slate-900 p-2.5 text-white shadow-xl md:group-hover/badge:block">
+                                  {/* Hover tooltip — desktop only */}
+                                  <div className="absolute left-0 top-full z-30 mt-1 hidden w-52 rounded-lg bg-slate-900 p-2.5 text-white shadow-xl group-hover/badge:block">
                                     <div className="flex items-center gap-1.5">
                                       <span className={`h-2.5 w-2.5 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} />
                                       <span className="text-[11px] font-semibold">{deadline.title}</span>
@@ -552,7 +585,8 @@ export default function CalendarPage() {
                                 </div>
                               )
                             })}
-                            {dayDeadlines.length > 2 && (
+                            {/* +N more — mobile threshold vs desktop threshold */}
+                            {dayDeadlines.length > mobileMax && (
                               <button
                                 type="button"
                                 onClick={(event) => {
@@ -561,8 +595,8 @@ export default function CalendarPage() {
                                 }}
                                 className="text-[10px] text-slate-400 hover:text-[#5B8DEF] transition-colors"
                               >
-                                <span className="inline sm:hidden">+{dayDeadlines.length - 2} more</span>
-                                <span className="hidden sm:inline">{dayDeadlines.length > 3 ? `+${dayDeadlines.length - 3} more` : ''}</span>
+                                <span className="inline sm:hidden">+{dayDeadlines.length - mobileMax} more</span>
+                                <span className="hidden sm:inline">{dayDeadlines.length > desktopMax ? `+${dayDeadlines.length - desktopMax} more` : ''}</span>
                               </button>
                             )}
                           </div>
@@ -573,7 +607,7 @@ export default function CalendarPage() {
                 </div>
               ) : view === 'Week' ? (
                 /* Week View */
-                <div className="mt-4 md:mt-6">
+                <div className="mt-3 md:mt-6">
                   <div className="grid grid-cols-7 gap-0.5 md:gap-2">
                     {weekDates.map((d) => {
                       const dateStr = formatFullDate(d)
@@ -581,41 +615,45 @@ export default function CalendarPage() {
                       const dayDeadlines = getDeadlinesForFullDate(dateStr)
                       const dayName = d.toLocaleDateString('default', { weekday: 'short' })
                       const dayNum = d.getDate()
+                      const weekMobileMax = 3
 
                       return (
                         <div
                           key={dateStr}
-                          className={`min-h-[140px] md:min-h-[200px] rounded-lg md:rounded-2xl border p-1.5 md:p-3 transition-all duration-300 ${
+                          className={`min-h-[120px] md:min-h-[200px] rounded-lg md:rounded-2xl border p-1 md:p-3 transition-all duration-300 ${
                             isToday ? 'border-[#5B8DEF] bg-[#F8FAFF] ring-2 ring-[#5B8DEF]/20' : 'border-slate-100 bg-white'
                           }`}
                         >
                           <div className="text-center">
-                            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">{dayName}</div>
-                            <div className={`mt-1 text-lg font-semibold ${isToday ? 'text-[#5B8DEF]' : 'text-slate-700'}`}>
+                            <div className="text-[10px] md:text-xs font-semibold uppercase tracking-wider text-slate-400">{dayName.slice(0, 2)}<span className="hidden sm:inline">{dayName.slice(2)}</span></div>
+                            <div className={`mt-0.5 md:mt-1 text-sm md:text-lg font-semibold ${isToday ? 'text-[#5B8DEF]' : 'text-slate-700'}`}>
                               {dayNum}
                             </div>
                           </div>
-                          <div className="mt-3 space-y-2">
+                          <div className="mt-1.5 md:mt-3 space-y-1 md:space-y-2">
                             {dayDeadlines.length === 0 ? (
                               <div className="text-center text-xs text-slate-300">—</div>
                             ) : (
-                              dayDeadlines.slice(0, 4).map((deadline) => (
-                                <button
-                                  key={deadline.id}
-                                  onClick={() => setSelectedDeadline(deadline)}
-                                  className={`w-full rounded-md md:rounded-xl px-1.5 md:px-2 py-1 md:py-1.5 text-left text-xs transition-all duration-200 hover:scale-[1.02] ${
-                                    courseColors[deadline.course_id]?.light || 'bg-slate-100'
-                                  } ${deadline.completed ? 'opacity-50' : ''}`}
-                                >
-                                  <div className={`font-semibold text-slate-700 truncate ${deadline.completed ? 'line-through' : ''}`}>
-                                    {deadline.title}
-                                  </div>
-                                  {deadline.time && <div className="hidden sm:block text-[10px] text-slate-500">{deadline.time}</div>}
-                                </button>
-                              ))
+                              dayDeadlines.slice(0, weekMobileMax).map((deadline) => {
+                                const courseColor = courseColors[deadline.course_id]
+                                return (
+                                  <button
+                                    key={deadline.id}
+                                    onClick={() => setSelectedDeadline(deadline)}
+                                    className={`w-full rounded-full md:rounded-xl px-1.5 md:px-2 py-0.5 md:py-1.5 text-left text-xs transition-all duration-200 hover:scale-[1.02] ${
+                                      courseColor?.light || 'bg-slate-100'
+                                    } ${deadline.completed ? 'opacity-50' : ''}`}
+                                  >
+                                    <div className={`font-semibold truncate text-[10px] md:text-xs ${courseColor?.text || 'text-slate-700'} ${deadline.completed ? 'line-through' : ''}`}>
+                                      {deadline.title}
+                                    </div>
+                                    {deadline.time && <div className="hidden sm:block text-[10px] text-slate-500">{deadline.time}</div>}
+                                  </button>
+                                )
+                              })
                             )}
-                            {dayDeadlines.length > 4 && (
-                              <div className="text-center text-[10px] text-slate-400">+{dayDeadlines.length - 4} more</div>
+                            {dayDeadlines.length > weekMobileMax && (
+                              <div className="text-center text-[10px] text-slate-400">+{dayDeadlines.length - weekMobileMax} more</div>
                             )}
                           </div>
                         </div>
@@ -696,59 +734,110 @@ export default function CalendarPage() {
               )}
             </div>
 
-            <aside className="space-y-6">
-              <div className="rounded-3xl bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-slate-900">Upcoming this week</h3>
-                <div className="mt-4 space-y-3">
-                  {upcomingWeek.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                      Nothing coming up.
-                    </div>
-                  ) : (
-                    upcomingWeek.slice(0, 6).map((deadline) => (
-                      <button
-                        key={deadline.id}
-                        onClick={() => setSelectedDeadline(deadline)}
-                        className="w-full text-left rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-                      >
-                        <div className="flex items-center justify-between text-xs text-slate-500">
-                          <span>{deadline.date}</span>
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-500'}`}>
-                            {deadline.type}
-                          </span>
-                        </div>
-                        <div className={`mt-1 text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through opacity-60' : ''}`}>
-                          {deadline.title}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {deadline.course_code ? `${deadline.course_code}` : deadline.course_name}
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Course Legend */}
-              <div className="rounded-3xl bg-white p-6 shadow-sm">
-                <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-                  Courses
-                </h4>
-                <div className="mt-4 max-h-48 space-y-2 overflow-y-auto pr-1">
-                  {courses.length === 0 ? (
-                    <div className="text-xs text-slate-400">No courses yet.</div>
-                  ) : (
-                    courses.map((course) => (
+            <aside>
+              {/* Mobile: horizontal scroll strip for upcoming + course legend pills */}
+              <div className="lg:hidden">
+                {/* Course legend — horizontal pill row */}
+                {courses.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {courses.map((course) => (
                       <Link
                         key={course.id}
                         href={`/courses/${course.id}`}
-                        className="flex items-center gap-2 text-xs text-slate-600 hover:text-slate-900 transition-colors"
+                        className="flex shrink-0 items-center gap-1.5 rounded-full bg-white border border-slate-100 px-3 py-1 shadow-sm text-xs text-slate-600 hover:text-slate-900 transition-colors"
                       >
-                        <span className={`h-3 w-3 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
-                        <span className="truncate">{course.code ? `${course.code} - ${course.name}` : course.name}</span>
+                        <span className={`h-2.5 w-2.5 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
+                        <span className="whitespace-nowrap">{course.code || course.name}</span>
                       </Link>
-                    ))
-                  )}
+                    ))}
+                  </div>
+                )}
+                {/* Upcoming this week — horizontal scroll */}
+                {upcomingWeek.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Upcoming</p>
+                    <div className="flex gap-2 overflow-x-auto pb-2">
+                      {upcomingWeek.slice(0, 6).map((deadline) => {
+                        const courseColor = courseColors[deadline.course_id]
+                        return (
+                          <button
+                            key={deadline.id}
+                            onClick={() => setSelectedDeadline(deadline)}
+                            className={`shrink-0 w-[140px] text-left rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:shadow-md`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-slate-400">{deadline.date.slice(5)}</span>
+                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${courseColor?.light || 'bg-slate-100'} ${courseColor?.text || 'text-slate-500'}`}>
+                                {deadline.type}
+                              </span>
+                            </div>
+                            <div className={`mt-1 text-xs font-semibold text-slate-900 truncate ${deadline.completed ? 'line-through opacity-60' : ''}`}>
+                              {deadline.title}
+                            </div>
+                            <div className="text-[10px] text-slate-400">{deadline.course_code || deadline.course_name}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Desktop sidebar: full cards */}
+              <div className="hidden lg:flex lg:flex-col lg:gap-6">
+                <div className="rounded-3xl bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-900">Upcoming this week</h3>
+                  <div className="mt-4 space-y-3">
+                    {upcomingWeek.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                        Nothing coming up.
+                      </div>
+                    ) : (
+                      upcomingWeek.slice(0, 6).map((deadline) => (
+                        <button
+                          key={deadline.id}
+                          onClick={() => setSelectedDeadline(deadline)}
+                          className="w-full text-left rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                        >
+                          <div className="flex items-center justify-between text-xs text-slate-500">
+                            <span>{deadline.date}</span>
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-500'}`}>
+                              {deadline.type}
+                            </span>
+                          </div>
+                          <div className={`mt-1 text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through opacity-60' : ''}`}>
+                            {deadline.title}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {deadline.course_code ? `${deadline.course_code}` : deadline.course_name}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Course Legend */}
+                <div className="rounded-3xl bg-white p-6 shadow-sm">
+                  <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Courses
+                  </h4>
+                  <div className="mt-4 max-h-48 space-y-2 overflow-y-auto pr-1">
+                    {courses.length === 0 ? (
+                      <div className="text-xs text-slate-400">No courses yet.</div>
+                    ) : (
+                      courses.map((course) => (
+                        <Link
+                          key={course.id}
+                          href={`/courses/${course.id}`}
+                          className="flex items-center gap-2 text-xs text-slate-600 hover:text-slate-900 transition-colors"
+                        >
+                          <span className={`h-3 w-3 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
+                          <span className="truncate">{course.code ? `${course.code} - ${course.name}` : course.name}</span>
+                        </Link>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
             </aside>
