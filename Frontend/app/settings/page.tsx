@@ -43,7 +43,9 @@ export default function SettingsPage() {
     setMajor((metadata.major as string) || '')
   }, [user])
 
-  // Load profile picture from backend (not JWT — avoids base64 bloat in every request)
+  // Load profile picture from backend (not JWT — avoids base64 bloat in every request).
+  // If the backend profile row doesn't exist yet, seed it from Supabase metadata so that
+  // profile-picture uploads will work immediately without a page reload.
   useEffect(() => {
     if (!user) return
     const loadPic = async () => {
@@ -51,7 +53,23 @@ export default function SettingsPage() {
         const res = await fetchWithAuth(`${API_URL}/me`)
         if (res.ok) {
           const data = await res.json()
-          setProfilePicture(data.profile?.profile_picture || null)
+          if (data.profile) {
+            setProfilePicture(data.profile.profile_picture || null)
+          } else {
+            // Backend profile row missing — create it now from Supabase metadata
+            const metadata = user.user_metadata || {}
+            await fetchWithAuth(`${API_URL}/me/profile`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                full_name: (metadata.full_name as string) || '',
+                school_name: (metadata.school_name as string) || '',
+                school_type: (metadata.school_type as string) || '',
+                academic_year: (metadata.academic_year as string) || '',
+                major: (metadata.major as string) || '',
+              }),
+            }).catch(() => {})  // best-effort; picture upload endpoint also auto-creates if needed
+          }
         }
       } catch {
         // non-fatal — avatar just stays as initials

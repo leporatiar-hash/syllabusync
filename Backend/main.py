@@ -1205,15 +1205,27 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
-            raise HTTPException(status_code=404, detail="Profile not found")
+            # Create the profile row so new users are never stuck
+            profile = UserProfile(
+                user_id=current_user.id,
+                email=current_user.email or (payload.email or ""),
+                full_name=payload.full_name,
+                school_name=payload.school_name,
+                school_type=payload.school_type,
+                academic_year=payload.academic_year,
+                major=payload.major,
+            )
+            db.add(profile)
+            db.commit()
+            db.refresh(profile)
+        else:
+            profile.full_name = payload.full_name or profile.full_name
+            profile.school_name = payload.school_name or profile.school_name
+            profile.school_type = payload.school_type or profile.school_type
+            profile.academic_year = payload.academic_year or profile.academic_year
+            profile.major = payload.major or profile.major
+            db.commit()
 
-        profile.full_name = payload.full_name or profile.full_name
-        profile.school_name = payload.school_name or profile.school_name
-        profile.school_type = payload.school_type or profile.school_type
-        profile.academic_year = payload.academic_year or profile.academic_year
-        profile.major = payload.major or profile.major
-
-        db.commit()
         return {
             "message": "Profile saved",
             "profile": {
@@ -1237,7 +1249,14 @@ def upload_profile_picture(payload: ProfilePictureRequest, current_user: User = 
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
-            raise HTTPException(status_code=404, detail="Profile not found")
+            # Auto-create a minimal profile so the picture can be saved immediately
+            profile = UserProfile(
+                user_id=current_user.id,
+                email=current_user.email or "",
+            )
+            db.add(profile)
+            db.commit()
+            db.refresh(profile)
 
         if len(payload.image_data) > 500_000:
             raise HTTPException(status_code=400, detail="Image too large (max ~375KB)")
