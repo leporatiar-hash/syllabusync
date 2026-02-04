@@ -155,6 +155,30 @@ export default function CourseDetailPage() {
     loadCourse()
   }, [user, courseId, loadCourse])
 
+  // Initialise class-schedule pickers from persisted course_info when course loads
+  useEffect(() => {
+    if (!course?.course_info?.logistics?.meeting_times) return
+    const lines = course.course_info.logistics.meeting_times
+      .split(/[,\n]/)
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+    const parsed: Array<{ day: string; start: string; end: string }> = []
+    const dayMap: Record<string, string> = {
+      mon: 'Monday', monday: 'Monday',
+      tue: 'Tuesday', tuesday: 'Tuesday',
+      wed: 'Wednesday', wednesday: 'Wednesday',
+      thu: 'Thursday', thursday: 'Thursday',
+      fri: 'Friday', friday: 'Friday',
+    }
+    for (const line of lines) {
+      const words = line.split(/\s+/)
+      const dayKey = words[0]?.toLowerCase().replace(/[^a-z]/g, '')
+      const day = dayMap[dayKey]
+      if (day) parsed.push({ day, start: '', end: '' })
+    }
+    if (parsed.length > 0) setClassSchedule(parsed)
+  }, [course])
+
   const removeFromCalendar = async (deadlineId: string) => {
     setSavingToCalendar(deadlineId)
     try {
@@ -262,7 +286,6 @@ export default function CourseDetailPage() {
         body: formData,
         cache: 'no-store',
       })
-      console.log('[Syllabus Upload]', url, res.status)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || 'Failed to parse syllabus')
@@ -309,9 +332,7 @@ export default function CourseDetailPage() {
         if (!flashcardExts.includes(ext)) {
           errors.push('Flashcards support PDF or TXT files.')
         } else {
-          const url = `${API_URL}/courses/${courseId}/flashcards`
-          console.log('[Flashcard Upload]', url)
-          actions.push(upload(url))
+          actions.push(upload(`${API_URL}/courses/${courseId}/flashcards`))
         }
       }
 
@@ -319,9 +340,7 @@ export default function CourseDetailPage() {
         if (!flashcardExts.includes(ext)) {
           errors.push('Quiz generation supports PDF or TXT files.')
         } else {
-          const url = `${API_URL}/courses/${courseId}/generate-quiz`
-          console.log('[Quiz Upload]', url)
-          actions.push(upload(url))
+          actions.push(upload(`${API_URL}/courses/${courseId}/generate-quiz`))
         }
       }
 
@@ -329,9 +348,7 @@ export default function CourseDetailPage() {
         if (!summaryExts.includes(ext)) {
           errors.push('Summaries support PDF, DOCX, TXT, or image files.')
         } else {
-          const url = `${API_URL}/courses/${courseId}/summaries`
-          console.log('[Summary Upload]', url)
-          actions.push(upload(url))
+          actions.push(upload(`${API_URL}/courses/${courseId}/summaries`))
         }
       }
 
@@ -1253,15 +1270,58 @@ export default function CourseDetailPage() {
                         </div>
                         <div className="flex gap-2">
                           <button
-                            onClick={() => {
-                              if (selectedDays.length > 0 && scheduleTime.start && scheduleTime.end) {
-                                const newEntries = selectedDays.map((day) => ({
-                                  day,
-                                  start: scheduleTime.start,
-                                  end: scheduleTime.end,
-                                }))
-                                setClassSchedule(newEntries)
-                                setEditingSchedule(false)
+                            onClick={async () => {
+                              if (selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end) return
+                              const newEntries = selectedDays.map((day) => ({
+                                day,
+                                start: scheduleTime.start,
+                                end: scheduleTime.end,
+                              }))
+                              // Format as human-readable string and persist via PATCH
+                              const formatTime = (t: string) => {
+                                const [h, m] = t.split(':')
+                                const hour = parseInt(h, 10)
+                                const ampm = hour >= 12 ? 'PM' : 'AM'
+                                const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+                                return `${h12}:${m} ${ampm}`
+                              }
+                              const meetingStr = newEntries
+                                .map((e) => `${e.day} ${formatTime(e.start)} - ${formatTime(e.end)}`)
+                                .join(', ')
+                              try {
+                                const res = await fetchWithAuth(`${API_URL}/courses/${courseId}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    course_info: {
+                                      ...course?.course_info,
+                                      logistics: {
+                                        ...(course?.course_info?.logistics || {}),
+                                        meeting_times: meetingStr,
+                                      },
+                                    },
+                                  }),
+                                  cache: 'no-store',
+                                })
+                                if (res.ok) {
+                                  setClassSchedule(newEntries)
+                                  setEditingSchedule(false)
+                                  setCourse(prev => prev ? {
+                                    ...prev,
+                                    course_info: {
+                                      ...prev.course_info,
+                                      logistics: { ...prev.course_info?.logistics, meeting_times: meetingStr },
+                                    },
+                                  } : prev)
+                                  setCalendarToast('Schedule saved!')
+                                  setTimeout(() => setCalendarToast(null), 2000)
+                                } else {
+                                  setCalendarToast('Failed to save schedule')
+                                  setTimeout(() => setCalendarToast(null), 2000)
+                                }
+                              } catch {
+                                setCalendarToast('Failed to save schedule')
+                                setTimeout(() => setCalendarToast(null), 2000)
                               }
                             }}
                             disabled={selectedDays.length === 0 || !scheduleTime.start || !scheduleTime.end}
