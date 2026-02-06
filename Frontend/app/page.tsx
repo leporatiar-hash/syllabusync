@@ -1,7 +1,7 @@
 'use client'
 
-import HomeClient from './HomeClient'
+import LandingPage from './landing/page'
 
 export default function HomePage() {
-  return <HomeClient />
+  return <LandingPage />
 }
