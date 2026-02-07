@@ -330,11 +330,12 @@ export default function LandingPage() {
         </div>
 
         <div className="max-w-4xl mx-auto space-y-6">
-          {/* Feature 1 */}
+          {/* Feature 1 - Study Smart */}
           <div
             id="feature-1"
             data-reveal
-            className={`bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-700 ${
+            onClick={() => router.push('/flashcards')}
+            className={`bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-[#5B8DEF] cursor-pointer transition-all duration-700 ${
               isVisible('feature-1') ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
             }`}
           >
@@ -353,11 +354,12 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Feature 2 */}
+          {/* Feature 2 - Parse Syllabi / Stay Organized */}
           <div
             id="feature-2"
             data-reveal
-            className={`bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-700 delay-100 ${
+            onClick={() => router.push('/calendar')}
+            className={`bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-[#5B8DEF] cursor-pointer transition-all duration-700 delay-100 ${
               isVisible('feature-2') ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
             }`}
           >
