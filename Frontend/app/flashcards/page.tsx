@@ -66,6 +66,8 @@ function FlashcardsContent() {
   const searchParams = useSearchParams()
   const setIdParam = searchParams.get('set')
 
+  // Debug: Force update - v2.0
+
   const [flashcardSets, setFlashcardSets] = useState<FlashcardSet[]>([])
   const [selectedSetId, setSelectedSetId] = useState<string | null>(setIdParam)
   const [cards, setCards] = useState<Flashcard[]>([])
@@ -356,6 +358,25 @@ function FlashcardsContent() {
     }
   }
 
+  const handleDeleteQuiz = async (quizId: string) => {
+    if (!confirm('Delete this quiz?')) return
+    try {
+      const res = await fetchWithAuth(`${API_URL}/quizzes/${quizId}`, {
+        method: 'DELETE',
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        throw new Error('Failed to delete quiz')
+      }
+      setQuizzes((prev) => prev.filter((q) => q.id !== quizId))
+      setToast('Quiz deleted.')
+      setTimeout(() => setToast(null), 3000)
+    } catch (err) {
+      console.error('Failed to delete quiz:', err)
+      setUploadError('Failed to delete quiz')
+    }
+  }
+
   return (
     <main className="min-h-screen px-4 pb-20 pt-10">
       <div className="mx-auto max-w-5xl space-y-10">
@@ -632,7 +653,6 @@ function FlashcardsContent() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                          <span>📝</span>
                           {summary.title}
                         </div>
                         <div className="text-xs text-slate-500 mt-1">
@@ -665,7 +685,6 @@ function FlashcardsContent() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                          <span>❓</span>
                           {quiz.name}
                         </div>
                         <div className="text-xs text-slate-500 mt-1">
@@ -674,6 +693,20 @@ function FlashcardsContent() {
                         <div className="mt-2 text-xs text-slate-600">
                           {quiz.question_count} questions
                         </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/quizzes/${quiz.id}`}
+                          className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition-all duration-300 hover:border-slate-300"
+                        >
+                          Start
+                        </Link>
+                        <button
+                          onClick={() => handleDeleteQuiz(quiz.id)}
+                          className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600 transition-all duration-300 hover:border-red-300"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </div>

@@ -33,6 +33,13 @@ interface Summary {
   created_at: string
 }
 
+interface Quiz {
+  id: string
+  name: string
+  question_count: number
+  created_at: string
+}
+
 interface CourseInfo {
   instructor?: {
     name?: string | null
@@ -72,6 +79,15 @@ interface CourseDetail {
   deadlines?: Deadline[]
   flashcard_sets?: FlashcardSet[]
   summaries?: Summary[]
+  quizzes?: Quiz[]
+}
+
+/** Shape passed into the confirmation modal */
+interface ConfirmTarget {
+  id: string
+  type: 'syllabus' | 'flashcard_set' | 'summary' | 'quiz'
+  label: string          // human-readable name shown in the modal
+  warning?: string       // optional extra warning line
 }
 
 const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode }> = {
@@ -122,6 +138,66 @@ export default function CourseDetailPage() {
 
   const syllabusInputRef = useRef<HTMLInputElement>(null)
   const studyInputRef = useRef<HTMLInputElement>(null)
+
+  // Drag-and-drop highlight state & enter-count refs (prevents flicker on child boundaries)
+  const [syllabusDragOver, setSyllabusDragOver] = useState(false)
+  const [studyDragOver, setStudyDragOver] = useState(false)
+  const syllabusDragCount = useRef(0)
+  const studyDragCount = useRef(0)
+
+  // Shared drag helpers ------------------------------------------------
+  const preventDefault = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation() }
+
+  const onSyllabusDragEnter = (e: React.DragEvent) => {
+    preventDefault(e)
+    syllabusDragCount.current += 1
+    setSyllabusDragOver(true)
+  }
+  const onSyllabusDragLeave = (e: React.DragEvent) => {
+    preventDefault(e)
+    syllabusDragCount.current -= 1
+    if (syllabusDragCount.current <= 0) {
+      syllabusDragCount.current = 0
+      setSyllabusDragOver(false)
+    }
+  }
+  const onStudyDragEnter = (e: React.DragEvent) => {
+    preventDefault(e)
+    studyDragCount.current += 1
+    setStudyDragOver(true)
+  }
+  const onStudyDragLeave = (e: React.DragEvent) => {
+    preventDefault(e)
+    studyDragCount.current -= 1
+    if (studyDragCount.current <= 0) {
+      studyDragCount.current = 0
+      setStudyDragOver(false)
+    }
+  }
+
+  const handleSyllabusDrop = (e: React.DragEvent) => {
+    preventDefault(e)
+    syllabusDragCount.current = 0
+    setSyllabusDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext === 'pdf' || ext === 'docx') {
+      setSyllabusFile(file)
+    }
+  }
+
+  const handleStudyDrop = (e: React.DragEvent, acceptedExts: string[]) => {
+    preventDefault(e)
+    studyDragCount.current = 0
+    setStudyDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext && acceptedExts.includes(ext)) {
+      setStudyFile(file)
+    }
+  }
 
   // Computed values
   const unsavedDeadlines = deadlines.filter(d => !d.saved_to_calendar)
@@ -419,6 +495,55 @@ export default function CourseDetailPage() {
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  }
+
+  // ── Confirmation modal ──────────────────────────────────────────
+  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null)
+  const [confirmDeleting, setConfirmDeleting] = useState(false)
+
+  const executeDelete = async () => {
+    if (!confirmTarget || !courseId) return
+    setConfirmDeleting(true)
+    try {
+      let url = ''
+      switch (confirmTarget.type) {
+        case 'syllabus':
+          url = `${API_URL}/courses/${courseId}/syllabus`
+          break
+        case 'flashcard_set':
+          url = `${API_URL}/flashcard-sets/${confirmTarget.id}`
+          break
+        case 'summary':
+          url = `${API_URL}/summaries/${confirmTarget.id}`
+          break
+        case 'quiz':
+          url = `${API_URL}/quizzes/${confirmTarget.id}`
+          break
+      }
+      const res = await fetchWithAuth(url, { method: 'DELETE', cache: 'no-store' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Delete failed')
+      }
+      // Optimistically update local state
+      if (confirmTarget.type === 'syllabus') {
+        setDeadlines([])
+        setCourse((prev) => prev ? { ...prev, course_info: null, deadlines: [] } : prev)
+      } else if (confirmTarget.type === 'flashcard_set') {
+        setCourse((prev) => prev ? { ...prev, flashcard_sets: prev.flashcard_sets?.filter(s => s.id !== confirmTarget.id) } : prev)
+      } else if (confirmTarget.type === 'summary') {
+        setCourse((prev) => prev ? { ...prev, summaries: prev.summaries?.filter(s => s.id !== confirmTarget.id) } : prev)
+      } else if (confirmTarget.type === 'quiz') {
+        setCourse((prev) => prev ? { ...prev, quizzes: prev.quizzes?.filter(q => q.id !== confirmTarget.id) } : prev)
+      }
+      setConfirmTarget(null)
+    } catch (err) {
+      setConfirmTarget(null)
+      // Show error via syllabus/flashcard error banner — reuse syllabusError for simplicity
+      setSyllabusError(err instanceof Error ? err.message : 'Delete failed. Please try again.')
+    } finally {
+      setConfirmDeleting(false)
+    }
   }
 
   const startEditingInfo = () => {
@@ -779,7 +904,11 @@ export default function CourseDetailPage() {
               {!syllabusFile ? (
                 <label
                   htmlFor="syllabus-upload"
-                  className="mt-4 flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-6 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30"
+                  className={`mt-4 flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30 ${syllabusDragOver ? 'border-[#5B8DEF] bg-[#EEF2FF]/50 scale-[1.02]' : 'border-slate-200 bg-slate-50/50'}`}
+                  onDragEnter={onSyllabusDragEnter}
+                  onDragLeave={onSyllabusDragLeave}
+                  onDragOver={preventDefault}
+                  onDrop={handleSyllabusDrop}
                 >
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm">
                     <svg viewBox="0 0 24 24" className="h-6 w-6 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -787,7 +916,9 @@ export default function CourseDetailPage() {
                       <rect x="5" y="3" width="14" height="18" rx="3" />
                     </svg>
                   </div>
-                  <p className="mt-4 text-sm font-medium text-slate-700">Click to upload syllabus</p>
+                  <p className="mt-4 text-sm font-medium text-slate-700">
+                    {syllabusDragOver ? 'Drop it here!' : 'Drop or click to upload syllabus'}
+                  </p>
                   <p className="mt-1 text-xs text-slate-400">PDF or Word doc, max 10MB</p>
                 </label>
               ) : (
@@ -845,6 +976,22 @@ export default function CourseDetailPage() {
                   <button onClick={() => setSyllabusError(null)} className="ml-2 underline">Dismiss</button>
                 </div>
               )}
+
+              {/* "Remove syllabus" — visible once deadlines have been extracted */}
+              {deadlines.length > 0 && !syllabusFile && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmTarget({
+                    id: courseId || '',
+                    type: 'syllabus',
+                    label: 'syllabus & all extracted deadlines',
+                    warning: 'This will permanently remove every deadline that was pulled from the syllabus. You can re-upload a corrected file afterwards.',
+                  })}
+                  className="mt-4 w-full rounded-full border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-500 transition-colors hover:bg-red-50"
+                >
+                  Remove syllabus & deadlines
+                </button>
+              )}
             </div>
 
             {/* Flashcard Upload */}
@@ -866,7 +1013,11 @@ export default function CourseDetailPage() {
               {!studyFile ? (
                 <label
                   htmlFor="study-upload"
-                  className="mt-4 flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-6 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30"
+                  className={`mt-4 flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30 ${studyDragOver ? 'border-[#5B8DEF] bg-[#EEF2FF]/50 scale-[1.02]' : 'border-slate-200 bg-slate-50/50'}`}
+                  onDragEnter={onStudyDragEnter}
+                  onDragLeave={onStudyDragLeave}
+                  onDragOver={preventDefault}
+                  onDrop={(e) => handleStudyDrop(e, ['pdf', 'txt'])}
                 >
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm">
                     <svg viewBox="0 0 24 24" className="h-6 w-6 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -874,7 +1025,9 @@ export default function CourseDetailPage() {
                       <rect x="4" y="4" width="16" height="16" rx="3" />
                     </svg>
                   </div>
-                  <p className="mt-4 text-sm font-medium text-slate-700">Click to upload study material</p>
+                  <p className="mt-4 text-sm font-medium text-slate-700">
+                    {studyDragOver ? 'Drop it here!' : 'Drop or click to upload study material'}
+                  </p>
                   <p className="mt-1 text-xs text-slate-400">PDF or TXT, max 10MB</p>
                 </label>
               ) : (
@@ -937,46 +1090,44 @@ export default function CourseDetailPage() {
             {/* Flashcard Decks */}
             <div className="rounded-3xl bg-white p-6 shadow-sm">
               <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Available decks</h4>
-              <div className="mt-4 grid gap-6">
+              <div className="mt-4 grid gap-3">
                 {(course?.flashcard_sets || []).length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
                     No flashcard sets yet.
                   </div>
                 ) : (
                   course?.flashcard_sets?.map((set) => (
-                    <Link
-                      key={set.id}
-                      href={`/flashcards?set=${set.id}`}
-                      className="group flex items-center justify-between rounded-2xl border border-transparent bg-white px-5 py-4 text-sm text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-[#5B8DEF]/50 hover:shadow-lg"
-                    >
-                      <div className="flex-1 pr-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#EEF2FF] text-[#5B8DEF]">
-                            <Layers size={20} />
-                          </div>
-                          <div>
-                            <div className="text-base font-semibold text-slate-900">{set.name}</div>
-                            <div className="mt-1 text-xs text-slate-500">{set.card_count} cards</div>
-                          </div>
+                    <div key={set.id} className="group relative flex items-center rounded-2xl border border-transparent bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-[#5B8DEF]/50 hover:shadow-lg">
+                      <Link
+                        href={`/flashcards?set=${set.id}`}
+                        className="flex flex-1 items-center gap-3 px-4 py-4 min-w-0"
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#EEF2FF] text-[#5B8DEF]">
+                          <Layers size={20} />
                         </div>
-                        {typeof set.progress === 'number' && (
-                          <div className="mt-3">
-                            <div className="h-px w-full bg-slate-100" />
-                            <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100">
-                              <div
-                                className="h-full rounded-full bg-[#5B8DEF]"
-                                style={{ width: `${Math.min(100, Math.max(0, set.progress))}%` }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-400 transition-all duration-300 group-hover:text-[#5B8DEF]">
-                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">{set.name}</div>
+                          <div className="text-xs text-slate-500">{set.card_count} cards</div>
+                        </div>
+                        <svg viewBox="0 0 24 24" className="ml-auto h-4 w-4 shrink-0 text-slate-300 group-hover:text-[#5B8DEF] transition-colors" fill="none" stroke="currentColor" strokeWidth="1.8">
                           <path d="M9 5l7 7-7 7" />
                         </svg>
-                      </div>
-                    </Link>
+                      </Link>
+                      {/* delete trigger — stops the Link click */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault(); e.stopPropagation()
+                          setConfirmTarget({ id: set.id, type: 'flashcard_set', label: set.name, warning: 'This removes the deck and all its cards permanently.' })
+                        }}
+                        className="mr-2 rounded-full p-1.5 text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
+                        aria-label="Delete flashcard set"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+                        </svg>
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
@@ -1011,12 +1162,18 @@ export default function CourseDetailPage() {
                 {!studyFile ? (
                   <label
                     htmlFor="study-tools-upload"
-                    className="flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-8 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30"
+                    className={`flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30 ${studyDragOver ? 'border-[#5B8DEF] bg-[#EEF2FF]/50 scale-[1.02]' : 'border-slate-200 bg-slate-50/50'}`}
+                    onDragEnter={onStudyDragEnter}
+                    onDragLeave={onStudyDragLeave}
+                    onDragOver={preventDefault}
+                    onDrop={(e) => handleStudyDrop(e, ['pdf', 'txt', 'docx', 'png', 'jpg', 'jpeg'])}
                   >
                     <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm">
-                      <Upload size={24} className="text-slate-400" />
+                      <Upload size={24} className={studyDragOver ? 'text-[#5B8DEF]' : 'text-slate-400'} />
                     </div>
-                    <p className="mt-4 text-base font-medium text-slate-700">Drop files here or click to browse</p>
+                    <p className="mt-4 text-base font-medium text-slate-700">
+                      {studyDragOver ? 'Drop it here!' : 'Drop files here or click to browse'}
+                    </p>
                     <p className="mt-2 text-sm text-slate-400">Accepts: PDF, DOCX, TXT, PNG, JPG (max 10MB)</p>
                   </label>
                 ) : (
@@ -1132,41 +1289,56 @@ export default function CourseDetailPage() {
                 </div>
               )}
 
-              {/* Generated Study Tools */}
-              {((course?.flashcard_sets?.length || 0) > 0 || (course?.summaries?.length || 0) > 0) && (
+              {/* Generated Study Tools — manage / delete */}
+              {((course?.flashcard_sets?.length || 0) > 0 || (course?.summaries?.length || 0) > 0 || (course?.quizzes?.length || 0) > 0) && (
                 <div className="mt-10">
                   <h3 className="text-lg font-semibold text-slate-900 mb-4">Your Study Tools</h3>
+
+                  {/* Flashcard sets */}
                   {(course?.flashcard_sets?.length || 0) > 0 && (
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       {course?.flashcard_sets?.map((set) => (
-                        <Link
-                          key={set.id}
-                          href={`/flashcards?set=${set.id}`}
-                          className="group flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 transition-all duration-300 hover:-translate-y-1 hover:border-[#5B8DEF]/50 hover:bg-white hover:shadow-lg"
-                        >
-                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] text-white">
-                            <Layers size={24} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-slate-900 truncate">{set.name}</div>
-                            <div className="text-xs text-slate-500">{set.card_count} flashcards</div>
-                          </div>
-                          <div className="text-slate-400 group-hover:text-[#5B8DEF] transition-colors">
-                            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <div key={set.id} className="group relative flex items-center rounded-2xl border border-slate-100 bg-slate-50 transition-all duration-300 hover:-translate-y-1 hover:border-[#5B8DEF]/50 hover:bg-white hover:shadow-lg">
+                          <Link
+                            href={`/flashcards?set=${set.id}`}
+                            className="flex flex-1 items-center gap-3 p-4 min-w-0"
+                          >
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] text-white">
+                              <Layers size={24} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 truncate">{set.name}</div>
+                              <div className="text-xs text-slate-500">{set.card_count} flashcards</div>
+                            </div>
+                            <svg viewBox="0 0 24 24" className="ml-auto h-5 w-5 shrink-0 text-slate-300 group-hover:text-[#5B8DEF] transition-colors" fill="none" stroke="currentColor" strokeWidth="1.8">
                               <path d="M9 5l7 7-7 7" />
                             </svg>
-                          </div>
-                        </Link>
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault(); e.stopPropagation()
+                              setConfirmTarget({ id: set.id, type: 'flashcard_set', label: set.name, warning: 'This removes the deck and all its cards permanently.' })
+                            }}
+                            className="mr-3 rounded-full p-1.5 text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
+                            aria-label="Delete flashcard set"
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+                            </svg>
+                          </button>
+                        </div>
                       ))}
                     </div>
                   )}
 
+                  {/* Summaries */}
                   {(course?.summaries?.length || 0) > 0 && (
                     <div className="mt-6 space-y-3">
                       {course?.summaries?.map((summary) => (
-                        <div key={summary.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                        <div key={summary.id} className="group rounded-2xl border border-slate-100 bg-slate-50 p-4">
                           <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#E0F2FE] text-[#38BDF8]">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#E0F2FE] text-[#38BDF8]">
                               <FileText size={18} />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -1175,10 +1347,53 @@ export default function CourseDetailPage() {
                                 {new Date(summary.created_at).toLocaleDateString()}
                               </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmTarget({ id: summary.id, type: 'summary', label: summary.title })}
+                              className="rounded-full p-1.5 text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
+                              aria-label="Delete summary"
+                            >
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+                              </svg>
+                            </button>
                           </div>
                           <div className="mt-3 text-xs text-slate-600 whitespace-pre-wrap line-clamp-4">
                             {summary.content}
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Quizzes */}
+                  {(course?.quizzes?.length || 0) > 0 && (
+                    <div className="mt-6 space-y-3">
+                      {course?.quizzes?.map((quiz) => (
+                        <div key={quiz.id} className="group flex items-center rounded-2xl border border-slate-100 bg-slate-50 p-4 transition-all duration-300 hover:-translate-y-1 hover:border-[#A78BFA]/50 hover:bg-white hover:shadow-lg">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#F3E8FF] text-[#A78BFA]">
+                            <HelpCircle size={18} />
+                          </div>
+                        <div className="ml-3 flex-1 min-w-0">
+                          <div className="font-semibold text-slate-900 truncate">{quiz.name}</div>
+                          <div className="text-xs text-slate-500">{quiz.question_count} questions · {new Date(quiz.created_at).toLocaleDateString()}</div>
+                        </div>
+                        <Link
+                          href={`/quizzes/${quiz.id}`}
+                          className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                        >
+                          Start Quiz
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmTarget({ id: quiz.id, type: 'quiz', label: quiz.name })}
+                          className="rounded-full p-1.5 text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
+                          aria-label="Delete quiz"
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+                            </svg>
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -1889,17 +2104,49 @@ export default function CourseDetailPage() {
         </div>
       )}
 
-      <style jsx>{`
-        @keyframes loading {
-          0% { transform: translateX(-100%); }
-          50% { transform: translateX(0%); }
-          100% { transform: translateX(100%); }
-        }
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateX(20px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
+      {/* ── Delete-confirmation modal ───────────────────────── */}
+      {confirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 backdrop-blur">
+          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Delete {confirmTarget.type === 'syllabus' ? 'syllabus' : confirmTarget.type === 'flashcard_set' ? 'flashcard deck' : confirmTarget.type === 'summary' ? 'summary' : 'quiz'}?</h2>
+              <button
+                onClick={() => setConfirmTarget(null)}
+                className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 transition-all duration-300 hover:border-slate-300"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mt-4 text-sm text-slate-600">
+              Are you sure you want to delete <span className="font-semibold text-slate-800">{confirmTarget.label}</span>? This action cannot be undone.
+            </p>
+
+            {confirmTarget.warning && (
+              <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                <p className="text-xs text-amber-700 font-semibold">Warning: {confirmTarget.warning}</p>
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setConfirmTarget(null)}
+                disabled={confirmDeleting}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition-all duration-300 hover:border-slate-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeDelete}
+                disabled={confirmDeleting}
+                className="rounded-full bg-red-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:bg-red-600 disabled:opacity-50"
+              >
+                {confirmDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
