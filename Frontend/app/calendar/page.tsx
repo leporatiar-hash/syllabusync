@@ -662,7 +662,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : view === 'Week' ? (
-                /* Week View */}
+                /* Week View */
                 <div className="mt-4 md:mt-6">
                   {/* Week grid with header */}
                   <div className="grid grid-cols-7 border-b border-slate-200">
