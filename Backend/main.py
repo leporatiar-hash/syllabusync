@@ -522,37 +522,166 @@ def generate_flashcards_fallback(text: str):
 
 
 def extract_text_from_pdf(content: bytes) -> str:
-    pdf = PyPDF2.PdfReader(io.BytesIO(content))
-    text = ""
-    for page in pdf.pages:
-        text += (page.extract_text() or "") + "\n"
-    return text
+    try:
+        pdf = PyPDF2.PdfReader(io.BytesIO(content))
+        text = ""
+        page_count = len(pdf.pages)
+        print(f"[DEBUG] PDF has {page_count} pages")
+
+        for i, page in enumerate(pdf.pages):
+            page_text = page.extract_text() or ""
+            text += page_text + "\n"
+            if i < 3:  # Log first 3 pages for debugging
+                print(f"[DEBUG] Page {i+1} extracted {len(page_text)} characters")
+
+        # Check if extraction was successful
+        if len(text.strip()) < 50:
+            print(f"[WARNING] PDF text extraction yielded only {len(text.strip())} characters from {page_count} pages")
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to extract text from PDF. The file may be scanned, image-based, or password-protected. Please try a text-based PDF or use an image format instead."
+            )
+
+        print(f"[DEBUG] Total extracted text: {len(text)} characters")
+        return text
+    except HTTPException:
+        raise  # Re-raise our custom exception
+    except Exception as e:
+        print(f"[ERROR] PDF extraction failed: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to process PDF file: {str(e)}"
+        )
 
 
 def extract_text_from_docx(content: bytes) -> str:
-    file_stream = io.BytesIO(content)
-    doc = Document(file_stream)
-    return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+    try:
+        file_stream = io.BytesIO(content)
+        doc = Document(file_stream)
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        text = "\n".join(paragraphs)
+
+        print(f"[DEBUG] DOCX has {len(doc.paragraphs)} paragraphs")
+        print(f"[DEBUG] Extracted {len(text)} characters from DOCX")
+
+        # Check if extraction was successful
+        if len(text.strip()) < 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to extract sufficient text from DOCX file. The file may be empty or corrupted."
+            )
+
+        return text
+    except HTTPException:
+        raise  # Re-raise our custom exception
+    except Exception as e:
+        print(f"[ERROR] DOCX extraction failed: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to process DOCX file: {str(e)}"
+        )
 
 
 def generate_summary_from_text(text: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
-    prompt = """You are a study assistant. Summarize the notes clearly and concisely.
+    # Handle empty or very short text
+    if not text or len(text.strip()) < 50:
+        raise HTTPException(status_code=400, detail="Document contains insufficient content to summarize")
+
+    # For short documents (under 12,000 chars), use single-pass summarization
+    if len(text) <= 12000:
+        prompt = """You are a study assistant. Summarize the notes clearly and concisely.
 Return 5-8 bullet points plus a short 1-2 sentence overview.
 Focus on key concepts, definitions, and important facts.
+"""
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.3,
+                max_tokens=900
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            _raise_if_openai_error(e)
+            raise
+
+    # For long documents, use chunked summarization with map-reduce approach
+    print(f"[DEBUG] Large document detected ({len(text)} chars). Using chunked summarization.")
+
+    # Split text into chunks of ~10,000 characters, breaking at paragraph boundaries
+    chunk_size = 10000
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+
+        # If this isn't the last chunk, try to break at a paragraph or sentence boundary
+        if end < len(text):
+            # Look for paragraph break (double newline)
+            paragraph_break = text.rfind("\n\n", start, end)
+            if paragraph_break > start + chunk_size // 2:  # Only use if it's in the latter half of the chunk
+                end = paragraph_break
+            else:
+                # Fall back to sentence break (period followed by space or newline)
+                sentence_break = text.rfind(". ", start, end)
+                if sentence_break > start + chunk_size // 2:
+                    end = sentence_break + 1
+
+        chunks.append(text[start:end])
+        start = end
+
+    print(f"[DEBUG] Split into {len(chunks)} chunks for summarization")
+
+    # Generate summaries for each chunk
+    chunk_summaries = []
+    for i, chunk in enumerate(chunks):
+        chunk_prompt = f"""You are a study assistant. This is part {i+1} of {len(chunks)} from a larger document.
+Summarize this section clearly and concisely, focusing on key concepts, definitions, and important facts.
+Return 3-5 bullet points covering the main ideas in this section.
+"""
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": chunk_prompt},
+                    {"role": "user", "content": chunk}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            chunk_summaries.append(response.choices[0].message.content.strip())
+        except Exception as e:
+            _raise_if_openai_error(e)
+            raise
+
+    # Combine chunk summaries into final comprehensive summary
+    combined_text = "\n\n".join([f"Section {i+1}:\n{summary}" for i, summary in enumerate(chunk_summaries)])
+
+    final_prompt = """You are a study assistant. Below are summaries of different sections from a larger document.
+Create a unified, comprehensive summary that:
+1. Provides a 2-3 sentence overview of the entire document
+2. Lists 6-10 bullet points covering the most important concepts across all sections
+3. Maintains logical flow and removes redundancy
+
+Focus on the key takeaways a student needs to know for studying.
 """
 
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": text[:15000]}
+                {"role": "system", "content": final_prompt},
+                {"role": "user", "content": combined_text}
             ],
             temperature=0.3,
-            max_tokens=900
+            max_tokens=1200
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -1746,6 +1875,41 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
             "deadlines": deadlines_data,
             "course_info": course.course_info
         }
+    finally:
+        db.close()
+
+
+@app.delete("/courses/{course_id}/syllabus")
+def delete_course_syllabus(course_id: str, current_user: User = Depends(get_current_user)):
+    """Remove all AI-extracted deadlines and course_info for a course so the syllabus can be re-uploaded.
+
+    Only deadlines that were created by syllabus extraction (i.e. all deadlines on the course)
+    are removed.  Flashcard sets, summaries, and quizzes are NOT touched — those come from
+    separate study-material uploads and have their own delete endpoints.
+    """
+    db = SessionLocal()
+    try:
+        user_id = current_user.id
+        course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+
+        # Remove calendar entries that reference this course's deadlines first
+        deadline_ids = [d.id for d in course.deadlines]
+        if deadline_ids:
+            db.query(CalendarEntry).filter(
+                CalendarEntry.deadline_id.in_(deadline_ids),
+                CalendarEntry.user_id == user_id
+            ).delete(synchronize_session=False)
+
+        # Delete all deadlines
+        db.query(Deadline).filter(Deadline.course_id == course_id).delete()
+
+        # Clear extracted course_info so the sidebar shows the syllabus upload zone again
+        course.course_info = None
+        db.commit()
+
+        return {"message": "Syllabus and extracted deadlines removed", "course_id": course_id}
     finally:
         db.close()
 
