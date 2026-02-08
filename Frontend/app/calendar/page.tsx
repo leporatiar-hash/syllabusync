@@ -366,11 +366,59 @@ export default function CalendarPage() {
     }
   }
 
-  if (authLoading) {
+  if (authLoading || loading) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
-        <div className="text-sm text-slate-500">Loading...</div>
-      </div>
+      <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6 bg-gradient-to-br from-white via-[#F8FAFF] to-[#EEF2FF]">
+        <div className="mx-auto w-full max-w-[1600px]">
+          {/* Skeleton header */}
+          <div className="flex items-center justify-between gap-2 md:gap-4 mb-6">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="h-9 w-48 rounded-full bg-white/60 shadow-sm animate-pulse" />
+              <div className="h-9 w-32 rounded-full bg-white/60 shadow-sm animate-pulse" />
+            </div>
+            <div className="h-10 w-40 rounded-full bg-white/60 shadow-sm animate-pulse" />
+          </div>
+
+          {/* Skeleton navigation */}
+          <div className="flex items-center justify-between mb-4 md:mb-6">
+            <div className="h-8 w-48 rounded-full bg-white/40 animate-pulse" />
+            <div className="flex gap-2">
+              <div className="h-8 w-8 rounded-full bg-white/40 animate-pulse" />
+              <div className="h-8 w-8 rounded-full bg-white/40 animate-pulse" />
+            </div>
+          </div>
+
+          {/* Skeleton calendar grid */}
+          <div className="rounded-2xl bg-white/60 shadow-lg p-4 md:p-6">
+            <div className="grid grid-cols-7 gap-0.5 md:gap-2">
+              {/* Days header */}
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+                <div key={i} className="p-2 text-center">
+                  <div className="h-4 w-8 mx-auto rounded bg-slate-100 animate-pulse" />
+                </div>
+              ))}
+              {/* Calendar cells */}
+              {[...Array(35)].map((_, i) => (
+                <div key={i} className="min-h-[80px] md:min-h-[120px] rounded-lg border border-slate-100 bg-white p-2">
+                  <div className="h-4 w-6 rounded bg-slate-50 animate-pulse mb-2" />
+                  <div className="space-y-1">
+                    <div className="h-6 rounded bg-slate-50 animate-pulse" />
+                    {i % 3 === 0 && <div className="h-6 rounded bg-slate-50 animate-pulse" />}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Loading message */}
+          <div className="mt-6 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/60 px-4 py-2 shadow-sm">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#5B8DEF] border-t-transparent" />
+              <span className="text-sm font-medium text-slate-600">Loading your schedule...</span>
+            </div>
+          </div>
+        </div>
+      </main>
     )
   }
 
@@ -450,17 +498,20 @@ export default function CalendarPage() {
               </div>
 
               {view === 'Month' ? (
-                <div className="mt-3 md:mt-6">
-                  <div className="grid grid-cols-7 gap-0.5 md:gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="mt-4 md:mt-6">
+                  {/* Weekday headers */}
+                  <div className="grid grid-cols-7 border-b border-slate-200">
                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                      <div key={day} className="text-center py-1">
-                        {day.slice(0, 1)}<span className="hidden sm:inline">{day.slice(1)}</span>
+                      <div key={day} className="text-center py-3 text-xs font-medium text-slate-600">
+                        <span className="hidden sm:inline">{day}</span>
+                        <span className="sm:hidden">{day.slice(0, 1)}</span>
                       </div>
                     ))}
                   </div>
-                  <div className="mt-1 md:mt-4 grid grid-cols-7 gap-0.5 md:gap-2">
+                  {/* Calendar grid */}
+                  <div className="grid grid-cols-7 border-l border-slate-200">
                     {Array.from({ length: startingDay }).map((_, i) => (
-                      <div key={`empty-${i}`} className="min-h-[58px] md:min-h-[100px] rounded-lg md:rounded-xl bg-slate-50" />
+                      <div key={`empty-${i}`} className="min-h-[80px] md:min-h-[120px] border-r border-b border-slate-200 bg-slate-50/30" />
                     ))}
 
                     {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -489,18 +540,18 @@ export default function CalendarPage() {
                             if (deadline) moveDeadline(deadline, dateStr)
                           }}
                           onClick={() => openCreateModal(dateStr)}
-                          className={`group relative min-h-[58px] md:min-h-[100px] cursor-pointer rounded-lg md:rounded-xl border border-slate-100 p-1 md:p-2 transition-all duration-300 hover:shadow-md ${
-                            isToday ? 'ring-2 ring-[#5B8DEF]/40' : ''
-                          } ${isWeekend ? 'bg-slate-50' : 'bg-white'} ${
-                            dropTarget === dateStr ? 'border-[#5B8DEF] ring-2 ring-[#5B8DEF]/20' : ''
+                          className={`group relative min-h-[80px] md:min-h-[120px] cursor-pointer border-r border-b border-slate-200 p-2 md:p-3 transition-colors duration-150 hover:bg-slate-50/50 ${
+                            isToday ? 'bg-blue-50/30' : isWeekend ? 'bg-slate-50/30' : 'bg-white'
+                          } ${
+                            dropTarget === dateStr ? 'bg-blue-50' : ''
                           }`}
                         >
-                          <div className="hidden md:block absolute right-2 top-2 text-slate-300 opacity-0 transition-opacity duration-300 group-hover:opacity-100">+</div>
-                          <div className={`text-[11px] md:text-sm ${isToday ? 'font-semibold text-[#5B8DEF]' : 'text-slate-400'}`}>
+                          <div className="hidden md:block absolute right-2 top-2 text-xs text-slate-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">+</div>
+                          <div className={`text-xs md:text-sm font-medium mb-1 ${isToday ? 'bg-[#5B8DEF] text-white rounded-full w-6 h-6 md:w-7 md:h-7 flex items-center justify-center' : 'text-slate-700'}`}>
                             {day}
                           </div>
-                          <div className="mt-0.5 md:mt-1 space-y-0.5 md:space-y-1">
-                            {/* Mobile badges: simple solid-color rounded pills, no icons */}
+                          <div className="mt-1 space-y-1">
+                            {/* Mobile badges: simple solid-color rounded pills */}
                             {dayDeadlines.slice(0, mobileMax).map((deadline) => {
                               const courseColor = courseColors[deadline.course_id]
                               return (
@@ -519,19 +570,18 @@ export default function CalendarPage() {
                                       setSelectedDeadline(deadline)
                                     }
                                   }}
-                                  className={`sm:hidden w-full cursor-pointer rounded-full px-1.5 py-0.5 text-left transition-all duration-200 ${
-                                    courseColor?.light || 'bg-slate-100'
-                                  } ${deadline.completed ? 'opacity-50' : ''}`}
+                                  className={`sm:hidden w-full cursor-pointer rounded px-1.5 py-0.5 text-left transition-colors duration-150 ${
+                                    courseColor?.bg || 'bg-slate-400'
+                                  } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
                                 >
-                                  <span className={`truncate block text-[10px] font-semibold ${courseColor?.text || 'text-slate-600'} ${deadline.completed ? 'line-through' : ''}`}>
+                                  <span className={`truncate block text-[9px] font-medium text-white ${deadline.completed ? 'line-through' : ''}`}>
                                     {deadline.title}
                                   </span>
                                 </div>
                               )
                             })}
-                            {/* Desktop badges: border-left style with icon + title + time + tooltip */}
+                            {/* Desktop badges: clean pill style */}
                             {dayDeadlines.slice(0, desktopMax).map((deadline) => {
-                              const color = typeColors[deadline.type] || typeColors.Deadline
                               const courseColor = courseColors[deadline.course_id]
                               return (
                                 <div
@@ -557,35 +607,41 @@ export default function CalendarPage() {
                                     }
                                   }}
                                   title={`${deadline.title} • ${deadline.course_name}${deadline.time ? ` • ${deadline.time}` : ''}`}
-                                  className={`group/badge relative hidden sm:block w-full cursor-pointer rounded-lg border-l-2 px-2 py-1 text-left ${color.bg} ${courseColor?.border || 'border-slate-300'} shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
-                                    deadline.completed ? 'opacity-50' : ''
-                                  } ${draggingId === deadline.id ? 'opacity-50' : ''}`}
+                                  className={`group/badge relative hidden sm:block w-full cursor-pointer rounded px-2 py-1 text-left transition-all duration-150 ${
+                                    courseColor?.bg || 'bg-slate-400'
+                                  } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'} ${
+                                    draggingId === deadline.id ? 'opacity-50' : ''
+                                  }`}
                                 >
-                                  <div className="flex items-center gap-1">
-                                    <span className={color.text}>{color.icon}</span>
-                                    <span className={`truncate text-[11px] font-medium ${color.text} ${deadline.completed ? 'line-through' : ''}`}>
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className={`truncate text-[11px] font-medium text-white ${deadline.completed ? 'line-through' : ''}`}>
                                       {deadline.title}
                                     </span>
+                                    {deadline.time && (
+                                      <span className="text-[9px] text-white/80 shrink-0">{deadline.time}</span>
+                                    )}
                                   </div>
-                                  {deadline.time && (
-                                    <div className="text-[9px] text-slate-400 ml-4">{deadline.time}</div>
-                                  )}
-                                  {/* Hover tooltip — desktop only */}
-                                  <div className="absolute left-0 top-full z-30 mt-1 hidden w-52 rounded-lg bg-slate-900 p-2.5 text-white shadow-xl group-hover/badge:block">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className={`h-2.5 w-2.5 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} />
-                                      <span className="text-[11px] font-semibold">{deadline.title}</span>
-                                    </div>
-                                    <div className="mt-1.5 text-[10px] text-slate-300">{deadline.course_name}</div>
-                                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
-                                      <span>{deadline.type}</span>
-                                      {deadline.time && <span>• {deadline.time}</span>}
+                                  {/* Hover tooltip — desktop only, smart positioning to avoid clipping */}
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-full z-50 mt-2 hidden min-w-[220px] max-w-xs rounded-xl bg-slate-900 px-3 py-2.5 text-white shadow-2xl group-hover/badge:block before:absolute before:-top-1 before:left-1/2 before:-translate-x-1/2 before:h-2 before:w-2 before:rotate-45 before:bg-slate-900">
+                                    <div className="flex items-start gap-2">
+                                      <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-xs font-semibold leading-tight">{deadline.title}</div>
+                                        <div className="mt-1 text-[10px] text-slate-300 leading-tight">{deadline.course_name}</div>
+                                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
+                                          <span className="inline-flex items-center gap-1">
+                                            {typeColors[deadline.type]?.icon}
+                                            {deadline.type}
+                                          </span>
+                                          {deadline.time && <span>• {deadline.time}</span>}
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               )
                             })}
-                            {/* +N more — mobile threshold vs desktop threshold */}
+                            {/* +N more indicator */}
                             {dayDeadlines.length > mobileMax && (
                               <button
                                 type="button"
@@ -593,10 +649,10 @@ export default function CalendarPage() {
                                   event.stopPropagation()
                                   setSelectedDeadline(dayDeadlines[0])
                                 }}
-                                className="text-[10px] text-slate-400 hover:text-[#5B8DEF] transition-colors"
+                                className="text-[10px] font-medium text-slate-500 hover:text-[#5B8DEF] transition-colors"
                               >
-                                <span className="inline sm:hidden">+{dayDeadlines.length - mobileMax} more</span>
-                                <span className="hidden sm:inline">{dayDeadlines.length > desktopMax ? `+${dayDeadlines.length - desktopMax} more` : ''}</span>
+                                <span className="inline sm:hidden">+{dayDeadlines.length - mobileMax}</span>
+                                <span className="hidden sm:inline">{dayDeadlines.length > desktopMax ? `+${dayDeadlines.length - desktopMax}` : ''}</span>
                               </button>
                             )}
                           </div>
@@ -606,54 +662,70 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : view === 'Week' ? (
-                /* Week View */
-                <div className="mt-3 md:mt-6">
-                  <div className="grid grid-cols-7 gap-0.5 md:gap-2">
+                /* Week View */}
+                <div className="mt-4 md:mt-6">
+                  {/* Week grid with header */}
+                  <div className="grid grid-cols-7 border-b border-slate-200">
+                    {weekDates.map((d) => {
+                      const dateStr = formatFullDate(d)
+                      const isToday = todayStr === dateStr
+                      const dayName = d.toLocaleDateString('default', { weekday: 'short' })
+                      const dayNum = d.getDate()
+
+                      return (
+                        <div key={dateStr} className="text-center py-3 border-r border-slate-200 last:border-r-0">
+                          <div className="text-xs font-medium text-slate-600">{dayName}</div>
+                          <div className={`mt-1 text-lg font-semibold ${isToday ? 'bg-[#5B8DEF] text-white rounded-full w-8 h-8 mx-auto flex items-center justify-center' : 'text-slate-900'}`}>
+                            {dayNum}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Week day columns */}
+                  <div className="grid grid-cols-7">
                     {weekDates.map((d) => {
                       const dateStr = formatFullDate(d)
                       const isToday = todayStr === dateStr
                       const dayDeadlines = getDeadlinesForFullDate(dateStr)
-                      const dayName = d.toLocaleDateString('default', { weekday: 'short' })
-                      const dayNum = d.getDate()
                       const weekMobileMax = 3
 
                       return (
                         <div
                           key={dateStr}
-                          className={`min-h-[120px] md:min-h-[200px] rounded-lg md:rounded-2xl border p-1 md:p-3 transition-all duration-300 ${
-                            isToday ? 'border-[#5B8DEF] bg-[#F8FAFF] ring-2 ring-[#5B8DEF]/20' : 'border-slate-100 bg-white'
+                          className={`min-h-[300px] md:min-h-[400px] border-r border-slate-200 last:border-r-0 p-2 md:p-3 transition-colors duration-150 ${
+                            isToday ? 'bg-blue-50/20' : 'bg-white hover:bg-slate-50/30'
                           }`}
                         >
-                          <div className="text-center">
-                            <div className="text-[10px] md:text-xs font-semibold uppercase tracking-wider text-slate-400">{dayName.slice(0, 2)}<span className="hidden sm:inline">{dayName.slice(2)}</span></div>
-                            <div className={`mt-0.5 md:mt-1 text-sm md:text-lg font-semibold ${isToday ? 'text-[#5B8DEF]' : 'text-slate-700'}`}>
-                              {dayNum}
-                            </div>
-                          </div>
-                          <div className="mt-1.5 md:mt-3 space-y-1 md:space-y-2">
+                          <div className="space-y-1.5">
                             {dayDeadlines.length === 0 ? (
-                              <div className="text-center text-xs text-slate-300">—</div>
+                              <div className="text-center text-xs text-slate-300 pt-4">—</div>
                             ) : (
-                              dayDeadlines.slice(0, weekMobileMax).map((deadline) => {
-                                const courseColor = courseColors[deadline.course_id]
-                                return (
-                                  <button
-                                    key={deadline.id}
-                                    onClick={() => setSelectedDeadline(deadline)}
-                                    className={`w-full rounded-full md:rounded-xl px-1.5 md:px-2 py-0.5 md:py-1.5 text-left text-xs transition-all duration-200 hover:scale-[1.02] ${
-                                      courseColor?.light || 'bg-slate-100'
-                                    } ${deadline.completed ? 'opacity-50' : ''}`}
-                                  >
-                                    <div className={`font-semibold truncate text-[10px] md:text-xs ${courseColor?.text || 'text-slate-700'} ${deadline.completed ? 'line-through' : ''}`}>
-                                      {deadline.title}
-                                    </div>
-                                    {deadline.time && <div className="hidden sm:block text-[10px] text-slate-500">{deadline.time}</div>}
-                                  </button>
-                                )
-                              })
-                            )}
-                            {dayDeadlines.length > weekMobileMax && (
-                              <div className="text-center text-[10px] text-slate-400">+{dayDeadlines.length - weekMobileMax} more</div>
+                              <>
+                                {dayDeadlines.slice(0, weekMobileMax).map((deadline) => {
+                                  const courseColor = courseColors[deadline.course_id]
+                                  return (
+                                    <button
+                                      key={deadline.id}
+                                      onClick={() => setSelectedDeadline(deadline)}
+                                      className={`w-full rounded px-2 py-1.5 text-left transition-all duration-150 ${
+                                        courseColor?.bg || 'bg-slate-400'
+                                      } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
+                                    >
+                                      <div className={`font-medium truncate text-[10px] md:text-xs text-white ${deadline.completed ? 'line-through' : ''}`}>
+                                        {deadline.title}
+                                      </div>
+                                      {deadline.time && (
+                                        <div className="hidden sm:block text-[10px] text-white/80 mt-0.5">{deadline.time}</div>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                                {dayDeadlines.length > weekMobileMax && (
+                                  <div className="text-center text-[10px] font-medium text-slate-500">+{dayDeadlines.length - weekMobileMax}</div>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
