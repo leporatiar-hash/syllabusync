@@ -30,41 +30,74 @@ export default function StudyStudioPage() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [coursesRes, flashcardsRes, quizzesRes] = await Promise.all([
-        fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' }),
-        fetchWithAuth(`${API_URL}/flashcard-sets`, { cache: 'no-store' }),
-        fetchWithAuth(`${API_URL}/quizzes`, { cache: 'no-store' })
-      ])
+      const coursesRes = await fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
 
-      if (coursesRes.ok) {
-        const coursesData = await coursesRes.json()
-        setCourses(coursesData)
+      if (!coursesRes.ok) {
+        console.error('Failed to load courses')
+        setLoading(false)
+        return
       }
 
+      const coursesData = await coursesRes.json()
+      setCourses(coursesData)
+
+      // Fetch each course's details to get flashcard sets, quizzes, and summaries
       const tools: any[] = []
 
-      if (flashcardsRes.ok) {
-        const flashcardsData = await flashcardsRes.json()
-        tools.push(...flashcardsData.map((set: any) => ({
-          ...set,
-          tool_type: 'flashcards',
-          type: 'flashcards',
-          name: set.name,
-          metadata: `${set.card_count || 0} cards`,
-          created_at: set.created_at
-        })))
-      }
+      for (const course of coursesData) {
+        try {
+          const courseRes = await fetchWithAuth(`${API_URL}/courses/${course.id}`, { cache: 'no-store' })
+          if (courseRes.ok) {
+            const courseData = await courseRes.json()
 
-      if (quizzesRes.ok) {
-        const quizzesData = await quizzesRes.json()
-        tools.push(...quizzesData.map((quiz: any) => ({
-          ...quiz,
-          tool_type: 'quiz',
-          type: 'quiz',
-          name: quiz.name,
-          metadata: `${quiz.question_count || 0} questions`,
-          created_at: quiz.created_at
-        })))
+            // Add flashcard sets
+            if (courseData.flashcard_sets) {
+              for (const set of courseData.flashcard_sets) {
+                tools.push({
+                  ...set,
+                  tool_type: 'flashcards',
+                  type: 'flashcards',
+                  name: set.name,
+                  metadata: `${set.card_count || 0} cards`,
+                  created_at: set.created_at,
+                  course_id: course.id
+                })
+              }
+            }
+
+            // Add quizzes
+            if (courseData.quizzes) {
+              for (const quiz of courseData.quizzes) {
+                tools.push({
+                  ...quiz,
+                  tool_type: 'quiz',
+                  type: 'quiz',
+                  name: quiz.name,
+                  metadata: `${quiz.question_count || 0} questions`,
+                  created_at: quiz.created_at,
+                  course_id: course.id
+                })
+              }
+            }
+
+            // Add summaries
+            if (courseData.summaries) {
+              for (const summary of courseData.summaries) {
+                tools.push({
+                  ...summary,
+                  tool_type: 'summary',
+                  type: 'summary',
+                  name: summary.title,
+                  metadata: 'Summary',
+                  created_at: summary.created_at,
+                  course_id: course.id
+                })
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to load course ${course.id}:`, err)
+        }
       }
 
       setStudyTools(tools)

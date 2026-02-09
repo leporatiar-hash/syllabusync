@@ -93,11 +93,13 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
 
       // Generate flashcards
       if (generateFlashcards) {
+        const flashcardsFormData = new FormData()
+        flashcardsFormData.append('file', file)
         const flashcardsRes = await fetchWithAuth(
-          `${API_URL}/courses/${selectedCourse}/generate-flashcards`,
+          `${API_URL}/courses/${selectedCourse}/flashcards`,
           {
             method: 'POST',
-            body: formData.get('file') as Blob,
+            body: flashcardsFormData,
             cache: 'no-store',
           }
         )
@@ -130,7 +132,7 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         const summaryFormData = new FormData()
         summaryFormData.append('file', file)
         const summaryRes = await fetchWithAuth(
-          `${API_URL}/courses/${selectedCourse}/generate-summary`,
+          `${API_URL}/courses/${selectedCourse}/summaries`,
           {
             method: 'POST',
             body: summaryFormData,
