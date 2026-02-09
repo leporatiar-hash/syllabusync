@@ -201,17 +201,15 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         onChange={handleFileChange}
       />
       <div
-        onClick={() => !uploading && selectedCourse && fileInputRef.current?.click()}
+        onClick={() => !uploading && fileInputRef.current?.click()}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         className={`relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition-all duration-300 ${
-          !selectedCourse
-            ? 'border-slate-200 bg-slate-50/50 opacity-60 cursor-not-allowed'
-            : dragOver
-              ? 'border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.01]'
-              : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
+          dragOver
+            ? 'border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.01]'
+            : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
         } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
       >
         <div className={`flex h-16 w-16 items-center justify-center rounded-full transition-colors ${dragOver ? 'bg-[#5B8DEF]/10' : 'bg-[#EEF2FF]'}`}>
