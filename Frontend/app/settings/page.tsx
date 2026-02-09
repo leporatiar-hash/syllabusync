@@ -119,8 +119,18 @@ export default function SettingsPage() {
     setUploadingPic(true)
     setSaveError(null)
     try {
+      // On iOS, camera photos are HEIC which canvas can't encode.
+      // Convert to a safe MIME type first if needed, then resize.
+      const safeFile = await ensureSafeImageFile(file)
       // Resize and compress image to keep it under the 375 KB backend limit
-      const dataUrl = await resizeImage(file, 200, 200)
+      const dataUrl = await resizeImage(safeFile, 200, 200)
+
+      // Guard: canvas.toDataURL() silently returns "data:," on iOS when it
+      // can't encode the image.  Catch that before we hit the network.
+      if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 30) {
+        setSaveError('Could not process this image. Please try a different photo.')
+        return
+      }
 
       const res = await fetchWithAuth(`${API_URL}/me/profile-picture`, {
         method: 'POST',
@@ -319,6 +329,47 @@ export default function SettingsPage() {
       </div>
     </main>
   )
+}
+
+/**
+ * iOS camera photos are HEIC/HEIF by default.  Canvas cannot encode HEIC,
+ * so toDataURL() silently returns an empty "data:," string.  This helper
+ * draws the original file into a canvas once (which forces the browser to
+ * decode it) and re-exports it as a plain JPEG Blob — a format every browser
+ * can handle.  For files that are already JPEG/PNG/WEBP we skip the step.
+ */
+async function ensureSafeImageFile(file: File): Promise<File> {
+  const safeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+  if (safeTypes.includes(file.type)) return file
+
+  // Read the original file into an Image via an object URL (works for HEIC on iOS)
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image()
+      i.onerror = () => reject(new Error('Could not decode this image format.'))
+      i.onload = () => resolve(i)
+      i.src = url
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = img.width
+    canvas.height = img.height
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(img, 0, 0)
+
+    // Export as JPEG Blob
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b)
+        else reject(new Error('Could not convert image to JPEG.'))
+      }, 'image/jpeg', 0.9)
+    })
+
+    return new File([blob], 'photo.jpg', { type: 'image/jpeg' })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 function resizeImage(file: File, maxW: number, maxH: number): Promise<string> {

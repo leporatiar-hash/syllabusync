@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
@@ -60,6 +60,85 @@ export default function CoursesClient() {
   const [editSemester, setEditSemester] = useState('')
   const [editError, setEditError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+
+  // Syllabus-drop upload state
+  const [uploadDragOver, setUploadDragOver] = useState(false)
+  const uploadDragCount = useRef(0)
+  const syllabusInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const preventDefault = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation() }
+
+  const onUploadDragEnter = (e: React.DragEvent) => {
+    preventDefault(e)
+    uploadDragCount.current += 1
+    setUploadDragOver(true)
+  }
+  const onUploadDragLeave = (e: React.DragEvent) => {
+    preventDefault(e)
+    uploadDragCount.current -= 1
+    if (uploadDragCount.current <= 0) {
+      uploadDragCount.current = 0
+      setUploadDragOver(false)
+    }
+  }
+
+  const submitSyllabus = async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext !== 'pdf' && ext !== 'docx') {
+      setUploadError('Only PDF or Word (.docx) files are supported.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('File is too large (max 10 MB).')
+      return
+    }
+
+    setUploading(true)
+    setUploadError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetchWithAuth(`${API_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Failed to process syllabus')
+      }
+      const data = await res.json()
+      if (data.course?.id) {
+        router.push(`/courses/${data.course.id}`)
+      } else {
+        // File parsed but no course extracted — still reload list
+        setToastMessage('Syllabus uploaded but no course could be extracted.')
+        setToastType('error')
+        setShowToast(true)
+        setTimeout(() => setShowToast(false), 3500)
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed.')
+    } finally {
+      setUploading(false)
+      if (syllabusInputRef.current) syllabusInputRef.current.value = ''
+    }
+  }
+
+  const onUploadDrop = (e: React.DragEvent) => {
+    preventDefault(e)
+    uploadDragCount.current = 0
+    setUploadDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) submitSyllabus(file)
+  }
+
+  const onUploadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) submitSyllabus(file)
+  }
 
   useEffect(() => {
     if (!user) {
@@ -345,9 +424,49 @@ export default function CoursesClient() {
             </Link>
           ))}
 
-          {courses.length === 0 && !loading && (
-            <div className="flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-6 text-center text-sm text-slate-500">
-              No courses yet. Add your first one or upload a syllabus.
+          {/* Drop-a-syllabus tile — always visible in the grid */}
+          <input
+            ref={syllabusInputRef}
+            type="file"
+            accept=".pdf,.docx"
+            className="hidden"
+            id="courses-syllabus-upload"
+            onChange={onUploadFileChange}
+          />
+          <label
+            htmlFor="courses-syllabus-upload"
+            className={`relative flex min-h-[180px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-6 text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${
+              uploadDragOver
+                ? 'border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.02] shadow-md'
+                : 'border-slate-300 bg-white/70 hover:border-slate-400'
+            }`}
+            onDragEnter={onUploadDragEnter}
+            onDragLeave={onUploadDragLeave}
+            onDragOver={preventDefault}
+            onDrop={onUploadDrop}
+          >
+            <span className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${uploadDragOver ? 'bg-[#5B8DEF]/10' : 'bg-[#EEF2FF]'}`}>
+              <svg viewBox="0 0 24 24" className={`h-6 w-6 transition-colors ${uploadDragOver ? 'text-[#5B8DEF]' : 'text-slate-400'}`} fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </span>
+            <span className="text-sm font-semibold text-slate-600">
+              {uploading ? 'Uploading…' : uploadDragOver ? 'Drop it here!' : 'Drop syllabus here'}
+            </span>
+            <span className="text-xs text-slate-400">or click · PDF / Word</span>
+            {uploading && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/80">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#5B8DEF] border-t-transparent" />
+              </div>
+            )}
+          </label>
+
+          {uploadError && (
+            <div className="col-span-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {uploadError}
+              <button onClick={() => setUploadError(null)} className="ml-2 underline">Dismiss</button>
             </div>
           )}
 

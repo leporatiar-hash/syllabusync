@@ -10,7 +10,7 @@ const navItems = [
   { href: '/', label: 'Home' },
   { href: '/courses', label: 'Courses' },
   { href: '/calendar', label: 'Calendar' },
-  { href: '/flashcards', label: 'Flashcards' },
+  { href: '/study-studio', label: 'Study Studio' },
 ]
 
 export default function Nav() {
