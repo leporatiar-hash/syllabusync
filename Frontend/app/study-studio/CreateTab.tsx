@@ -57,6 +57,9 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
   }
 
   const processFile = async (file: File) => {
+    setError(null)
+
+    // Validate file type
     const ext = file.name.split('.').pop()?.toLowerCase()
     const allowedExts = ['pdf', 'docx', 'txt', 'png', 'jpg', 'jpeg']
 
@@ -65,11 +68,13 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
       return
     }
 
+    // Validate file size
     if (file.size > 10 * 1024 * 1024) {
       setError('File is too large (max 10 MB)')
       return
     }
 
+    // Check prerequisites before uploading
     if (!selectedCourse) {
       setError('Please select a course first')
       return
@@ -81,7 +86,6 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
     }
 
     setUploading(true)
-    setError(null)
 
     try {
       const formData = new FormData()
@@ -157,6 +161,35 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Course Selector - FIRST */}
+      <div className="rounded-3xl bg-white p-6 shadow-sm">
+        <label htmlFor="course-select" className="mb-3 block text-sm font-semibold uppercase tracking-wider text-slate-500">
+          Save to course:
+        </label>
+        <select
+          id="course-select"
+          value={selectedCourse}
+          onChange={(e) => setSelectedCourse(e.target.value)}
+          className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 transition-all focus:border-[#5B8DEF] focus:outline-none focus:ring-2 focus:ring-[#5B8DEF]/20"
+        >
+          <option value="">Select a course...</option>
+          {courses.map((course) => (
+            <option key={course.id} value={course.id}>
+              {course.code ? `${course.code} - ${course.name}` : course.name}
+            </option>
+          ))}
+        </select>
+        {!selectedCourse && (
+          <p className="mt-2 text-sm text-slate-500">Select a course before uploading</p>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       {/* Upload Zone */}
       <input
         ref={fileInputRef}
@@ -166,15 +199,17 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         onChange={handleFileChange}
       />
       <div
-        onClick={() => !uploading && fileInputRef.current?.click()}
+        onClick={() => !uploading && selectedCourse && fileInputRef.current?.click()}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         className={`relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition-all duration-300 ${
-          dragOver
-            ? 'border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.01]'
-            : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
+          !selectedCourse
+            ? 'border-slate-200 bg-slate-50/50 opacity-60 cursor-not-allowed'
+            : dragOver
+              ? 'border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.01]'
+              : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
         } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
       >
         <div className={`flex h-16 w-16 items-center justify-center rounded-full transition-colors ${dragOver ? 'bg-[#5B8DEF]/10' : 'bg-[#EEF2FF]'}`}>
@@ -199,12 +234,6 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
           </div>
         )}
       </div>
-
-      {error && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
 
       {/* Generation Options */}
       <div className="rounded-3xl bg-white p-6 shadow-sm">
@@ -252,35 +281,6 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
           </label>
         </div>
       </div>
-
-      {/* Course Selector */}
-      <div className="rounded-3xl bg-white p-6 shadow-sm">
-        <label htmlFor="course-select" className="mb-3 block text-sm font-semibold uppercase tracking-wider text-slate-500">
-          Save to course:
-        </label>
-        <select
-          id="course-select"
-          value={selectedCourse}
-          onChange={(e) => setSelectedCourse(e.target.value)}
-          className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 transition-all focus:border-[#5B8DEF] focus:outline-none focus:ring-2 focus:ring-[#5B8DEF]/20"
-        >
-          <option value="">Select a course...</option>
-          {courses.map((course) => (
-            <option key={course.id} value={course.id}>
-              {course.code ? `${course.code} - ${course.name}` : course.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Generate Button */}
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        disabled={!canGenerate}
-        className="w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-4 text-base font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50 disabled:hover:translate-y-0"
-      >
-        {uploading ? 'Generating Study Tools...' : 'Generate Study Tools'}
-      </button>
     </div>
   )
 }
