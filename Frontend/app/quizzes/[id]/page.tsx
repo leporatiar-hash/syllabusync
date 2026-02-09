@@ -89,10 +89,18 @@ export default function QuizPage() {
     setSubmitting(true)
     setError(null)
     try {
+      // Extract answer letters (A, B, C, D) from full option text
+      // Options are formatted like "A) First option" or "A. First option"
+      const letterAnswers: Record<string, string> = {}
+      for (const [qid, fullAnswer] of Object.entries(answers)) {
+        const match = fullAnswer.match(/^([A-D])[).\s]/)
+        letterAnswers[qid] = match ? match[1] : fullAnswer.charAt(0).toUpperCase()
+      }
+
       const res = await fetchWithAuth(`${API_URL}/quizzes/${quizId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers }),
+        body: JSON.stringify({ answers: letterAnswers }),
       })
       if (!res.ok) throw new Error('Failed to submit quiz')
       const data = await res.json()
@@ -179,8 +187,10 @@ export default function QuizPage() {
                     <div className="mt-4 space-y-2">
                       {q.options.map((opt) => {
                         const selected = answers[q.id] === opt
-                        const isCorrect = result?.correct_answer === opt
-                        const isUser = result?.user_answer === opt
+                        // Extract letter from option (e.g., "A) Text" -> "A")
+                        const optLetter = opt.match(/^([A-D])[).\s]/)?.[1] || opt.charAt(0).toUpperCase()
+                        const isCorrect = result?.correct_answer === optLetter
+                        const isUser = result?.user_answer === optLetter
                         const showResult = Boolean(results)
                         const ring =
                           showResult && isCorrect
