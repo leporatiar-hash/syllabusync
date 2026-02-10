@@ -54,6 +54,7 @@ export default function RootLayout({
           </header>
           {children}
           <FeedbackButton />
+          {/* Deployment marker: d569228-feedback-button-v2 */}
           <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
             {process.env.NODE_ENV !== "production" && (
               <>
