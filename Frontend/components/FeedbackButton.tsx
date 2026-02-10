@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useAuth } from '../lib/useAuth'
 import dynamic from 'next/dynamic'
 
-const FeedbackModal = dynamic(() => import('./FeedbackModal'), { ssr: false })
+const FeedbackModal = dynamic(() => import('../components/FeedbackModal'), { ssr: false })
 
 export default function FeedbackButton() {
   const { user, loading } = useAuth()
