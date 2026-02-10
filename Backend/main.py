@@ -28,6 +28,7 @@ import base64
 import time
 import asyncio
 import logging
+import resend
 
 # Configure logging
 logging.basicConfig(
@@ -94,6 +95,8 @@ async def timeout_middleware(request: Request, call_next):
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
 
 
 def _raise_if_openai_error(e: Exception) -> None:
@@ -461,6 +464,16 @@ class QuizQuestion(Base):
     quiz = relationship("Quiz", back_populates="questions")
 
 
+class Feedback(Base):
+    __tablename__ = "feedback"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_email = Column(String, nullable=False)
+    feedback_type = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ProfilePictureRequest(BaseModel):
     image_data: str  # base64-encoded image
 
@@ -505,6 +518,11 @@ class CreateDeadlineRequest(BaseModel):
 
 class QuizSubmission(BaseModel):
     answers: dict[str, str]  # question_id -> selected answer (A, B, C, D)
+
+
+class FeedbackRequest(BaseModel):
+    feedback_type: str
+    message: str
 
 
 def generate_flashcards_fallback(text: str):
@@ -2553,5 +2571,50 @@ def delete_quiz(quiz_id: str, current_user: User = Depends(get_current_user)):
         db.delete(quiz)
         db.commit()
         return {"message": "Quiz deleted"}
+    finally:
+        db.close()
+
+
+@app.post("/feedback")
+@limiter.limit("5/minute")
+def submit_feedback(request: Request, payload: FeedbackRequest, current_user: User = Depends(get_current_user)):
+    """Submit user feedback. Saves to DB and sends notification email via Resend."""
+    valid_types = ("bug", "feature", "general")
+    if payload.feedback_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"feedback_type must be one of: {', '.join(valid_types)}")
+
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    db = SessionLocal()
+    try:
+        feedback = Feedback(
+            user_email=current_user.email,
+            feedback_type=payload.feedback_type,
+            message=payload.message.strip(),
+        )
+        db.add(feedback)
+        db.commit()
+
+        if RESEND_API_KEY and FEEDBACK_EMAIL:
+            try:
+                resend.api_key = RESEND_API_KEY
+                type_label = {"bug": "Bug Report", "feature": "Feature Request", "general": "General Feedback"}.get(payload.feedback_type, payload.feedback_type)
+                resend.Emails.send({
+                    "from": "onboarding@resend.dev",
+                    "to": [FEEDBACK_EMAIL],
+                    "subject": f"[ClassMate Feedback] {type_label} from {current_user.email}",
+                    "html": (
+                        f"<h2>{type_label}</h2>"
+                        f"<p><strong>From:</strong> {current_user.email}</p>"
+                        f"<p><strong>Message:</strong></p>"
+                        f"<p>{payload.message.strip()}</p>"
+                        f"<hr><p style='color:#999;font-size:12px'>Feedback ID: {feedback.id}</p>"
+                    ),
+                })
+            except Exception as e:
+                logger.warning(f"[Feedback] Failed to send email notification: {e}")
+
+        return {"message": "Feedback submitted successfully"}
     finally:
         db.close()
