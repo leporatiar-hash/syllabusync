@@ -5,9 +5,11 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '../lib/useAuth'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
+import dynamic from 'next/dynamic'
 
-const navItems = [
-  { href: '/', label: 'Home' },
+const FeedbackModal = dynamic(() => import('./FeedbackModal'), { ssr: false })
+
+const baseNavItems = [
   { href: '/courses', label: 'Courses' },
   { href: '/calendar', label: 'Calendar' },
   { href: '/study-studio', label: 'Study Studio' },
@@ -19,6 +21,9 @@ export default function Nav() {
   const { user, loading, signOut } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
   const [profilePicture, setProfilePicture] = useState<string | null>(null)
+  const [showFeedback, setShowFeedback] = useState(false)
+  const homeHref = !loading && user ? '/home' : '/'
+  const navItems = [{ href: homeHref, label: 'Home' }, ...baseNavItems]
 
   const fullName = user?.user_metadata?.full_name as string | undefined
   const initials = (fullName?.[0] || user?.email?.[0] || 'U').toUpperCase()
@@ -42,6 +47,35 @@ export default function Nav() {
     }
     loadAvatar()
   }, [user])
+
+  useEffect(() => {
+    const logoAnchor = document
+      .querySelector('header a img[alt="Classmate"]')
+      ?.closest('a') as HTMLAnchorElement | null
+    if (!logoAnchor) return
+
+    const handleLogoClick = (event: MouseEvent) => {
+      if (loading || !user) return
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        event.button !== 0
+      ) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      router.push('/home')
+    }
+
+    logoAnchor.addEventListener('click', handleLogoClick, true)
+    return () => {
+      logoAnchor.removeEventListener('click', handleLogoClick, true)
+    }
+  }, [user, loading, router])
 
   return (
     <>
@@ -75,6 +109,12 @@ export default function Nav() {
           </button>
         ) : (
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowFeedback(true)}
+              className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+            >
+              Feedback
+            </button>
             <Link
               href="/settings"
               prefetch={false}
@@ -95,6 +135,7 @@ export default function Nav() {
           </div>
         )}
       </nav>
+      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
     </>
   )
 }
