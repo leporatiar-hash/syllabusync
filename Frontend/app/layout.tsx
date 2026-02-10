@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Nav from "../components/Nav";
+import FeedbackButton from "../components/FeedbackButton";
 import AuthWrapper from "../components/AuthWrapper";
 import AuthDebug from "../components/AuthDebug";
 import BuildVerifier from "../components/BuildVerifier";
@@ -52,6 +53,7 @@ export default function RootLayout({
             </div>
           </header>
           {children}
+          <FeedbackButton />
           <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
             {process.env.NODE_ENV !== "production" && (
               <>
