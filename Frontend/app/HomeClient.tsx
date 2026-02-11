@@ -1,11 +1,15 @@
 'use client'
 
-import { useEffect, useState, ReactNode } from 'react'
+import { useCallback, useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
+
+const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
+const ICalConnectModal = dynamic(() => import('../components/ICalConnectModal'), { ssr: false })
 
 interface Deadline {
   id: string
@@ -72,6 +76,18 @@ export default function HomeClient() {
   const { fetchWithAuth } = useAuthFetch()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
+  const [lmsConnections, setLmsConnections] = useState<any[]>([])
+  const [lmsLoaded, setLmsLoaded] = useState(false)
+  const [showCanvasModal, setShowCanvasModal] = useState(false)
+  const [showICalModal, setShowICalModal] = useState(false)
+
+  const loadLmsConnections = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`${API_URL}/lms/connections`)
+      if (res.ok) setLmsConnections(await res.json())
+    } catch { /* non-fatal */ }
+    finally { setLmsLoaded(true) }
+  }, [fetchWithAuth])
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -106,6 +122,10 @@ export default function HomeClient() {
 
     loadDeadlines()
   }, [user])
+
+  useEffect(() => {
+    if (user) loadLmsConnections()
+  }, [user, loadLmsConnections])
 
   // Show loading while checking auth
   if (authLoading) {
@@ -231,6 +251,78 @@ export default function HomeClient() {
           </div>
         </div>
       </section>
+
+      {/* LMS Connect Banner — only shown when no connections yet */}
+      {lmsLoaded && lmsConnections.length === 0 && (
+        <section className="mx-auto max-w-6xl px-4">
+          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
+            <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Connect your LMS</h3>
+                  <p className="text-sm text-slate-500">Sync deadlines from Canvas or an iCal feed directly to your calendar.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCanvasModal(true)}
+                  className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                >
+                  Connect Canvas
+                </button>
+                <button
+                  onClick={() => setShowICalModal(true)}
+                  className="rounded-full border border-white/70 bg-white/70 px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  iCal Feed
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* LMS Connected Banner — shown when connections exist */}
+      {lmsLoaded && lmsConnections.length > 0 && (
+        <section className="mx-auto max-w-6xl px-4">
+          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-green-50 text-green-500">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">LMS Connected</h3>
+                  <p className="text-sm text-slate-500">
+                    {lmsConnections.map(c => c.provider === 'canvas' ? 'Canvas' : 'iCal').join(', ')} synced.{' '}
+                    <Link href="/settings" className="text-[#5B8DEF] hover:underline">Manage</Link>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {showCanvasModal && (
+        <CanvasConnectModal
+          onClose={() => setShowCanvasModal(false)}
+          onSuccess={() => { setShowCanvasModal(false); loadLmsConnections() }}
+        />
+      )}
+      {showICalModal && (
+        <ICalConnectModal
+          onClose={() => setShowICalModal(false)}
+          onSuccess={() => { setShowICalModal(false); loadLmsConnections() }}
+        />
+      )}
 
       <section className="mx-auto max-w-6xl px-4 py-16">
         <div className="grid gap-6 md:grid-cols-3">
