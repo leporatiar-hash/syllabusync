@@ -20,6 +20,8 @@ interface Deadline {
   title: string
   description?: string
   completed: boolean
+  source?: string
+  external_id?: string
 }
 
 interface Course {
@@ -776,7 +778,12 @@ export default function CalendarPage() {
                                     <span className={`rounded-full px-2 py-0.5 ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-600'}`}>
                                       {deadline.type}
                                     </span>
-                                    <span>{deadline.course_code || deadline.course_name}</span>
+                                    <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
+                                    {deadline.source && deadline.source !== 'manual' && (
+                                      <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
+                                        {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
+                                      </span>
+                                    )}
                                     {deadline.time && <span className="font-semibold">{deadline.time}</span>}
                                   </div>
                                   {deadline.description && (
@@ -847,7 +854,14 @@ export default function CalendarPage() {
                             <div className={`mt-1 text-xs font-semibold text-slate-900 truncate ${deadline.completed ? 'line-through opacity-60' : ''}`}>
                               {deadline.title}
                             </div>
-                            <div className="text-[10px] text-slate-400">{deadline.course_code || deadline.course_name}</div>
+                            <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                              <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
+                              {deadline.source && deadline.source !== 'manual' && (
+                                <span className="rounded bg-indigo-100 px-1 text-[8px] font-semibold text-indigo-600">
+                                  {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         )
                       })}
@@ -881,8 +895,13 @@ export default function CalendarPage() {
                           <div className={`mt-1 text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through opacity-60' : ''}`}>
                             {deadline.title}
                           </div>
-                          <div className="text-xs text-slate-500">
-                            {deadline.course_code ? `${deadline.course_code}` : deadline.course_name}
+                          <div className="flex items-center gap-1 text-xs text-slate-500">
+                            <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
+                            {deadline.source && deadline.source !== 'manual' && (
+                              <span className="rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-semibold text-indigo-600">
+                                {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
+                              </span>
+                            )}
                           </div>
                         </button>
                       ))
@@ -955,9 +974,18 @@ export default function CalendarPage() {
             <div className="mt-4 space-y-3">
               <div className="flex items-center gap-3 text-sm text-slate-600">
                 <span className="text-slate-400">Course:</span>
-                <Link href={`/courses/${selectedDeadline.course_id}`} className="text-[#5B8DEF] hover:underline">
-                  {selectedDeadline.course_code ? `${selectedDeadline.course_code} - ${selectedDeadline.course_name}` : selectedDeadline.course_name}
-                </Link>
+                {selectedDeadline.course_id ? (
+                  <Link href={`/courses/${selectedDeadline.course_id}`} className="text-[#5B8DEF] hover:underline">
+                    {selectedDeadline.course_code ? `${selectedDeadline.course_code} - ${selectedDeadline.course_name}` : selectedDeadline.course_name}
+                  </Link>
+                ) : (
+                  <span className="text-slate-500">No course</span>
+                )}
+                {selectedDeadline.source && selectedDeadline.source !== 'manual' && (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
+                    {selectedDeadline.source === 'canvas' ? 'Canvas' : 'iCal'}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-3 text-sm text-slate-600">
                 <span className="text-slate-400">Date:</span>

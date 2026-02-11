@@ -29,6 +29,9 @@ import time
 import asyncio
 import logging
 import resend
+import httpx
+from icalendar import Calendar as ICalCalendar
+from cryptography.fernet import Fernet
 
 # Configure logging
 logging.basicConfig(
@@ -97,6 +100,20 @@ async def timeout_middleware(request: Request, call_next):
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
+fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
+
+
+def encrypt_token(plain: str) -> str:
+    if not fernet:
+        raise HTTPException(status_code=500, detail="Encryption not configured")
+    return fernet.encrypt(plain.encode()).decode()
+
+
+def decrypt_token(encrypted: str) -> str:
+    if not fernet:
+        raise HTTPException(status_code=500, detail="Encryption not configured")
+    return fernet.decrypt(encrypted.encode()).decode()
 
 
 def _raise_if_openai_error(e: Exception) -> None:
@@ -354,7 +371,7 @@ class Deadline(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     user_id = Column(String, nullable=False)
-    course_id = Column(String, ForeignKey("courses.id"), nullable=False)
+    course_id = Column(String, ForeignKey("courses.id"), nullable=True)  # nullable for LMS-synced deadlines
     date = Column(String)  # YYYY-MM-DD
     time = Column(String)  # 11:59pm, etc.
     type = Column(String)  # exam, assignment, quiz, project, reading, deadline
@@ -364,6 +381,8 @@ class Deadline(Base):
     frequency = Column(String)  # weekly, biweekly, monthly, null
     day_of_week = Column(String)  # Monday, Tuesday, etc.
     completed = Column(Boolean, default=False)
+    source = Column(String, nullable=True, default="manual")  # "manual", "canvas", "ical"
+    external_id = Column(String, nullable=True)  # dedup key for synced items
     created_at = Column(DateTime, default=datetime.utcnow)
 
     course = relationship("Course", back_populates="deadlines")
@@ -473,6 +492,19 @@ class QuizQuestion(Base):
     quiz = relationship("Quiz", back_populates="questions")
 
 
+class LMSConnection(Base):
+    __tablename__ = "lms_connections"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False, index=True)
+    provider = Column(String, nullable=False)  # "canvas" or "ical"
+    instance_url = Column(String, nullable=True)  # Canvas base URL
+    encrypted_token = Column(Text, nullable=True)  # Fernet-encrypted Canvas PAT
+    ical_url = Column(Text, nullable=True)  # raw iCal feed URL
+    last_synced = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Feedback(Base):
     __tablename__ = "feedback"
 
@@ -532,6 +564,15 @@ class QuizSubmission(BaseModel):
 class FeedbackRequest(BaseModel):
     feedback_type: str
     message: str
+
+
+class LMSConnectCanvas(BaseModel):
+    instance_url: str
+    access_token: str
+
+
+class LMSConnectICal(BaseModel):
+    ical_url: str
 
 
 def generate_flashcards_fallback(text: str):
@@ -749,10 +790,34 @@ def generate_summary_from_image(content: bytes, filename: str) -> str:
     return response.choices[0].message.content.strip()
 
 
+def ensure_deadline_columns():
+    """Add source and external_id columns to deadlines table if missing.
+    Also make course_id nullable for LMS-synced deadlines."""
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE deadlines ADD COLUMN source VARCHAR DEFAULT 'manual'"))
+            logger.info("[Migration] Added 'source' column to deadlines")
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(text("ALTER TABLE deadlines ADD COLUMN external_id VARCHAR"))
+            logger.info("[Migration] Added 'external_id' column to deadlines")
+        except Exception:
+            pass  # Column already exists
+        # Make course_id nullable (PostgreSQL syntax)
+        if engine.dialect.name == "postgresql":
+            try:
+                conn.execute(text("ALTER TABLE deadlines ALTER COLUMN course_id DROP NOT NULL"))
+                logger.info("[Migration] Made deadlines.course_id nullable")
+            except Exception:
+                pass
+
+
 # Create tables / migrations
 # Ensure schema exists before running column updates
 Base.metadata.create_all(bind=engine)
 ensure_user_columns()
+ensure_deadline_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -768,6 +833,8 @@ def ensure_indexes():
         "CREATE INDEX IF NOT EXISTS idx_quizzes_user_id ON quizzes(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_quiz_questions_user_id ON quiz_questions(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_id ON calendar_entries(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lms_connections_user_id ON lms_connections(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_deadlines_external_id ON deadlines(external_id)",
         # user email uniqueness
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
     ]
@@ -1563,7 +1630,7 @@ def list_all_deadlines(
     try:
         user_id = current_user.id
         print(f"[DEBUG] /deadlines request from={from_date} to={to_date} course_id={course_id}")
-        query = db.query(Deadline).join(Course).filter(Deadline.user_id == user_id)
+        query = db.query(Deadline).outerjoin(Course).filter(Deadline.user_id == user_id)
         if course_id:
             query = query.filter(Deadline.course_id == course_id)
         if from_date:
@@ -1575,8 +1642,8 @@ def list_all_deadlines(
             {
                 "id": d.id,
                 "course_id": d.course_id,
-                "course_name": d.course.name,
-                "course_code": d.course.code,
+                "course_name": d.course.name if d.course else None,
+                "course_code": d.course.code if d.course else None,
                 "date": d.date,
                 "time": d.time,
                 "type": d.type,
@@ -1585,7 +1652,9 @@ def list_all_deadlines(
                 "recurring": d.recurring,
                 "frequency": d.frequency,
                 "day_of_week": d.day_of_week,
-                "completed": d.completed
+                "completed": d.completed,
+                "source": getattr(d, 'source', 'manual') or 'manual',
+                "external_id": getattr(d, 'external_id', None),
             }
             for d in sorted(deadlines, key=lambda x: x.date or "9999")
         ]
@@ -2625,5 +2694,378 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
                 logger.warning(f"[Feedback] Failed to send email notification: {e}")
 
         return {"message": "Feedback submitted successfully"}
+    finally:
+        db.close()
+
+
+# ── LMS Sync Logic ──────────────────────────────────────────────────────────
+
+def sync_canvas(connection, user_id: str, db):
+    """Sync assignments from Canvas LMS into deadlines."""
+    synced = 0
+    errors = []
+    token = decrypt_token(connection.encrypted_token)
+    base = connection.instance_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            # Fetch active courses
+            courses_resp = client.get(f"{base}/api/v1/courses", params={"enrollment_state": "active", "per_page": 100}, headers=headers)
+            if courses_resp.status_code != 200:
+                errors.append(f"Failed to fetch Canvas courses: {courses_resp.status_code}")
+                return synced, errors
+
+            canvas_courses = courses_resp.json()
+
+            for course in canvas_courses:
+                course_id = course.get("id")
+                course_name = course.get("name", "Unknown Course")
+                try:
+                    assignments_resp = client.get(
+                        f"{base}/api/v1/courses/{course_id}/assignments",
+                        params={"order_by": "due_at", "per_page": 100},
+                        headers=headers,
+                    )
+                    if assignments_resp.status_code != 200:
+                        errors.append(f"Failed to fetch assignments for course {course_name}")
+                        continue
+
+                    for assignment in assignments_resp.json():
+                        due_at = assignment.get("due_at")
+                        if not due_at:
+                            continue
+
+                        ext_id = f"canvas_{assignment['id']}"
+                        # Parse due_at (ISO 8601)
+                        try:
+                            dt = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+                            deadline_date = dt.strftime("%Y-%m-%d")
+                            deadline_time = dt.strftime("%I:%M %p").lstrip("0")
+                        except (ValueError, AttributeError):
+                            continue
+
+                        # Upsert
+                        existing = db.query(Deadline).filter(
+                            Deadline.user_id == user_id,
+                            Deadline.external_id == ext_id,
+                        ).first()
+
+                        if existing:
+                            existing.title = assignment.get("name", "Untitled")
+                            existing.date = deadline_date
+                            existing.time = deadline_time
+                            existing.description = f"[{course_name}] {assignment.get('description', '') or ''}"[:500]
+                        else:
+                            deadline = Deadline(
+                                user_id=user_id,
+                                course_id=None,
+                                date=deadline_date,
+                                time=deadline_time,
+                                type="assignment",
+                                title=assignment.get("name", "Untitled"),
+                                description=f"[{course_name}] {assignment.get('description', '') or ''}"[:500],
+                                source="canvas",
+                                external_id=ext_id,
+                            )
+                            db.add(deadline)
+                        synced += 1
+
+                except Exception as e:
+                    errors.append(f"Error syncing course {course_name}: {str(e)}")
+
+            db.commit()
+            connection.last_synced = datetime.utcnow()
+            db.commit()
+
+    except Exception as e:
+        errors.append(f"Canvas sync error: {str(e)}")
+
+    return synced, errors
+
+
+def sync_ical(connection, user_id: str, db):
+    """Sync events from an iCal feed into deadlines."""
+    synced = 0
+    errors = []
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(connection.ical_url)
+            if resp.status_code != 200:
+                errors.append(f"Failed to fetch iCal feed: {resp.status_code}")
+                return synced, errors
+
+            cal = ICalCalendar.from_ical(resp.text)
+
+            for component in cal.walk():
+                if component.name != "VEVENT":
+                    continue
+
+                uid = str(component.get("UID", ""))
+                if not uid:
+                    continue
+
+                ext_id = f"ical_{uid}"
+                summary = str(component.get("SUMMARY", "Untitled"))
+                description = str(component.get("DESCRIPTION", ""))[:500]
+
+                # Parse DTSTART
+                dtstart = component.get("DTSTART")
+                if not dtstart:
+                    continue
+
+                dt_val = dtstart.dt
+                if isinstance(dt_val, datetime):
+                    deadline_date = dt_val.strftime("%Y-%m-%d")
+                    deadline_time = dt_val.strftime("%I:%M %p").lstrip("0")
+                elif isinstance(dt_val, date):
+                    deadline_date = dt_val.strftime("%Y-%m-%d")
+                    deadline_time = None
+                else:
+                    continue
+
+                # Upsert
+                existing = db.query(Deadline).filter(
+                    Deadline.user_id == user_id,
+                    Deadline.external_id == ext_id,
+                ).first()
+
+                if existing:
+                    existing.title = summary
+                    existing.date = deadline_date
+                    existing.time = deadline_time
+                    existing.description = description
+                else:
+                    deadline = Deadline(
+                        user_id=user_id,
+                        course_id=None,
+                        date=deadline_date,
+                        time=deadline_time,
+                        type="assignment",
+                        title=summary,
+                        description=description,
+                        source="ical",
+                        external_id=ext_id,
+                    )
+                    db.add(deadline)
+                synced += 1
+
+            db.commit()
+            connection.last_synced = datetime.utcnow()
+            db.commit()
+
+    except Exception as e:
+        errors.append(f"iCal sync error: {str(e)}")
+
+    return synced, errors
+
+
+def sync_all_connections(user_id: str, db):
+    """Sync all LMS connections for a user."""
+    connections = db.query(LMSConnection).filter(LMSConnection.user_id == user_id).all()
+    total_synced = 0
+    all_errors = []
+
+    for conn_obj in connections:
+        if conn_obj.provider == "canvas":
+            count, errs = sync_canvas(conn_obj, user_id, db)
+        elif conn_obj.provider == "ical":
+            count, errs = sync_ical(conn_obj, user_id, db)
+        else:
+            errs = [f"Unknown provider: {conn_obj.provider}"]
+            count = 0
+        total_synced += count
+        all_errors.extend(errs)
+
+    return total_synced, all_errors
+
+
+# ── LMS Endpoints ───────────────────────────────────────────────────────────
+
+@app.post("/lms/connect/canvas")
+@limiter.limit("3/minute")
+def connect_canvas(
+    request: Request,
+    payload: LMSConnectCanvas,
+    current_user: User = Depends(get_current_user),
+):
+    """Connect a Canvas LMS account."""
+    if not fernet:
+        raise HTTPException(status_code=500, detail="Encryption not configured on server")
+
+    # Validate instance URL format
+    instance_url = payload.instance_url.rstrip("/")
+    if not instance_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Instance URL must start with https://")
+
+    # Test the credentials
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            test_resp = client.get(
+                f"{instance_url}/api/v1/users/self",
+                headers={"Authorization": f"Bearer {payload.access_token}"},
+            )
+        if test_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Invalid Canvas credentials. Check your instance URL and access token.")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=400, detail=f"Could not reach Canvas instance: {str(e)}")
+
+    db = SessionLocal()
+    try:
+        user_id = current_user.id
+
+        # Check if already connected to this instance
+        existing = db.query(LMSConnection).filter(
+            LMSConnection.user_id == user_id,
+            LMSConnection.provider == "canvas",
+            LMSConnection.instance_url == instance_url,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Already connected to this Canvas instance")
+
+        connection = LMSConnection(
+            user_id=user_id,
+            provider="canvas",
+            instance_url=instance_url,
+            encrypted_token=encrypt_token(payload.access_token),
+        )
+        db.add(connection)
+        db.commit()
+        db.refresh(connection)
+
+        # Run initial sync
+        synced, errors = sync_canvas(connection, user_id, db)
+        logger.info(f"[LMS] Canvas initial sync for user {user_id}: {synced} items, {len(errors)} errors")
+
+        return {
+            "id": connection.id,
+            "provider": connection.provider,
+            "instance_url": connection.instance_url,
+            "last_synced": connection.last_synced.isoformat() if connection.last_synced else None,
+            "created_at": connection.created_at.isoformat(),
+            "initial_sync": {"synced_count": synced, "errors": errors},
+        }
+    finally:
+        db.close()
+
+
+@app.post("/lms/connect/ical")
+@limiter.limit("3/minute")
+def connect_ical(
+    request: Request,
+    payload: LMSConnectICal,
+    current_user: User = Depends(get_current_user),
+):
+    """Connect an iCal feed."""
+    ical_url = payload.ical_url.strip()
+    if not ical_url.startswith("http://") and not ical_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="iCal URL must start with http:// or https://")
+
+    # Validate by fetching and parsing
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(ical_url)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Could not fetch iCal feed (HTTP {resp.status_code})")
+        ICalCalendar.from_ical(resp.text)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid iCal feed: {str(e)}")
+
+    db = SessionLocal()
+    try:
+        user_id = current_user.id
+
+        # Check for duplicate
+        existing = db.query(LMSConnection).filter(
+            LMSConnection.user_id == user_id,
+            LMSConnection.provider == "ical",
+            LMSConnection.ical_url == ical_url,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="This iCal feed is already connected")
+
+        connection = LMSConnection(
+            user_id=user_id,
+            provider="ical",
+            ical_url=ical_url,
+        )
+        db.add(connection)
+        db.commit()
+        db.refresh(connection)
+
+        # Run initial sync
+        synced, errors = sync_ical(connection, user_id, db)
+        logger.info(f"[LMS] iCal initial sync for user {user_id}: {synced} items, {len(errors)} errors")
+
+        return {
+            "id": connection.id,
+            "provider": connection.provider,
+            "instance_url": None,
+            "last_synced": connection.last_synced.isoformat() if connection.last_synced else None,
+            "created_at": connection.created_at.isoformat(),
+            "initial_sync": {"synced_count": synced, "errors": errors},
+        }
+    finally:
+        db.close()
+
+
+@app.get("/lms/connections")
+def list_lms_connections(current_user: User = Depends(get_current_user)):
+    """List all LMS connections for the current user."""
+    db = SessionLocal()
+    try:
+        connections = db.query(LMSConnection).filter(
+            LMSConnection.user_id == current_user.id
+        ).all()
+        return [
+            {
+                "id": c.id,
+                "provider": c.provider,
+                "instance_url": c.instance_url,
+                "last_synced": c.last_synced.isoformat() if c.last_synced else None,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in connections
+        ]
+    finally:
+        db.close()
+
+
+@app.delete("/lms/connections/{connection_id}")
+def delete_lms_connection(
+    connection_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Remove an LMS connection."""
+    db = SessionLocal()
+    try:
+        connection = db.query(LMSConnection).filter(
+            LMSConnection.id == connection_id,
+            LMSConnection.user_id == current_user.id,
+        ).first()
+        if not connection:
+            raise HTTPException(status_code=404, detail="Connection not found")
+
+        db.delete(connection)
+        db.commit()
+        return {"message": "Connection removed"}
+    finally:
+        db.close()
+
+
+@app.post("/lms/sync")
+@limiter.limit("2/minute")
+def manual_lms_sync(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Manually trigger a sync of all LMS connections."""
+    db = SessionLocal()
+    try:
+        synced, errors = sync_all_connections(current_user.id, db)
+        return {"synced_count": synced, "errors": errors}
     finally:
         db.close()

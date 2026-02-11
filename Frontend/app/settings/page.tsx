@@ -1,10 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
+
+const CanvasConnectModal = dynamic(() => import('../../components/CanvasConnectModal'), { ssr: false })
+const ICalConnectModal = dynamic(() => import('../../components/ICalConnectModal'), { ssr: false })
 
 const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
 const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
@@ -26,6 +30,28 @@ export default function SettingsPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [uploadingPic, setUploadingPic] = useState(false)
 
+  // LMS state
+  const [lmsConnections, setLmsConnections] = useState<any[]>([])
+  const [lmsLoading, setLmsLoading] = useState(false)
+  const [lmsSyncing, setLmsSyncing] = useState(false)
+  const [lmsError, setLmsError] = useState<string | null>(null)
+  const [showCanvasModal, setShowCanvasModal] = useState(false)
+  const [showICalModal, setShowICalModal] = useState(false)
+
+  const loadLmsConnections = useCallback(async () => {
+    setLmsLoading(true)
+    try {
+      const res = await fetchWithAuth(`${API_URL}/lms/connections`)
+      if (res.ok) {
+        setLmsConnections(await res.json())
+      }
+    } catch {
+      // non-fatal
+    } finally {
+      setLmsLoading(false)
+    }
+  }, [fetchWithAuth])
+
   useEffect(() => {
     if (!authLoading && !user) {
       router.replace('/login')
@@ -42,6 +68,11 @@ export default function SettingsPage() {
     setAcademicYear((metadata.academic_year as string) || '')
     setMajor((metadata.major as string) || '')
   }, [user])
+
+  // Load LMS connections
+  useEffect(() => {
+    if (user) loadLmsConnections()
+  }, [user, loadLmsConnections])
 
   // Load profile picture from backend (not JWT — avoids base64 bloat in every request).
   // If the backend profile row doesn't exist yet, seed it from Supabase metadata so that
@@ -149,6 +180,35 @@ export default function SettingsPage() {
     } finally {
       setUploadingPic(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleDisconnectLms = async (connectionId: string) => {
+    try {
+      const res = await fetchWithAuth(`${API_URL}/lms/connections/${connectionId}`, { method: 'DELETE' })
+      if (res.ok) {
+        setLmsConnections((prev) => prev.filter((c) => c.id !== connectionId))
+      }
+    } catch {
+      setLmsError('Failed to disconnect')
+    }
+  }
+
+  const handleSyncAll = async () => {
+    setLmsSyncing(true)
+    setLmsError(null)
+    try {
+      const res = await fetchWithAuth(`${API_URL}/lms/sync`, { method: 'POST' })
+      if (res.ok) {
+        await loadLmsConnections()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setLmsError(data.detail || 'Sync failed')
+      }
+    } catch {
+      setLmsError('Sync failed')
+    } finally {
+      setLmsSyncing(false)
     }
   }
 
@@ -314,6 +374,105 @@ export default function SettingsPage() {
           )}
         </div>
       </form>
+
+      {/* LMS Connections */}
+      <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">LMS Connections</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Connect your Canvas LMS or iCal feed to automatically sync deadlines.
+            </p>
+          </div>
+          {lmsConnections.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSyncAll}
+              disabled={lmsSyncing}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {lmsSyncing ? 'Syncing...' : 'Sync Now'}
+            </button>
+          )}
+        </div>
+
+        {lmsError && (
+          <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{lmsError}</div>
+        )}
+
+        {lmsLoading ? (
+          <div className="py-4 text-center text-sm text-slate-400">Loading connections...</div>
+        ) : lmsConnections.length > 0 ? (
+          <div className="mb-4 space-y-3">
+            {lmsConnections.map((conn) => (
+              <div
+                key={conn.id}
+                className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-white ${conn.provider === 'canvas' ? 'bg-red-500' : 'bg-orange-500'}`}>
+                    {conn.provider === 'canvas' ? (
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">
+                      {conn.provider === 'canvas' ? 'Canvas LMS' : 'iCal Feed'}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {conn.instance_url || 'Feed connected'}
+                      {conn.last_synced && (
+                        <span> &middot; Last synced {new Date(conn.last_synced).toLocaleDateString()}</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDisconnectLms(conn.id)}
+                  className="text-xs font-medium text-slate-400 transition-colors hover:text-red-500"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mb-4 text-sm text-slate-400">No LMS connections yet.</p>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => setShowCanvasModal(true)}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Connect Canvas
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowICalModal(true)}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Connect iCal Feed
+          </button>
+        </div>
+      </div>
+
+      {showCanvasModal && (
+        <CanvasConnectModal
+          onClose={() => setShowCanvasModal(false)}
+          onSuccess={() => { setShowCanvasModal(false); loadLmsConnections() }}
+        />
+      )}
+      {showICalModal && (
+        <ICalConnectModal
+          onClose={() => setShowICalModal(false)}
+          onSuccess={() => { setShowICalModal(false); loadLmsConnections() }}
+        />
+      )}
 
       {/* Logout */}
       <div className="mt-8 rounded-2xl border border-red-100 bg-white p-6">

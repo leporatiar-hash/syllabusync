@@ -10,3 +10,6 @@ psycopg2-binary
 python-jose[cryptography]
 slowapi
 resend
+httpx
+icalendar
+cryptography
