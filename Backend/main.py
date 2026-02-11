@@ -242,7 +242,16 @@ def _safe_db_url(url: str) -> str:
 
 print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+# Create engine with connection pooling to prevent connection exhaustion
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    pool_size=5,              # Max 5 persistent connections
+    max_overflow=10,          # Max 10 additional connections when needed
+    pool_pre_ping=True,       # Check connections before using (prevents stale connections)
+    pool_recycle=3600,        # Recycle connections after 1 hour
+    echo=False                # Set to True for SQL query logging (debug only)
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
