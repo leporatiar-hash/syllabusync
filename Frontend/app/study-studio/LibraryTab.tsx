@@ -85,9 +85,9 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
   }
 
   const getToolColor = (type: string) => {
-    if (type === 'flashcards') return 'bg-purple-500'
-    if (type === 'quiz') return 'bg-pink-500'
-    return 'bg-blue-500'
+    if (type === 'flashcards') return 'bg-[#8B5CF6]'
+    if (type === 'quiz') return 'bg-[#F59E0B]'
+    return 'bg-[#5B8DEF]'
   }
 
   const getActionLabel = (type: string) => {
@@ -129,7 +129,7 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
           <p className="text-slate-500">No study tools yet. Upload a file in the Create tab to get started!</p>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {Object.entries(toolsByCourse).map(([courseId, tools]) => {
             const course = courses.find((c) => c.id === courseId)
             if (!course) return null
@@ -137,15 +137,17 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
             return (
               <div key={courseId}>
                 {/* Course Header */}
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="flex items-center gap-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 px-4 py-1.5 text-sm font-bold text-white shadow-sm">
+                <div className="mb-6 flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-xs font-bold text-white">
                     {tools.length}
                   </div>
-                  <h3 className="text-lg font-semibold text-slate-900">
-                    {course.code || course.name}
-                  </h3>
-                  <div className="text-sm text-slate-500">
-                    {tools.length} study {tools.length === 1 ? 'tool' : 'tools'}
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">
+                      {course.code ? `${course.code} — ${course.name}` : course.name}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      {tools.length} study {tools.length === 1 ? 'tool' : 'tools'}
+                    </p>
                   </div>
                 </div>
 
@@ -160,7 +162,7 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
                     return (
                       <div
                         key={tool.id}
-                        className="group relative rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
+                        className="group relative rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-slate-200"
                       >
                         {/* Icon */}
                         <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-xl ${getToolColor(tool.type)} text-white shadow-sm`}>
@@ -187,7 +189,7 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
                           <button
                             onClick={() => handleDelete(tool)}
                             disabled={isDeleting}
-                            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-all hover:bg-red-50 disabled:opacity-50"
+                            className="px-3 py-2 text-xs text-slate-400 transition-colors hover:text-red-500 disabled:opacity-50"
                           >
                             {isDeleting ? '...' : 'Delete'}
                           </button>

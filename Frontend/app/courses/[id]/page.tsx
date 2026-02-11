@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../../hooks/useAuthFetch'
 import { useAuth } from '../../../lib/useAuth'
+import posthog from 'posthog-js'
 
 interface Deadline {
   id: string
@@ -401,6 +402,7 @@ export default function CourseDetailPage() {
         throw new Error(data.detail || 'Failed to parse syllabus')
       }
       setSyllabusSuccess(true)
+      posthog.capture('syllabus_uploaded')
       setSyllabusFile(null)
       setDeadlineTabTouched(false)
       await loadCourse()
@@ -475,6 +477,9 @@ export default function CourseDetailPage() {
       }
 
       setFlashcardSuccess(true)
+      if (generateFlashcards) posthog.capture('flashcard_set_created')
+      if (generateQuiz) posthog.capture('quiz_generated')
+      if (generateSummary) posthog.capture('summary_generated')
       setStudyFile(null)
       const refreshed = await fetchWithAuth(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
       if (refreshed.ok) {

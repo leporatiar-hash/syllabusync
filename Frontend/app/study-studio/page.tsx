@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
+import posthog from 'posthog-js'
 import CreateTab from './CreateTab'
 import LibraryTab from './LibraryTab'
 
@@ -24,6 +25,7 @@ export default function StudyStudioPage() {
 
   useEffect(() => {
     if (!user) return
+    posthog.capture('study_studio_opened')
     loadData()
   }, [user])
 

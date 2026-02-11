@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
+import posthog from 'posthog-js'
 
 interface Deadline {
   id: string
@@ -99,6 +100,7 @@ export default function CalendarPage() {
       setLoading(false)
       return
     }
+    posthog.capture('deadline_viewed')
     const loadData = async () => {
       setLoading(true)
       try {
