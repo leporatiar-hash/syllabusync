@@ -7,6 +7,7 @@ import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck,
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import posthog from 'posthog-js'
+import { buildCourseColorMap } from '../../lib/courseColors'
 
 interface Deadline {
   id: string
@@ -45,15 +46,7 @@ const typeColors: Record<string, { bg: string; text: string; icon: ReactNode }> 
   Class: { bg: 'bg-teal-50', text: 'text-teal-600', icon: <Clock size={12} /> },
 }
 
-// Course colors - auto-assigned based on index
-const courseColorPalette = [
-  { bg: 'bg-[#5B8DEF]', text: 'text-[#5B8DEF]', light: 'bg-[#E0EAFF]', border: 'border-[#5B8DEF]' },
-  { bg: 'bg-[#A78BFA]', text: 'text-[#A78BFA]', light: 'bg-[#F3E8FF]', border: 'border-[#A78BFA]' },
-  { bg: 'bg-[#FB7185]', text: 'text-[#FB7185]', light: 'bg-[#FEE2E2]', border: 'border-[#FB7185]' },
-  { bg: 'bg-[#4ADE80]', text: 'text-[#4ADE80]', light: 'bg-[#DCFCE7]', border: 'border-[#4ADE80]' },
-  { bg: 'bg-[#FB923C]', text: 'text-[#FB923C]', light: 'bg-[#FFEDD5]', border: 'border-[#FB923C]' },
-  { bg: 'bg-[#38BDF8]', text: 'text-[#38BDF8]', light: 'bg-[#E0F2FE]', border: 'border-[#38BDF8]' },
-]
+// Course colors — shared palette, deterministic by course ID (see lib/courseColors.ts)
 
 const viewOptions = ['Month', 'Week', 'Day'] as const
 type ViewOption = (typeof viewOptions)[number]
@@ -129,14 +122,8 @@ export default function CalendarPage() {
     loadData()
   }, [user])
 
-  // Map course IDs to colors
-  const courseColors = useMemo(() => {
-    const map: Record<string, typeof courseColorPalette[0]> = {}
-    courses.forEach((course, i) => {
-      map[course.id] = courseColorPalette[i % courseColorPalette.length]
-    })
-    return map
-  }, [courses])
+  // Map course IDs to colors (deterministic by ID, shared with Courses page)
+  const courseColors = useMemo(() => buildCourseColorMap(courses), [courses])
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear()

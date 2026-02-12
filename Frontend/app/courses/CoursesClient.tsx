@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
+import { getCourseColor } from '../../lib/courseColors'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -20,14 +21,7 @@ interface Course {
   course_info?: CourseInfo | null
 }
 
-const gradients = [
-  'from-[#E0EAFF] to-[#F5F7FF]',
-  'from-[#E6FFFB] to-[#ECFEFF]',
-  'from-[#F5E9FF] to-[#FDF2F8]',
-  'from-[#FFF7ED] to-[#FEF3C7]',
-  'from-[#ECFDF5] to-[#E0F2FE]',
-  'from-[#F1F5F9] to-[#E2E8F0]',
-]
+// Course card gradients — shared palette, deterministic by course ID (see lib/courseColors.ts)
 
 export default function CoursesClient() {
   const router = useRouter()
@@ -353,11 +347,11 @@ export default function CoursesClient() {
         </div>
 
         <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {courses.map((course, index) => (
+          {courses.map((course) => (
             <Link
               key={course.id}
               href={`/courses/${course.id}`}
-              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg`}
+              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl bg-gradient-to-br ${getCourseColor(course.id).gradient} p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg`}
             >
               <div className="flex items-start justify-between">
                 <div>
