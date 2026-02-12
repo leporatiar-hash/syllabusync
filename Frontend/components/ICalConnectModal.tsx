@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 
 interface Props {
@@ -13,6 +13,8 @@ export default function ICalConnectModal({ onClose, onSuccess }: Props) {
   const [icalUrl, setIcalUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showGuide, setShowGuide] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -48,7 +50,7 @@ export default function ICalConnectModal({ onClose, onSuccess }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+        className={`mx-4 w-full rounded-2xl bg-white p-6 shadow-xl transition-all duration-300 ${showGuide ? 'max-w-lg' : 'max-w-md'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-1 text-lg font-semibold text-slate-900">Connect iCal Feed</h2>
@@ -74,9 +76,35 @@ export default function ICalConnectModal({ onClose, onSuccess }: Props) {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
               required
             />
-            <p className="mt-1.5 text-xs text-slate-400">
-              In Canvas: Calendar &rarr; Calendar Feed &rarr; Copy the URL
-            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowGuide(!showGuide)
+                if (!showGuide && videoRef.current) {
+                  videoRef.current.pause()
+                }
+              }}
+              className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[#5B8DEF] transition-colors hover:text-[#4C7FE6]"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              {showGuide ? 'Hide guide' : 'Need help finding your URL?'}
+            </button>
+            {showGuide && (
+              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                <video
+                  ref={videoRef}
+                  src="/ical-guide.mp4"
+                  controls
+                  playsInline
+                  className="w-full"
+                />
+                <p className="px-3 py-2 text-[11px] text-slate-500">
+                  How to find your iCal feed URL in OAKS / Canvas
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-2">
