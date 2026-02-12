@@ -25,6 +25,8 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
     try {
       const endpoint = tool.type === 'flashcards'
         ? `${API_URL}/flashcard-sets/${tool.id}`
+        : tool.type === 'summary'
+        ? `${API_URL}/summaries/${tool.id}`
         : `${API_URL}/quizzes/${tool.id}`
 
       const res = await fetchWithAuth(endpoint, { method: 'DELETE' })
@@ -43,6 +45,8 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
       router.push(`/flashcards?set=${tool.id}`)
     } else if (tool.type === 'quiz') {
       router.push(`/quizzes/${tool.id}`)
+    } else if (tool.type === 'summary') {
+      router.push(`/summaries/${tool.id}`)
     }
   }
 

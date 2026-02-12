@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2 } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import posthog from 'posthog-js'
@@ -42,7 +42,7 @@ const typeColors: Record<string, { bg: string; text: string; icon: ReactNode }> 
   Reading: { bg: 'bg-green-100', text: 'text-green-700', icon: <BookOpenCheck size={12} /> },
   Admin: { bg: 'bg-slate-100', text: 'text-slate-700', icon: <ClipboardList size={12} /> },
   Deadline: { bg: 'bg-slate-100', text: 'text-slate-700', icon: <Clock size={12} /> },
-  Class: { bg: 'bg-[#E0EAFF]', text: 'text-[#5B8DEF]', icon: <Clock size={12} /> },
+  Class: { bg: 'bg-teal-50', text: 'text-teal-600', icon: <Clock size={12} /> },
 }
 
 // Course colors - auto-assigned based on index
@@ -268,6 +268,58 @@ export default function CalendarPage() {
       }
     } catch (err) {
       console.error('Failed to toggle deadline:', err)
+    }
+  }
+
+  const deleteDeadline = async (deadlineId: string) => {
+    try {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}`, {
+        method: 'DELETE',
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        setDeadlines(deadlines.filter((d) => d.id !== deadlineId))
+        setSelectedDeadline(null)
+        setToast('Deadline deleted')
+        setTimeout(() => setToast(null), 2500)
+      }
+    } catch (err) {
+      console.error('Failed to delete deadline:', err)
+      setToast('Failed to delete deadline')
+      setTimeout(() => setToast(null), 2500)
+    }
+  }
+
+  const reassignCourse = async (deadlineId: string, newCourseId: string) => {
+    try {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ course_id: newCourseId }),
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setDeadlines(deadlines.map((d) =>
+          d.id === deadlineId
+            ? { ...d, course_id: updated.course_id, course_name: updated.course_name, course_code: updated.course_code }
+            : d
+        ))
+        if (selectedDeadline?.id === deadlineId) {
+          setSelectedDeadline({
+            ...selectedDeadline,
+            course_id: updated.course_id,
+            course_name: updated.course_name,
+            course_code: updated.course_code,
+          })
+        }
+        setToast('Course updated')
+        setTimeout(() => setToast(null), 2500)
+      }
+    } catch (err) {
+      console.error('Failed to reassign course:', err)
+      setToast('Failed to update course')
+      setTimeout(() => setToast(null), 2500)
     }
   }
 
@@ -575,10 +627,12 @@ export default function CalendarPage() {
                                     }
                                   }}
                                   className={`sm:hidden w-full cursor-pointer rounded px-1.5 py-0.5 text-left transition-colors duration-150 ${
-                                    courseColor?.bg || 'bg-slate-400'
+                                    deadline.type === 'Class'
+                                      ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
+                                      : (courseColor?.bg || 'bg-slate-400')
                                   } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
                                 >
-                                  <span className={`truncate block text-[9px] font-medium text-white ${deadline.completed ? 'line-through' : ''}`}>
+                                  <span className={`truncate block text-[9px] font-medium ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
                                     {deadline.title}
                                   </span>
                                 </div>
@@ -612,17 +666,19 @@ export default function CalendarPage() {
                                   }}
                                   title={`${deadline.title} • ${deadline.course_name}${deadline.time ? ` • ${deadline.time}` : ''}`}
                                   className={`group/badge relative hidden sm:block w-full cursor-pointer rounded px-2 py-1 text-left transition-all duration-150 ${
-                                    courseColor?.bg || 'bg-slate-400'
+                                    deadline.type === 'Class'
+                                      ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
+                                      : (courseColor?.bg || 'bg-slate-400')
                                   } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'} ${
                                     draggingId === deadline.id ? 'opacity-50' : ''
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-1">
-                                    <span className={`truncate text-[11px] font-medium text-white ${deadline.completed ? 'line-through' : ''}`}>
+                                    <span className={`truncate text-[11px] font-medium ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
                                       {deadline.title}
                                     </span>
                                     {deadline.time && (
-                                      <span className="text-[9px] text-white/80 shrink-0">{deadline.time}</span>
+                                      <span className={`text-[9px] shrink-0 ${deadline.type === 'Class' ? 'text-slate-400' : 'text-white/80'}`}>{deadline.time}</span>
                                     )}
                                   </div>
                                   {/* Hover tooltip — desktop only, smart positioning to avoid clipping */}
@@ -713,14 +769,16 @@ export default function CalendarPage() {
                                       key={deadline.id}
                                       onClick={() => setSelectedDeadline(deadline)}
                                       className={`w-full rounded px-2 py-1.5 text-left transition-all duration-150 ${
-                                        courseColor?.bg || 'bg-slate-400'
+                                        deadline.type === 'Class'
+                                          ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
+                                          : (courseColor?.bg || 'bg-slate-400')
                                       } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
                                     >
-                                      <div className={`font-medium truncate text-[10px] md:text-xs text-white ${deadline.completed ? 'line-through' : ''}`}>
+                                      <div className={`font-medium truncate text-[10px] md:text-xs ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
                                         {deadline.title}
                                       </div>
                                       {deadline.time && (
-                                        <div className="hidden sm:block text-[10px] text-white/80 mt-0.5">{deadline.time}</div>
+                                        <div className={`hidden sm:block text-[10px] mt-0.5 ${deadline.type === 'Class' ? 'text-slate-400' : 'text-white/80'}`}>{deadline.time}</div>
                                       )}
                                     </button>
                                   )
@@ -766,7 +824,11 @@ export default function CalendarPage() {
                                 key={deadline.id}
                                 onClick={() => setSelectedDeadline(deadline)}
                                 className={`w-full flex items-start gap-4 rounded-2xl border p-4 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
-                                  deadline.completed ? 'border-slate-100 bg-slate-50 opacity-60' : `border-slate-100 ${courseColors[deadline.course_id]?.light || 'bg-white'}`
+                                  deadline.completed
+                                    ? 'border-slate-100 bg-slate-50 opacity-60'
+                                    : deadline.type === 'Class'
+                                      ? `border-dashed ${courseColors[deadline.course_id]?.border || 'border-slate-300'} bg-white`
+                                      : `border-slate-100 ${courseColors[deadline.course_id]?.light || 'bg-white'}`
                                 }`}
                               >
                                 <div className={`mt-1 h-4 w-4 rounded-full ${getDeadlineColor(deadline)}`} />
@@ -974,13 +1036,20 @@ export default function CalendarPage() {
             <div className="mt-4 space-y-3">
               <div className="flex items-center gap-3 text-sm text-slate-600">
                 <span className="text-slate-400">Course:</span>
-                {selectedDeadline.course_id ? (
-                  <Link href={`/courses/${selectedDeadline.course_id}`} className="text-[#5B8DEF] hover:underline">
-                    {selectedDeadline.course_code ? `${selectedDeadline.course_code} - ${selectedDeadline.course_name}` : selectedDeadline.course_name}
-                  </Link>
-                ) : (
-                  <span className="text-slate-500">No course</span>
-                )}
+                <select
+                  value={selectedDeadline.course_id || ''}
+                  onChange={(e) => {
+                    if (e.target.value) reassignCourse(selectedDeadline.id, e.target.value)
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 outline-none transition-colors focus:border-[#5B8DEF] focus:ring-1 focus:ring-[#5B8DEF]/20"
+                >
+                  <option value="">No course</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code ? `${c.code} - ${c.name}` : c.name}
+                    </option>
+                  ))}
+                </select>
                 {selectedDeadline.source && selectedDeadline.source !== 'manual' && (
                   <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
                     {selectedDeadline.source === 'canvas' ? 'Canvas' : 'iCal'}
@@ -1000,7 +1069,7 @@ export default function CalendarPage() {
               )}
             </div>
 
-            <div className="mt-6 flex items-center gap-4">
+            <div className="mt-6 flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1010,6 +1079,13 @@ export default function CalendarPage() {
                 />
                 Mark as complete
               </label>
+              <button
+                onClick={() => deleteDeadline(selectedDeadline.id)}
+                className="flex items-center gap-1.5 rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 transition-all duration-300 hover:bg-red-50 hover:border-red-300"
+              >
+                <Trash2 size={12} />
+                Delete
+              </button>
             </div>
           </div>
         </div>

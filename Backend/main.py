@@ -536,7 +536,8 @@ class UpdateCourseRequest(BaseModel):
 
 
 class UpdateDeadlineRequest(BaseModel):
-    date: str
+    date: str | None = None
+    course_id: str | None = None
 
 
 class UserProfileRequest(BaseModel):
@@ -1749,7 +1750,7 @@ def toggle_deadline_complete(deadline_id: str, current_user: User = Depends(get_
 
 @app.patch("/deadlines/{deadline_id}")
 def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, current_user: User = Depends(get_current_user)):
-    """Update deadline fields (currently supports date only)."""
+    """Update deadline fields (date, course_id)."""
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -1760,8 +1761,24 @@ def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, current_us
         if payload.date:
             deadline.date = payload.date
 
+        if payload.course_id is not None:
+            # Verify the course belongs to this user
+            course = db.query(Course).filter(Course.id == payload.course_id, Course.user_id == user_id).first()
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
+            deadline.course_id = payload.course_id
+
         db.commit()
-        return {"id": deadline.id, "date": deadline.date}
+
+        # Return updated deadline with course info
+        course = db.query(Course).filter(Course.id == deadline.course_id).first() if deadline.course_id else None
+        return {
+            "id": deadline.id,
+            "date": deadline.date,
+            "course_id": deadline.course_id,
+            "course_name": course.name if course else None,
+            "course_code": course.code if course else None,
+        }
     finally:
         db.close()
 
@@ -2700,6 +2717,28 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
 
 # ── LMS Sync Logic ──────────────────────────────────────────────────────────
 
+def _match_course(canvas_name: str, canvas_code: str, user_courses) -> str | None:
+    """Try to match a Canvas/iCal course name against the user's ClassMate courses.
+    Returns the matched course_id or None."""
+    cn = canvas_name.lower().strip()
+    cc = canvas_code.lower().strip()
+    for uc in user_courses:
+        uc_name = (uc.name or "").lower().strip()
+        uc_code = (uc.code or "").lower().strip()
+        # Exact code match (e.g. "FINC 315" == "FINC 315")
+        if uc_code and cc and uc_code == cc:
+            return uc.id
+        # Code appears in Canvas name or vice-versa
+        if uc_code and (uc_code in cn or uc_code in cc):
+            return uc.id
+        if cc and cc in uc_code:
+            return uc.id
+        # Name substring match
+        if uc_name and len(uc_name) > 3 and (uc_name in cn or cn in uc_name):
+            return uc.id
+    return None
+
+
 def sync_canvas(connection, user_id: str, db):
     """Sync assignments from Canvas LMS into deadlines."""
     synced = 0
@@ -2707,6 +2746,9 @@ def sync_canvas(connection, user_id: str, db):
     token = decrypt_token(connection.encrypted_token)
     base = connection.instance_url.rstrip("/")
     headers = {"Authorization": f"Bearer {token}"}
+
+    # Load user's ClassMate courses for auto-matching
+    user_courses = db.query(Course).filter(Course.user_id == user_id).all()
 
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -2721,6 +2763,9 @@ def sync_canvas(connection, user_id: str, db):
             for course in canvas_courses:
                 course_id = course.get("id")
                 course_name = course.get("name", "Unknown Course")
+                course_code = course.get("course_code", "")
+                matched_course_id = _match_course(course_name, course_code, user_courses)
+
                 try:
                     assignments_resp = client.get(
                         f"{base}/api/v1/courses/{course_id}/assignments",
@@ -2756,10 +2801,13 @@ def sync_canvas(connection, user_id: str, db):
                             existing.date = deadline_date
                             existing.time = deadline_time
                             existing.description = f"[{course_name}] {assignment.get('description', '') or ''}"[:500]
+                            # Auto-match course if not already assigned
+                            if not existing.course_id and matched_course_id:
+                                existing.course_id = matched_course_id
                         else:
                             deadline = Deadline(
                                 user_id=user_id,
-                                course_id=None,
+                                course_id=matched_course_id,
                                 date=deadline_date,
                                 time=deadline_time,
                                 type="assignment",
@@ -2789,6 +2837,9 @@ def sync_ical(connection, user_id: str, db):
     synced = 0
     errors = []
 
+    # Load user's ClassMate courses for auto-matching
+    user_courses = db.query(Course).filter(Course.user_id == user_id).all()
+
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.get(connection.ical_url)
@@ -2809,6 +2860,11 @@ def sync_ical(connection, user_id: str, db):
                 ext_id = f"ical_{uid}"
                 summary = str(component.get("SUMMARY", "Untitled"))
                 description = str(component.get("DESCRIPTION", ""))[:500]
+
+                # Auto-match: try summary and description against course codes/names
+                matched_course_id = _match_course(summary, "", user_courses)
+                if not matched_course_id and description:
+                    matched_course_id = _match_course(description, "", user_courses)
 
                 # Parse DTSTART
                 dtstart = component.get("DTSTART")
@@ -2836,10 +2892,13 @@ def sync_ical(connection, user_id: str, db):
                     existing.date = deadline_date
                     existing.time = deadline_time
                     existing.description = description
+                    # Auto-match course if not already assigned
+                    if not existing.course_id and matched_course_id:
+                        existing.course_id = matched_course_id
                 else:
                     deadline = Deadline(
                         user_id=user_id,
-                        course_id=None,
+                        course_id=matched_course_id,
                         date=deadline_date,
                         time=deadline_time,
                         type="assignment",
