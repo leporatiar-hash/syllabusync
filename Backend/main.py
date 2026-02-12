@@ -2717,26 +2717,67 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
 
 # ── LMS Sync Logic ──────────────────────────────────────────────────────────
 
-def _match_course(canvas_name: str, canvas_code: str, user_courses) -> str | None:
-    """Try to match a Canvas/iCal course name against the user's ClassMate courses.
+def _normalize(text: str) -> str:
+    """Normalize text for course matching: lowercase, strip separators to spaces."""
+    return re.sub(r'[\s\-_.,/]+', ' ', text.lower().strip())
+
+
+def _extract_course_codes(text: str) -> list[str]:
+    """Extract course code patterns like FINC315, FINC-315, FINC 315, etc.
+    Returns normalized codes like 'finc 315'."""
+    # Match 2-4 letter dept code + optional separator + 3-4 digit number
+    patterns = re.findall(r'([a-zA-Z]{2,4})[\s\-_./]*(\d{3,4})', text)
+    return [f"{dept.lower()} {num}" for dept, num in patterns]
+
+
+def _match_course(lms_text: str, lms_code: str, user_courses) -> str | None:
+    """Try to match LMS course name/code against the user's ClassMate courses.
+    Uses normalized text comparison and course code extraction for robust matching.
     Returns the matched course_id or None."""
-    cn = canvas_name.lower().strip()
-    cc = canvas_code.lower().strip()
+
+    # Normalize inputs
+    norm_text = _normalize(lms_text)
+    norm_code = _normalize(lms_code)
+
+    # Extract course codes from both LMS fields
+    lms_codes = set()
+    lms_codes.update(_extract_course_codes(lms_text))
+    lms_codes.update(_extract_course_codes(lms_code))
+
+    best_match = None
+    best_score = 0
+
     for uc in user_courses:
-        uc_name = (uc.name or "").lower().strip()
-        uc_code = (uc.code or "").lower().strip()
-        # Exact code match (e.g. "FINC 315" == "FINC 315")
-        if uc_code and cc and uc_code == cc:
+        uc_name = _normalize(uc.name or "")
+        uc_code = _normalize(uc.code or "")
+        uc_extracted = set(_extract_course_codes(uc.code or ""))
+        uc_extracted.update(_extract_course_codes(uc.name or ""))
+
+        # Score 1: Exact normalized code match (e.g. "finc 315" == "finc 315")
+        if uc_code and norm_code and uc_code == norm_code:
             return uc.id
-        # Code appears in Canvas name or vice-versa
-        if uc_code and (uc_code in cn or uc_code in cc):
+
+        # Score 2: Extracted course codes overlap (e.g. "finc 315" from "FINC-315-001-2025SP")
+        if lms_codes and uc_extracted and lms_codes & uc_extracted:
             return uc.id
-        if cc and cc in uc_code:
-            return uc.id
-        # Name substring match
-        if uc_name and len(uc_name) > 3 and (uc_name in cn or cn in uc_name):
-            return uc.id
-    return None
+
+        # Score 3: Normalized code appears in normalized text or vice-versa
+        if uc_code and len(uc_code) > 2:
+            if uc_code in norm_text or uc_code in norm_code:
+                return uc.id
+            if norm_code and norm_code in uc_code:
+                return uc.id
+
+        # Score 4: Course name substring match (both directions, min length to avoid false positives)
+        if uc_name and len(uc_name) > 3:
+            if uc_name in norm_text or norm_text in uc_name:
+                # Prefer longer matches
+                match_len = min(len(uc_name), len(norm_text))
+                if match_len > best_score:
+                    best_score = match_len
+                    best_match = uc.id
+
+    return best_match
 
 
 def sync_canvas(connection, user_id: str, db):
@@ -2860,11 +2901,13 @@ def sync_ical(connection, user_id: str, db):
                 ext_id = f"ical_{uid}"
                 summary = str(component.get("SUMMARY", "Untitled"))
                 description = str(component.get("DESCRIPTION", ""))[:500]
+                location = str(component.get("LOCATION", ""))
+                categories = str(component.get("CATEGORIES", ""))
 
-                # Auto-match: try summary and description against course codes/names
-                matched_course_id = _match_course(summary, "", user_courses)
-                if not matched_course_id and description:
-                    matched_course_id = _match_course(description, "", user_courses)
+                # Auto-match: try summary, description, location, categories, and UID
+                # Combine all available text for course code extraction
+                all_text = f"{summary} {description} {location} {categories} {uid}"
+                matched_course_id = _match_course(all_text, "", user_courses)
 
                 # Parse DTSTART
                 dtstart = component.get("DTSTART")
