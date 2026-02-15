@@ -32,6 +32,7 @@ import resend
 import httpx
 from icalendar import Calendar as ICalCalendar
 from cryptography.fernet import Fernet
+import sentry_sdk
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +43,18 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+# Sentry error monitoring
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=0.2,
+        send_default_pii=False,
+    )
+    print("[Sentry] Initialized")
+else:
+    print("[Sentry] No DSN configured, skipping")
 
 # Supabase auth configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or ""
@@ -1302,14 +1315,29 @@ def root():
 
 @app.get("/health")
 def health():
-    """Health check endpoint."""
-    return {"status": "healthy"}
+    """Health check endpoint with DB connectivity, timestamp, and version."""
+    db_status = "ok"
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+    except Exception:
+        db_status = "error"
+
+    api_status = "ok" if db_status == "ok" else "degraded"
+    return {
+        "status": api_status,
+        "database": db_status,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "version": os.getenv("APP_VERSION", "1.0.0"),
+        "commit": os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")[:8],
+    }
 
 
 @app.get("/api/health")
 def api_health():
-    """API health check endpoint."""
-    return {"status": "healthy"}
+    """API health check endpoint (alias)."""
+    return health()
 
 
 @app.get("/auth-status")

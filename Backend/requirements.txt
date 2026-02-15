@@ -13,3 +13,4 @@ resend
 httpx
 icalendar
 cryptography
+sentry-sdk[fastapi]

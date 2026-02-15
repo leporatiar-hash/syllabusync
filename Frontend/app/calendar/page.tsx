@@ -59,6 +59,7 @@ export default function CalendarPage() {
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
   const [filterCourse, setFilterCourse] = useState<string>('all')
+  const [filterType, setFilterType] = useState<string>('all')
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -146,9 +147,15 @@ export default function CalendarPage() {
   }
 
   const filteredDeadlines = useMemo(() => {
-    if (filterCourse === 'all') return deadlines
-    return deadlines.filter((d) => d.course_id === filterCourse)
-  }, [deadlines, filterCourse])
+    let filtered = deadlines
+    if (filterCourse !== 'all') {
+      filtered = filtered.filter((d) => d.course_id === filterCourse)
+    }
+    if (filterType !== 'all') {
+      filtered = filtered.filter((d) => d.type === filterType)
+    }
+    return filtered
+  }, [deadlines, filterCourse, filterType])
 
   const getDeadlinesForDate = (day: number) => {
     const dateStr = formatDateStr(day)
@@ -498,6 +505,21 @@ export default function CalendarPage() {
                   {course.code ? `${course.code} - ${course.name}` : course.name}
                 </option>
               ))}
+            </select>
+            <select
+              value={filterType}
+              onChange={(event) => setFilterType(event.target.value)}
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 md:px-4 md:py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
+            >
+              <option value="all">All types</option>
+              <option value="Assignment">Assignments</option>
+              <option value="Exam">Exams</option>
+              <option value="Quiz">Quizzes</option>
+              <option value="Homework">Homework</option>
+              <option value="Project">Projects</option>
+              <option value="Presentation">Presentations</option>
+              <option value="Class">Classes</option>
+              <option value="Deadline">Deadlines</option>
             </select>
           </div>
           <button
