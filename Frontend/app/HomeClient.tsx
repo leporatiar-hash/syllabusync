@@ -258,17 +258,22 @@ export default function HomeClient() {
           <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
             <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
                   <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900">Connect your LMS</h3>
-                  <p className="text-sm text-slate-500">Sync deadlines from Canvas or an iCal feed directly to your calendar.</p>
+                  <h3 className="text-base font-semibold text-slate-900">Sync your school calendar</h3>
+                  <p className="text-sm text-slate-500">
+                    Connect your Canvas or iCal feed to automatically import all your assignments and due dates.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Tip: Upload your syllabi first so deadlines get matched to your courses.
+                  </p>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex shrink-0 gap-3">
                 <button
                   onClick={() => setShowCanvasModal(true)}
                   className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
@@ -293,16 +298,17 @@ export default function HomeClient() {
           <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-green-50 text-green-500">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green-50 text-green-500">
                   <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900">LMS Connected</h3>
+                  <h3 className="text-base font-semibold text-slate-900">Calendar synced</h3>
                   <p className="text-sm text-slate-500">
-                    {lmsConnections.map(c => c.provider === 'canvas' ? 'Canvas' : 'iCal').join(', ')} synced.{' '}
-                    <Link href="/settings" className="text-[#5B8DEF] hover:underline">Manage</Link>
+                    {lmsConnections.map(c => c.provider === 'canvas' ? 'Canvas' : 'iCal').join(' & ')} connected.
+                    Your deadlines are up to date.{' '}
+                    <Link href="/settings" className="font-medium text-[#5B8DEF] hover:underline">Manage connections</Link>
                   </p>
                 </div>
               </div>

@@ -897,10 +897,36 @@ def _get_current_user(
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        user = User(id=user_id, email=email or f"{user_id}@supabase.local")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        # Check if a user with this email already exists (e.g. Supabase user was recreated)
+        if email:
+            existing_by_email = db.query(User).filter(User.email == email).first()
+            if existing_by_email:
+                old_id = existing_by_email.id
+                # Migrate all related data to the new user_id
+                for tbl in [Course, Deadline, LMSConnection, FlashcardSet,
+                            Flashcard, Summary, CalendarEntry, Quiz, QuizQuestion]:
+                    db.query(tbl).filter(tbl.user_id == old_id).update(
+                        {"user_id": user_id}, synchronize_session=False
+                    )
+                db.query(UserProfile).filter(UserProfile.user_id == old_id).update(
+                    {"user_id": user_id}, synchronize_session=False
+                )
+                # Update the user record itself
+                existing_by_email.id = user_id
+                db.commit()
+                db.refresh(existing_by_email)
+                logger.info(f"[Auth] Migrated user {old_id} -> {user_id} (email: {email})")
+                user = existing_by_email
+            else:
+                user = User(id=user_id, email=email)
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+        else:
+            user = User(id=user_id, email=f"{user_id}@supabase.local")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
     elif email and user.email != email:
         user.email = email
         db.commit()
@@ -2818,7 +2844,8 @@ def _match_course(lms_text: str, lms_code: str, user_courses) -> str | None:
 
 
 def sync_canvas(connection, user_id: str, db):
-    """Sync assignments from Canvas LMS into deadlines, auto-creating courses."""
+    """Sync assignments from Canvas LMS into deadlines, auto-creating courses.
+    Canvas provides structured course names and codes, so auto-creation is reliable here."""
     synced = 0
     errors = []
     token = decrypt_token(connection.encrypted_token)
@@ -2927,11 +2954,11 @@ def sync_canvas(connection, user_id: str, db):
 
 
 def sync_ical(connection, user_id: str, db):
-    """Sync events from an iCal feed into deadlines, auto-creating courses."""
+    """Sync events from an iCal feed into deadlines, matching against existing courses."""
     synced = 0
     errors = []
 
-    # Load user's ClassMate courses for auto-matching
+    # Load user's existing courses for matching
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
 
     try:
@@ -2943,33 +2970,7 @@ def sync_ical(connection, user_id: str, db):
 
             cal = ICalCalendar.from_ical(resp.text)
 
-            # First pass: collect unique course codes from all events and auto-create courses
-            seen_codes: dict[str, bool] = {}
-            for component in cal.walk():
-                if component.name != "VEVENT":
-                    continue
-                event_summary = str(component.get("SUMMARY", ""))
-                event_uid = str(component.get("UID", ""))
-                event_cats = str(component.get("CATEGORIES", ""))
-                all_event_text = f"{event_summary} {event_uid} {event_cats}"
-                for code in _extract_course_codes(all_event_text):
-                    if code not in seen_codes:
-                        seen_codes[code] = True
-                        # Check if this code already matches an existing course
-                        if not _match_course(code, code, user_courses):
-                            # Auto-create course from extracted code (e.g. "finc 315" → code "FINC 315")
-                            clean_code = code.upper()
-                            new_course = Course(
-                                user_id=user_id,
-                                name=clean_code,
-                                code=clean_code,
-                            )
-                            db.add(new_course)
-                            db.flush()
-                            user_courses.append(new_course)
-                            logger.info(f"[LMS] Auto-created course from iCal: {clean_code}")
-
-            # Second pass: sync events into deadlines
+            # Sync events into deadlines, matching to existing courses
             for component in cal.walk():
                 if component.name != "VEVENT":
                     continue
@@ -2984,7 +2985,7 @@ def sync_ical(connection, user_id: str, db):
                 location = str(component.get("LOCATION", ""))
                 categories = str(component.get("CATEGORIES", ""))
 
-                # Auto-match against courses (including any we just created)
+                # Try to match against user's existing courses
                 all_text = f"{summary} {description} {location} {categories} {uid}"
                 matched_course_id = _match_course(all_text, "", user_courses)
 

@@ -347,11 +347,11 @@ export default function CoursesClient() {
         </div>
 
         <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {courses.map((course) => (
+          {courses.map((course, idx) => (
             <Link
               key={course.id}
               href={`/courses/${course.id}`}
-              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl bg-gradient-to-br ${getCourseColor(course.id).gradient} p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg`}
+              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl bg-gradient-to-br ${getCourseColor(course.id, idx).gradient} p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg`}
             >
               <div className="flex items-start justify-between">
                 <div>

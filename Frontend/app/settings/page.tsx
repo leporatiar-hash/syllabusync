@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
@@ -377,23 +378,21 @@ export default function SettingsPage() {
 
       {/* LMS Connections */}
       <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">LMS Connections</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Connect your Canvas LMS or iCal feed to automatically sync deadlines.
-            </p>
-          </div>
-          {lmsConnections.length > 0 && (
-            <button
-              type="button"
-              onClick={handleSyncAll}
-              disabled={lmsSyncing}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
-            >
-              {lmsSyncing ? 'Syncing...' : 'Sync Now'}
-            </button>
-          )}
+        <div className="mb-4">
+          <h2 className="text-base font-semibold text-slate-900">Sync Your Calendar</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Pull in assignments and due dates from your school&apos;s calendar so you never miss a deadline.
+          </p>
+        </div>
+
+        {/* How it works tip */}
+        <div className="mb-5 rounded-xl bg-gradient-to-r from-[#EEF2FF] to-[#F0FDFF] px-4 py-3">
+          <p className="text-xs font-semibold text-slate-700">How it works</p>
+          <ol className="mt-1.5 list-inside list-decimal space-y-0.5 text-xs text-slate-600">
+            <li>Upload your syllabi on the <Link href="/courses" className="font-medium text-[#5B8DEF] hover:underline">Courses</Link> page to create your courses</li>
+            <li>Connect your iCal feed or Canvas below</li>
+            <li>Deadlines are automatically matched to your courses</li>
+          </ol>
         </div>
 
         {lmsError && (
@@ -438,9 +437,30 @@ export default function SettingsPage() {
                 </button>
               </div>
             ))}
+
+            {/* Sync Now button - prominent */}
+            <button
+              type="button"
+              onClick={handleSyncAll}
+              disabled={lmsSyncing}
+              className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:opacity-90 disabled:opacity-50"
+            >
+              {lmsSyncing ? (
+                <>
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" /></svg>
+                  Sync Now
+                </>
+              )}
+            </button>
+            <p className="text-center text-xs text-slate-400">Pull the latest assignments from your connected feeds</p>
           </div>
         ) : (
-          <p className="mb-4 text-sm text-slate-400">No LMS connections yet.</p>
+          <p className="mb-4 text-sm text-slate-400">No calendar feeds connected yet.</p>
         )}
 
         <div className="flex gap-3">
