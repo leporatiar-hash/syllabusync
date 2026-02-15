@@ -2818,7 +2818,7 @@ def _match_course(lms_text: str, lms_code: str, user_courses) -> str | None:
 
 
 def sync_canvas(connection, user_id: str, db):
-    """Sync assignments from Canvas LMS into deadlines."""
+    """Sync assignments from Canvas LMS into deadlines, auto-creating courses."""
     synced = 0
     errors = []
     token = decrypt_token(connection.encrypted_token)
@@ -2843,6 +2843,22 @@ def sync_canvas(connection, user_id: str, db):
                 course_name = course.get("name", "Unknown Course")
                 course_code = course.get("course_code", "")
                 matched_course_id = _match_course(course_name, course_code, user_courses)
+
+                # Auto-create course if no match found
+                if not matched_course_id and course_name != "Unknown Course":
+                    # Build a clean code from Canvas course_code (e.g. "FINC-315-001-2025SP" → "FINC 315")
+                    extracted = _extract_course_codes(course_code or course_name)
+                    clean_code = extracted[0].upper() if extracted else course_code
+                    new_course = Course(
+                        user_id=user_id,
+                        name=course_name,
+                        code=clean_code,
+                    )
+                    db.add(new_course)
+                    db.flush()  # Get the generated ID
+                    matched_course_id = new_course.id
+                    user_courses.append(new_course)  # So subsequent matches can find it
+                    logger.info(f"[LMS] Auto-created course: {clean_code} — {course_name}")
 
                 try:
                     assignments_resp = client.get(
@@ -2911,7 +2927,7 @@ def sync_canvas(connection, user_id: str, db):
 
 
 def sync_ical(connection, user_id: str, db):
-    """Sync events from an iCal feed into deadlines."""
+    """Sync events from an iCal feed into deadlines, auto-creating courses."""
     synced = 0
     errors = []
 
@@ -2919,14 +2935,41 @@ def sync_ical(connection, user_id: str, db):
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
 
     try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(connection.ical_url)
+        with httpx.Client(timeout=30.0) as http_client:
+            resp = http_client.get(connection.ical_url)
             if resp.status_code != 200:
                 errors.append(f"Failed to fetch iCal feed: {resp.status_code}")
                 return synced, errors
 
             cal = ICalCalendar.from_ical(resp.text)
 
+            # First pass: collect unique course codes from all events and auto-create courses
+            seen_codes: dict[str, bool] = {}
+            for component in cal.walk():
+                if component.name != "VEVENT":
+                    continue
+                event_summary = str(component.get("SUMMARY", ""))
+                event_uid = str(component.get("UID", ""))
+                event_cats = str(component.get("CATEGORIES", ""))
+                all_event_text = f"{event_summary} {event_uid} {event_cats}"
+                for code in _extract_course_codes(all_event_text):
+                    if code not in seen_codes:
+                        seen_codes[code] = True
+                        # Check if this code already matches an existing course
+                        if not _match_course(code, code, user_courses):
+                            # Auto-create course from extracted code (e.g. "finc 315" → code "FINC 315")
+                            clean_code = code.upper()
+                            new_course = Course(
+                                user_id=user_id,
+                                name=clean_code,
+                                code=clean_code,
+                            )
+                            db.add(new_course)
+                            db.flush()
+                            user_courses.append(new_course)
+                            logger.info(f"[LMS] Auto-created course from iCal: {clean_code}")
+
+            # Second pass: sync events into deadlines
             for component in cal.walk():
                 if component.name != "VEVENT":
                     continue
@@ -2941,8 +2984,7 @@ def sync_ical(connection, user_id: str, db):
                 location = str(component.get("LOCATION", ""))
                 categories = str(component.get("CATEGORIES", ""))
 
-                # Auto-match: try summary, description, location, categories, and UID
-                # Combine all available text for course code extraction
+                # Auto-match against courses (including any we just created)
                 all_text = f"{summary} {description} {location} {categories} {uid}"
                 matched_course_id = _match_course(all_text, "", user_courses)
 
