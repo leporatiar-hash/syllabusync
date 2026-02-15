@@ -47,12 +47,15 @@ load_dotenv()
 # Sentry error monitoring
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 if SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        traces_sample_rate=0.2,
-        send_default_pii=False,
-    )
-    print("[Sentry] Initialized")
+    try:
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            traces_sample_rate=0.2,
+            send_default_pii=False,
+        )
+        print("[Sentry] Initialized")
+    except Exception as e:
+        print(f"[Sentry] Failed to initialize (invalid DSN?): {e}")
 else:
     print("[Sentry] No DSN configured, skipping")
 
