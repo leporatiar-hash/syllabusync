@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from openai import OpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
+from openai import AsyncOpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
 from jose import JWTError, jwt, jwk
 from jose.utils import base64url_decode
 from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text
@@ -113,7 +113,7 @@ async def timeout_middleware(request: Request, call_next):
 
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
@@ -279,8 +279,8 @@ print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
-    pool_size=5,              # Max 5 persistent connections
-    max_overflow=10,          # Max 10 additional connections when needed
+    pool_size=20,             # Max 20 persistent connections
+    max_overflow=30,          # Max 30 additional connections (50 total)
     pool_pre_ping=True,       # Check connections before using (prevents stale connections)
     pool_recycle=3600,        # Recycle connections after 1 hour
     echo=False                # Set to True for SQL query logging (debug only)
@@ -667,7 +667,7 @@ def extract_text_from_docx(content: bytes) -> str:
         )
 
 
-def generate_summary_from_text(text: str) -> str:
+async def generate_summary_from_text(text: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
@@ -682,7 +682,7 @@ Return 5-8 bullet points plus a short 1-2 sentence overview.
 Focus on key concepts, definitions, and important facts.
 """
         try:
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": prompt},
@@ -732,7 +732,7 @@ Summarize this section clearly and concisely, focusing on key concepts, definiti
 Return 3-5 bullet points covering the main ideas in this section.
 """
         try:
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": chunk_prompt},
@@ -759,7 +759,7 @@ Focus on the key takeaways a student needs to know for studying.
 """
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": final_prompt},
@@ -774,7 +774,7 @@ Focus on the key takeaways a student needs to know for studying.
         raise
 
 
-def generate_summary_from_image(content: bytes, filename: str) -> str:
+async def generate_summary_from_image(content: bytes, filename: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
@@ -786,7 +786,7 @@ def generate_summary_from_image(content: bytes, filename: str) -> str:
     prompt = "Summarize the handwritten notes or study material in this image. Return 5-8 bullet points plus a short 1-2 sentence overview."
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -852,6 +852,12 @@ def ensure_indexes():
         "CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_id ON calendar_entries(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_lms_connections_user_id ON lms_connections(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_deadlines_external_id ON deadlines(external_id)",
+        # course_id indexes for list/filter queries
+        "CREATE INDEX IF NOT EXISTS idx_deadlines_course_id ON deadlines(course_id)",
+        "CREATE INDEX IF NOT EXISTS idx_flashcard_sets_course_id ON flashcard_sets(course_id)",
+        "CREATE INDEX IF NOT EXISTS idx_summaries_course_id ON summaries(course_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_course_id ON quizzes(course_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id)",
         # user email uniqueness
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
     ]
@@ -960,7 +966,7 @@ def parse_json_response(result: str):
     return json.loads(result.strip())
 
 
-def extract_course_metadata(text: str):
+async def extract_course_metadata(text: str):
     """PASS 1: Extract course metadata from syllabus."""
     print("[DEBUG] PASS 1: Extracting course metadata...")
 
@@ -1016,7 +1022,7 @@ If the year is 2026 and semester is Spring, start_date would be around 2026-01-1
 IMPORTANT: For any field where information is not found in the syllabus, use null (for strings) or empty arrays (for lists). Extract as much detail as possible."""
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1046,7 +1052,7 @@ IMPORTANT: For any field where information is not found in the syllabus, use nul
         }
 
 
-def extract_deadlines_with_context(text: str, metadata: dict):
+async def extract_deadlines_with_context(text: str, metadata: dict):
     """PASS 2: Extract deadlines using course metadata for context."""
     print("[DEBUG] PASS 2: Extracting deadlines with context...")
 
@@ -1122,7 +1128,7 @@ Examples of GOOD entries:
 Return [] if no deadlines found."""
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1979,8 +1985,8 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
     if len(text.strip()) < 50:
         raise HTTPException(status_code=400, detail="Could not extract text from the uploaded file. Make sure it contains readable text.")
 
-    metadata = extract_course_metadata(text)
-    deadlines_data = extract_deadlines_with_context(text, metadata)
+    metadata = await extract_course_metadata(text)
+    deadlines_data = await extract_deadlines_with_context(text, metadata)
     print(f"[DEBUG] Deadline extraction returned {len(deadlines_data)} items")
 
     db = SessionLocal()
@@ -2077,18 +2083,18 @@ async def generate_summary(request: Request, course_id: str, file: UploadFile = 
         if filename.endswith(".pdf"):
             text = extract_text_from_pdf(content)
             print(f"[DEBUG] Summary PDF text length: {len(text)}")
-            summary_text = generate_summary_from_text(text)
+            summary_text = await generate_summary_from_text(text)
         elif filename.endswith(".txt"):
             text = content.decode("utf-8", errors="ignore")
             print(f"[DEBUG] Summary TXT length: {len(text)}")
-            summary_text = generate_summary_from_text(text)
+            summary_text = await generate_summary_from_text(text)
         elif filename.endswith(".docx"):
             text = extract_text_from_docx(content)
             print(f"[DEBUG] Summary DOCX length: {len(text)}")
-            summary_text = generate_summary_from_text(text)
+            summary_text = await generate_summary_from_text(text)
         elif filename.endswith((".png", ".jpg", ".jpeg")):
             print(f"[DEBUG] Summary image size: {len(content)} bytes")
-            summary_text = generate_summary_from_image(content, filename)
+            summary_text = await generate_summary_from_image(content, filename)
         else:
             raise HTTPException(status_code=400, detail="Supported formats: PDF, DOCX, TXT, PNG, JPG")
 
@@ -2214,7 +2220,7 @@ Focus on:
 Make questions clear and answers concise but complete."""
 
             try:
-                response = client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -2352,10 +2358,10 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
             }
 
         # PASS 1: Extract course metadata
-        metadata = extract_course_metadata(text)
+        metadata = await extract_course_metadata(text)
 
         # PASS 2: Extract deadlines with context
-        deadlines_data = extract_deadlines_with_context(text, metadata)
+        deadlines_data = await extract_deadlines_with_context(text, metadata)
 
         # Save to database
         db = SessionLocal()
@@ -2494,7 +2500,7 @@ Guidelines:
 - Keep explanations concise (1-2 sentences)"""
 
         try:
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
