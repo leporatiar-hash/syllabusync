@@ -807,6 +807,38 @@ async def generate_summary_from_image(content: bytes, filename: str) -> str:
     return response.choices[0].message.content.strip()
 
 
+async def extract_text_from_image(content: bytes, filename: str) -> str:
+    """Use GPT-4o-mini vision to extract/transcribe text from an image of study material."""
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
+
+    ext = filename.lower().split(".")[-1]
+    if ext == "jpg":
+        ext = "jpeg"
+    data_url = f"data:image/{ext};base64,{base64.b64encode(content).decode('utf-8')}"
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Extract and transcribe ALL text, data, and information from this image of study material. Include all headings, paragraphs, tables, figures, equations, and any other content. Return the full text content as plain text."},
+                        {"type": "image_url", "image_url": {"url": data_url}}
+                    ],
+                }
+            ],
+            temperature=0.1,
+            max_tokens=4000
+        )
+    except Exception as e:
+        _raise_if_openai_error(e)
+        raise
+
+    return response.choices[0].message.content.strip()
+
+
 def ensure_deadline_columns():
     """Add source and external_id columns to deadlines table if missing.
     Also make course_id nullable for LMS-synced deadlines."""
@@ -2102,8 +2134,8 @@ async def generate_summary(request: Request, course_id: str, file: UploadFile = 
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Validate file upload - allow PDF, TXT, and DOCX files
-        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx'], max_size_mb=10)
+        # Validate file upload - allow PDF, TXT, DOCX, and image files
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=10)
         filename = file.filename.lower()
 
         if filename.endswith(".pdf"):
@@ -2199,7 +2231,7 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
             raise HTTPException(status_code=404, detail="Course not found")
 
         # Validate and extract text from file
-        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx'], max_size_mb=10)
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=10)
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
@@ -2209,12 +2241,17 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
                 text += (page.extract_text() or "") + "\n"
         elif filename.endswith('.txt'):
             text = content.decode('utf-8')
+        elif filename.endswith(('.png', '.jpg', '.jpeg')):
+            print(f"[DEBUG] Extracting text from image ({len(content)} bytes)")
+            text = await extract_text_from_image(content, filename)
+        elif filename.endswith('.docx'):
+            text = extract_text_from_docx(content)
         else:
-            raise HTTPException(status_code=400, detail="Supported formats: PDF, TXT")
+            raise HTTPException(status_code=400, detail="Supported formats: PDF, TXT, DOCX, PNG, JPG")
 
         print(f"[DEBUG] Extracted {len(text)} characters from study material")
 
-        if len(text.strip()) < 100:
+        if len(text.strip()) < 50:
             raise HTTPException(status_code=400, detail="Could not extract enough text from file")
 
         print(f"[DEBUG] Generating flashcards from {len(text)} characters")
@@ -2300,6 +2337,8 @@ Make questions clear and answers concise but complete."""
             "flashcards": flashcards_data
         }
 
+    except HTTPException:
+        raise
     except json.JSONDecodeError as e:
         print(f"[ERROR] Failed to parse flashcards JSON: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate flashcards")
@@ -2472,7 +2511,7 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
             raise HTTPException(status_code=404, detail="Course not found")
 
         # Validate and extract text from file
-        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx'], max_size_mb=10)
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=10)
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
@@ -2482,15 +2521,17 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
                 text += (page.extract_text() or "") + "\n"
         elif filename.endswith('.txt'):
             text = content.decode('utf-8')
+        elif filename.endswith(('.png', '.jpg', '.jpeg')):
+            print(f"[DEBUG] Extracting text from image for quiz ({len(content)} bytes)")
+            text = await extract_text_from_image(content, filename)
         elif filename.endswith('.docx'):
-            # For simplicity, treat as text; proper DOCX parsing would require python-docx
-            text = content.decode('utf-8', errors='ignore')
+            text = extract_text_from_docx(content)
         else:
-            raise HTTPException(status_code=400, detail="Supported formats: PDF, TXT, DOCX")
+            raise HTTPException(status_code=400, detail="Supported formats: PDF, TXT, DOCX, PNG, JPG")
 
         print(f"[DEBUG] Extracted {len(text)} characters for quiz generation")
 
-        if len(text.strip()) < 100:
+        if len(text.strip()) < 50:
             raise HTTPException(status_code=400, detail="Could not extract enough text from file")
 
         # Truncate if too long
