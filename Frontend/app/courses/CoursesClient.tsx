@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import posthog from 'posthog-js'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import { getCourseColor } from '../../lib/courseColors'
@@ -105,6 +106,9 @@ export default function CoursesClient() {
       }
       const data = await res.json()
       if (data.course?.id) {
+        const deadlineCount = data.course.deadlines?.length || data.deadline_count || 0
+        posthog.capture('syllabus_uploaded', { course_id: data.course.id })
+        if (deadlineCount > 0) posthog.capture('deadlines_extracted', { count: deadlineCount, course_id: data.course.id })
         router.push(`/courses/${data.course.id}`)
       } else {
         // File parsed but no course extracted — still reload list

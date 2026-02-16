@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import posthog from 'posthog-js'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 
@@ -68,6 +69,7 @@ function FlashcardsContent() {
 
   // Debug: Force update - v2.0
 
+  const directStudy = !!setIdParam // came from a deep-link, skip browse hub
   const [flashcardSets, setFlashcardSets] = useState<FlashcardSet[]>([])
   const [selectedSetId, setSelectedSetId] = useState<string | null>(setIdParam)
   const [cards, setCards] = useState<Flashcard[]>([])
@@ -79,7 +81,7 @@ function FlashcardsContent() {
   const [loading, setLoading] = useState(true)
   const [loadingCards, setLoadingCards] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [mode, setMode] = useState<'browse' | 'study'>('browse')
+  const [mode, setMode] = useState<'browse' | 'study'>(setIdParam ? 'study' : 'browse')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadLoading, setUploadLoading] = useState(false)
@@ -246,6 +248,7 @@ function FlashcardsContent() {
   const handleSelectSet = (setId: string) => {
     setSelectedSetId(setId)
     setMode('study')
+    posthog.capture('study_set_opened', { type: 'flashcards', set_id: setId })
     // Update URL without navigation
     window.history.pushState({}, '', `/flashcards?set=${setId}`)
   }
@@ -375,6 +378,161 @@ function FlashcardsContent() {
       console.error('Failed to delete quiz:', err)
       setUploadError('Failed to delete quiz')
     }
+  }
+
+  // Direct study mode: streamlined UI, no browse chrome
+  if (directStudy && selectedSetId) {
+    const currentSet = flashcardSets.find(s => s.id === selectedSetId)
+    return (
+      <main className="min-h-screen px-4 pb-20 pt-10">
+        <div className="mx-auto max-w-5xl space-y-6">
+          {/* Minimal header with back button */}
+          <div className="flex items-center gap-4">
+            <Link
+              href="/study-studio"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:border-slate-300 hover:text-slate-700"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </Link>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl font-bold text-slate-900 truncate">{currentSet?.name || 'Study Deck'}</h1>
+              {currentSet?.courseCode && (
+                <p className="text-sm text-slate-500">{currentSet.courseCode} — {currentSet.courseName}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Study section inline */}
+          <section className="rounded-3xl bg-white p-8 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <p className="text-sm text-slate-600">Click the card to flip it. Use arrow keys to navigate.</p>
+              <div className="flex items-center gap-3 text-sm">
+                {cards.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-24 rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] transition-all duration-300"
+                          style={{ width: `${((currentIndex + 1) / cards.length) * 100}%` }}
+                        />
+                      </div>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
+                        {currentIndex + 1} / {cards.length}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleShuffle}
+                      className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Shuffle
+                    </button>
+                    <button
+                      onClick={() => { setCurrentIndex(0); setFlipped(false) }}
+                      className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                      </svg>
+                      Reset
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-col items-center">
+              {loadingCards ? (
+                <div className="flex h-72 w-full max-w-xl items-center justify-center rounded-3xl bg-gradient-to-br from-slate-50 to-slate-100">
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Loading flashcards...
+                  </div>
+                </div>
+              ) : cards.length === 0 ? (
+                <div className="flex h-72 w-full max-w-xl flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 bg-gradient-to-br from-slate-50 to-white">
+                  <p className="text-sm font-medium text-slate-600">No cards in this deck yet</p>
+                </div>
+              ) : current ? (
+                <>
+                  <div
+                    className="w-full max-w-xl cursor-pointer"
+                    style={{ perspective: '1000px' }}
+                    onClick={() => setFlipped(!flipped)}
+                  >
+                    <div
+                      className="relative h-80 w-full transition-transform duration-500"
+                      style={{
+                        transformStyle: 'preserve-3d',
+                        transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)'
+                      }}
+                    >
+                      <div
+                        className="absolute inset-0 flex flex-col items-center justify-center rounded-3xl bg-white p-8 shadow-xl border border-slate-100"
+                        style={{ backfaceVisibility: 'hidden' }}
+                      >
+                        <div className="absolute top-4 left-4 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">Question</div>
+                        <div className="text-center text-xl font-semibold text-slate-900 leading-relaxed">{current.front}</div>
+                        <div className="absolute bottom-4 flex items-center gap-1.5 text-xs text-slate-400">
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
+                          Click to reveal answer
+                        </div>
+                      </div>
+                      <div
+                        className="absolute inset-0 flex flex-col items-center justify-center rounded-3xl bg-gradient-to-br from-[#667eea] to-[#764ba2] p-8 shadow-xl"
+                        style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                      >
+                        <div className="absolute top-4 left-4 rounded-full bg-white/20 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur-sm">Answer</div>
+                        <div className="text-center text-xl font-semibold text-white leading-relaxed">{current.back}</div>
+                        <div className="absolute bottom-4 flex items-center gap-1.5 text-xs text-white/70">
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
+                          Click to see question
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex items-center gap-4">
+                    <button
+                      onClick={() => { setCurrentIndex(Math.max(0, currentIndex - 1)); setFlipped(false) }}
+                      disabled={currentIndex === 0}
+                      className="flex items-center gap-2 rounded-full border border-slate-200 px-6 py-2.5 text-sm font-semibold text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => { setCurrentIndex(Math.min(cards.length - 1, currentIndex + 1)); setFlipped(false) }}
+                      disabled={currentIndex === cards.length - 1}
+                      className="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40"
+                    >
+                      Next
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                  </div>
+                  <p className="mt-4 text-xs text-slate-400">
+                    Tip: Use <kbd className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> to flip, <kbd className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px]">&larr;</kbd> <kbd className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px]">&rarr;</kbd> to navigate
+                  </p>
+                </>
+              ) : null}
+            </div>
+          </section>
+        </div>
+
+        {toast && (
+          <div className="fixed right-6 top-24 z-50 animate-[slideIn_0.3s_ease-out]">
+            <div className="rounded-2xl bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-lg border border-slate-100">{toast}</div>
+          </div>
+        )}
+      </main>
+    )
   }
 
   return (

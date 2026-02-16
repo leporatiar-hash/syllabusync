@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import posthog from 'posthog-js'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 
 interface Props {
@@ -38,6 +39,7 @@ export default function CanvasConnectModal({ onClose, onSuccess }: Props) {
       })
 
       if (res.ok) {
+        posthog.capture('lms_connected', { provider: 'canvas' })
         onSuccess()
       } else {
         const data = await res.json().catch(() => ({}))

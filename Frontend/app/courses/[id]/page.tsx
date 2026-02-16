@@ -402,7 +402,7 @@ export default function CourseDetailPage() {
         throw new Error(data.detail || 'Failed to parse syllabus')
       }
       setSyllabusSuccess(true)
-      posthog.capture('syllabus_uploaded')
+      posthog.capture('syllabus_uploaded', { course_id: courseId })
       setSyllabusFile(null)
       setDeadlineTabTouched(false)
       await loadCourse()
@@ -477,9 +477,10 @@ export default function CourseDetailPage() {
       }
 
       setFlashcardSuccess(true)
-      if (generateFlashcards) posthog.capture('flashcard_set_created')
-      if (generateQuiz) posthog.capture('quiz_generated')
-      if (generateSummary) posthog.capture('summary_generated')
+      posthog.capture('material_uploaded', { course_id: courseId })
+      if (generateFlashcards) posthog.capture('flashcard_set_created', { course_id: courseId })
+      if (generateQuiz) posthog.capture('quiz_generated', { course_id: courseId })
+      if (generateSummary) posthog.capture('summary_generated', { course_id: courseId })
       setStudyFile(null)
       const refreshed = await fetchWithAuth(`${API_URL}/courses/${courseId}`, { cache: 'no-store' })
       if (refreshed.ok) {

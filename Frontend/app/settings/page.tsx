@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
+import posthog from 'posthog-js'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
@@ -201,6 +202,7 @@ export default function SettingsPage() {
     try {
       const res = await fetchWithAuth(`${API_URL}/lms/sync`, { method: 'POST' })
       if (res.ok) {
+        posthog.capture('deadlines_synced')
         await loadLmsConnections()
       } else {
         const data = await res.json().catch(() => ({}))

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
+import posthog from 'posthog-js'
 import { supabase } from './supabaseClient'
 
 interface AuthState {
@@ -96,6 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signOut = async () => {
+    posthog.capture('user_logged_out')
     await supabase.auth.signOut()
   }
 

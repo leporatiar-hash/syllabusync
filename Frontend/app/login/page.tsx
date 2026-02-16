@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import posthog from 'posthog-js'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 
@@ -40,6 +41,7 @@ function LoginContent() {
         setError(error.message)
         setSubmitting(false)
       } else {
+        posthog.capture('user_logged_in')
         // Client-side navigation keeps the existing HTTP/2 connection alive;
         // a hard reload (window.location.href) opens a new TCP stream that
         // can hit a RST from the Railway edge proxy after an idle period.

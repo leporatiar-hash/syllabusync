@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import posthog from 'posthog-js'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 
@@ -48,6 +49,7 @@ export default function SignupPage() {
         setError(error.message)
         setSubmitting(false)
       } else {
+        posthog.capture('user_signed_up')
         router.push('/onboarding')
       }
     } catch (err) {

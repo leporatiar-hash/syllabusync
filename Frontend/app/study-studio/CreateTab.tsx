@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import posthog from 'posthog-js'
 
@@ -15,7 +16,17 @@ interface GeneratedTools {
   summary?: any
 }
 
+interface SavedResult {
+  courseName: string
+  courseId: string
+  flashcardSetId?: string
+  quizId?: string
+  summaryId?: string
+  tools: GeneratedTools
+}
+
 export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
+  const router = useRouter()
   const { fetchWithAuth } = useAuthFetch()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -28,6 +39,7 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
   const [error, setError] = useState<string | null>(null)
   const [generatedTools, setGeneratedTools] = useState<GeneratedTools | null>(null)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [savedResult, setSavedResult] = useState<SavedResult | null>(null)
   const dragCounter = useRef(0)
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -127,6 +139,10 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
     setError(null)
 
     try {
+      let flashcardSetId: string | undefined
+      let quizId: string | undefined
+      let summaryId: string | undefined
+
       // Generate flashcards
       if (generatedTools.flashcards) {
         const flashcardsFormData = new FormData()
@@ -143,6 +159,8 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
           const data = await flashcardsRes.json().catch(() => ({}))
           throw new Error(data.detail || 'Failed to generate flashcards')
         }
+        const flashcardsData = await flashcardsRes.json().catch(() => ({}))
+        flashcardSetId = flashcardsData.id
       }
 
       // Generate quiz
@@ -161,6 +179,8 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
           const data = await quizRes.json().catch(() => ({}))
           throw new Error(data.detail || 'Failed to generate quiz')
         }
+        const quizData = await quizRes.json().catch(() => ({}))
+        quizId = quizData.id
       }
 
       // Generate summary
@@ -179,20 +199,28 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
           const data = await summaryRes.json().catch(() => ({}))
           throw new Error(data.detail || 'Failed to generate summary')
         }
+        const summaryData = await summaryRes.json().catch(() => ({}))
+        summaryId = summaryData.id
       }
 
       // Success!
-      if (generatedTools.flashcards) posthog.capture('flashcard_set_created')
-      if (generatedTools.quiz) posthog.capture('quiz_generated')
-      if (generatedTools.summary) posthog.capture('summary_generated')
+      posthog.capture('material_uploaded', { course_id: selectedCourse })
+      if (generatedTools.flashcards) posthog.capture('flashcard_set_created', { course_id: selectedCourse })
+      if (generatedTools.quiz) posthog.capture('quiz_generated', { course_id: selectedCourse })
+      if (generatedTools.summary) posthog.capture('summary_generated', { course_id: selectedCourse })
+
+      const course = courses.find((c) => c.id === selectedCourse)
+      const courseName = course ? (course.code ? `${course.code} — ${course.name}` : course.name) : 'your course'
+
+      setSavedResult({
+        courseName,
+        courseId: selectedCourse,
+        flashcardSetId,
+        quizId,
+        summaryId,
+        tools: { ...generatedTools },
+      })
       onSuccess()
-      setSelectedCourse('')
-      setGenerateFlashcards(true)
-      setGenerateQuiz(false)
-      setGenerateSummary(false)
-      setGeneratedTools(null)
-      setUploadedFile(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -204,56 +232,133 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
     setGeneratedTools(null)
     setUploadedFile(null)
     setSelectedCourse('')
+    setSavedResult(null)
     setError(null)
+    setGenerateFlashcards(true)
+    setGenerateQuiz(false)
+    setGenerateSummary(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // Show course selector after generation
+  // Show success screen after saving
+  if (savedResult) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-3xl border border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-white shadow-lg">
+            <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-bold text-green-900">Saved to {savedResult.courseName}</h3>
+          <p className="mt-2 text-sm text-green-700">
+            Your study tools are ready. What would you like to do next?
+          </p>
+
+          {/* What was created */}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {savedResult.tools.flashcards && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-green-800 shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+                Flashcards
+              </span>
+            )}
+            {savedResult.tools.quiz && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-green-800 shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                Quiz
+              </span>
+            )}
+            {savedResult.tools.summary && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-green-800 shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
+                Summary
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {savedResult.flashcardSetId && (
+            <button
+              onClick={() => router.push(`/flashcards?set=${savedResult.flashcardSetId}`)}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#8B5CF6] to-[#A78BFA] px-6 py-4 text-base font-semibold text-white shadow-sm transition-all hover:opacity-90"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+              Study Flashcards
+            </button>
+          )}
+          {savedResult.quizId && (
+            <button
+              onClick={() => router.push(`/quizzes/${savedResult.quizId}`)}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#F59E0B] to-[#FBBF24] px-6 py-4 text-base font-semibold text-white shadow-sm transition-all hover:opacity-90"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+              Take Quiz
+            </button>
+          )}
+          {savedResult.summaryId && (
+            <button
+              onClick={() => router.push(`/summaries/${savedResult.summaryId}`)}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-4 text-base font-semibold text-white shadow-sm transition-all hover:opacity-90"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
+              Read Summary
+            </button>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleStartOver}
+            className="flex-1 rounded-2xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-4 text-base font-semibold text-white shadow-sm transition-all hover:opacity-90"
+          >
+            Create Another
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Show course selector after file upload
   if (generatedTools) {
     return (
       <div className="space-y-6">
-        {/* Success message */}
-        <div className="rounded-3xl border border-green-200 bg-green-50 p-6">
+        {/* File ready message */}
+        <div className="rounded-3xl border border-[#5B8DEF]/20 bg-[#F0F6FF] p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500 text-white">
-              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M20 6L9 17l-5-5" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#5B8DEF] text-white">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <path d="M14 2v6h6" />
               </svg>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-green-900">Study Tools Generated!</h3>
-              <p className="text-sm text-green-700">Select a course to save your {uploadedFile?.name}</p>
+              <h3 className="text-lg font-semibold text-slate-900">{uploadedFile?.name}</h3>
+              <p className="text-sm text-slate-600">Choose a course and hit save to generate your study tools</p>
             </div>
           </div>
 
-          {/* Generated tools list */}
-          <div className="mb-4 space-y-2">
+          {/* Tools to generate */}
+          <div className="mb-2 flex flex-wrap gap-2">
             {generatedTools.flashcards && (
-              <div className="flex items-center gap-2 text-sm text-green-800">
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <path d="M3 9h18M9 21V9" />
-                </svg>
-                <span>Flashcards ready</span>
-              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#8B5CF6] shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+                Flashcards
+              </span>
             )}
             {generatedTools.quiz && (
-              <div className="flex items-center gap-2 text-sm text-green-800">
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-                </svg>
-                <span>Quiz ready</span>
-              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#F59E0B] shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                Quiz
+              </span>
             )}
             {generatedTools.summary && (
-              <div className="flex items-center gap-2 text-sm text-green-800">
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                  <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-                </svg>
-                <span>Summary ready</span>
-              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#5B8DEF] shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
+                Summary
+              </span>
             )}
           </div>
         </div>
@@ -292,7 +397,15 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
             disabled={!selectedCourse || saving}
             className="flex-1 rounded-2xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-4 text-lg font-semibold text-white shadow-sm transition-all hover:opacity-90 disabled:opacity-50"
           >
-            {saving ? 'Saving...' : 'Save to Course'}
+            {saving ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Generating...
+              </span>
+            ) : 'Generate & Save'}
           </button>
           <button
             onClick={handleStartOver}
