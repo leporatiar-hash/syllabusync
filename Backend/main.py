@@ -667,6 +667,25 @@ def extract_text_from_docx(content: bytes) -> str:
         )
 
 
+def split_text_into_chunks(text: str, chunk_size: int = 12000) -> list[str]:
+    """Split text into chunks at paragraph/sentence boundaries."""
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        if end < len(text):
+            paragraph_break = text.rfind("\n\n", start, end)
+            if paragraph_break > start + chunk_size // 2:
+                end = paragraph_break
+            else:
+                sentence_break = text.rfind(". ", start, end)
+                if sentence_break > start + chunk_size // 2:
+                    end = sentence_break + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
 async def generate_summary_from_text(text: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
@@ -699,29 +718,7 @@ Focus on key concepts, definitions, and important facts.
     # For long documents, use chunked summarization with map-reduce approach
     print(f"[DEBUG] Large document detected ({len(text)} chars). Using chunked summarization.")
 
-    # Split text into chunks of ~10,000 characters, breaking at paragraph boundaries
-    chunk_size = 10000
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = start + chunk_size
-
-        # If this isn't the last chunk, try to break at a paragraph or sentence boundary
-        if end < len(text):
-            # Look for paragraph break (double newline)
-            paragraph_break = text.rfind("\n\n", start, end)
-            if paragraph_break > start + chunk_size // 2:  # Only use if it's in the latter half of the chunk
-                end = paragraph_break
-            else:
-                # Fall back to sentence break (period followed by space or newline)
-                sentence_break = text.rfind(". ", start, end)
-                if sentence_break > start + chunk_size // 2:
-                    end = sentence_break + 1
-
-        chunks.append(text[start:end])
-        start = end
-
+    chunks = split_text_into_chunks(text, chunk_size=10000)
     print(f"[DEBUG] Split into {len(chunks)} chunks for summarization")
 
     # Generate summaries for each chunk
@@ -2256,16 +2253,13 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
 
         print(f"[DEBUG] Generating flashcards from {len(text)} characters")
 
-        # Truncate if too long
-        max_chars = 15000
-        if len(text) > max_chars:
-            text = text[:max_chars]
-
         flashcards_data = []
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
-            # Generate flashcards with OpenAI
-            system_prompt = """You are a study assistant. Generate flashcards from the provided study material.
+            chunk_limit = 40000  # ~10k tokens — fits well within gpt-4o-mini context
+            if len(text) <= chunk_limit:
+                # Single-pass for short/medium documents
+                system_prompt = """You are a study assistant. Generate flashcards from the provided study material.
 
 Return ONLY a valid JSON array with 10-20 flashcards:
 [
@@ -2282,26 +2276,68 @@ Focus on:
 
 Make questions clear and answers concise but complete."""
 
-            try:
-                response = await client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Generate flashcards from this material:\n\n{text}"}
-                    ],
-                    temperature=0.3,
-                    max_tokens=4000
-                )
+                try:
+                    response = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"Generate flashcards from this material:\n\n{text}"}
+                        ],
+                        temperature=0.3,
+                        max_tokens=4000
+                    )
 
-                result = response.choices[0].message.content
-                print(f"[DEBUG] Flashcard response: {result[:500]}...")
+                    result = response.choices[0].message.content
+                    print(f"[DEBUG] Flashcard response: {result[:500]}...")
 
-                flashcards_data = parse_json_response(result)
-                print(f"[DEBUG] Generated {len(flashcards_data)} flashcards")
-            except Exception as e:
-                _raise_if_openai_error(e)  # don't silently fall back on auth / rate-limit
-                print(f"[WARN] OpenAI flashcard generation failed: {e}")
-                flashcards_data = generate_flashcards_fallback(text)
+                    flashcards_data = parse_json_response(result)
+                    print(f"[DEBUG] Generated {len(flashcards_data)} flashcards")
+                except Exception as e:
+                    _raise_if_openai_error(e)
+                    print(f"[WARN] OpenAI flashcard generation failed: {e}")
+                    flashcards_data = generate_flashcards_fallback(text)
+            else:
+                # Chunked generation for large documents
+                chunks = split_text_into_chunks(text, chunk_size=12000)
+                print(f"[DEBUG] Large document detected ({len(text)} chars). Split into {len(chunks)} chunks for flashcard generation.")
+
+                cards_per_chunk = max(5, 20 // len(chunks))
+                all_cards = []
+                for i, chunk in enumerate(chunks):
+                    chunk_prompt = f"""You are a study assistant. This is section {i+1} of {len(chunks)} from a larger document.
+Generate {cards_per_chunk}-{cards_per_chunk + 5} flashcards from THIS section only.
+
+Return ONLY a valid JSON array:
+[{{"front": "Question or term", "back": "Answer or definition"}}]
+
+Focus on key concepts, definitions, important facts, and formulas. Make questions clear and answers concise."""
+                    try:
+                        response = await client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {"role": "system", "content": chunk_prompt},
+                                {"role": "user", "content": chunk}
+                            ],
+                            temperature=0.3,
+                            max_tokens=2000
+                        )
+                        chunk_cards = parse_json_response(response.choices[0].message.content)
+                        if isinstance(chunk_cards, list):
+                            all_cards.extend(chunk_cards)
+                        print(f"[DEBUG] Chunk {i+1}/{len(chunks)}: generated {len(chunk_cards)} flashcards")
+                    except Exception as e:
+                        _raise_if_openai_error(e)
+                        print(f"[WARN] Chunk {i+1} flashcard generation failed: {e}")
+
+                # Deduplicate: remove cards with very similar fronts
+                seen_fronts = set()
+                for card in all_cards:
+                    front_key = card.get("front", "").lower().strip()
+                    if front_key and front_key not in seen_fronts:
+                        seen_fronts.add(front_key)
+                        flashcards_data.append(card)
+
+                print(f"[DEBUG] Total flashcards after dedup: {len(flashcards_data)}")
         else:
             print("[WARN] OPENAI_API_KEY not set; using fallback flashcard generator")
             flashcards_data = generate_flashcards_fallback(text)
@@ -2534,17 +2570,16 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
         if len(text.strip()) < 50:
             raise HTTPException(status_code=400, detail="Could not extract enough text from file")
 
-        # Truncate if too long
-        max_chars = 15000
-        if len(text) > max_chars:
-            text = text[:max_chars]
-
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise HTTPException(status_code=500, detail="Quiz generation requires OpenAI API key")
 
-        # Generate quiz with OpenAI
-        system_prompt = """You are a study assistant. Generate a multiple-choice quiz from the provided study material.
+        chunk_limit = 40000
+        questions = []
+
+        if len(text) <= chunk_limit:
+            # Single-pass for short/medium documents
+            system_prompt = """You are a study assistant. Generate a multiple-choice quiz from the provided study material.
 
 Return ONLY a valid JSON object with this structure:
 {
@@ -2566,36 +2601,82 @@ Guidelines:
 - Make distractors (wrong answers) plausible
 - Keep explanations concise (1-2 sentences)"""
 
-        try:
-            response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Generate a quiz from this material:\n\n{text}"}
-                ],
-                temperature=0.4,
-                max_tokens=4000
-            )
+            try:
+                response = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Generate a quiz from this material:\n\n{text}"}
+                    ],
+                    temperature=0.4,
+                    max_tokens=4000
+                )
 
-            result = response.choices[0].message.content
-            print(f"[DEBUG] Quiz response: {result[:500]}...")
+                result = response.choices[0].message.content
+                print(f"[DEBUG] Quiz response: {result[:500]}...")
 
-            quiz_data = parse_json_response(result)
+                quiz_data = parse_json_response(result)
 
-            # Handle both array and object responses
-            if isinstance(quiz_data, list):
-                questions = quiz_data
-            elif isinstance(quiz_data, dict) and "questions" in quiz_data:
-                questions = quiz_data["questions"]
-            else:
-                raise ValueError("Invalid quiz format from AI")
+                if isinstance(quiz_data, list):
+                    questions = quiz_data
+                elif isinstance(quiz_data, dict) and "questions" in quiz_data:
+                    questions = quiz_data["questions"]
+                else:
+                    raise ValueError("Invalid quiz format from AI")
 
-            print(f"[DEBUG] Generated {len(questions)} quiz questions")
+                print(f"[DEBUG] Generated {len(questions)} quiz questions")
 
-        except Exception as e:
-            _raise_if_openai_error(e)
-            print(f"[ERROR] Quiz generation failed: {e}")
-            raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
+            except Exception as e:
+                _raise_if_openai_error(e)
+                print(f"[ERROR] Quiz generation failed: {e}")
+                raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
+        else:
+            # Chunked generation for large documents
+            chunks = split_text_into_chunks(text, chunk_size=12000)
+            print(f"[DEBUG] Large document detected ({len(text)} chars). Split into {len(chunks)} chunks for quiz generation.")
+
+            qs_per_chunk = max(2, 10 // len(chunks))
+            all_questions = []
+            for i, chunk in enumerate(chunks):
+                chunk_prompt = f"""You are a study assistant. This is section {i+1} of {len(chunks)} from a larger document.
+Generate {qs_per_chunk}-{qs_per_chunk + 2} multiple-choice questions from THIS section only.
+
+Return ONLY a valid JSON object:
+{{"questions": [{{"question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": "B", "explanation": "..."}}]}}
+
+Each question must have exactly 4 options (A, B, C, D). Test understanding, not just memorization."""
+                try:
+                    response = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": chunk_prompt},
+                            {"role": "user", "content": chunk}
+                        ],
+                        temperature=0.4,
+                        max_tokens=2000
+                    )
+                    chunk_data = parse_json_response(response.choices[0].message.content)
+                    if isinstance(chunk_data, list):
+                        chunk_qs = chunk_data
+                    elif isinstance(chunk_data, dict) and "questions" in chunk_data:
+                        chunk_qs = chunk_data["questions"]
+                    else:
+                        chunk_qs = []
+                    all_questions.extend(chunk_qs)
+                    print(f"[DEBUG] Chunk {i+1}/{len(chunks)}: generated {len(chunk_qs)} quiz questions")
+                except Exception as e:
+                    _raise_if_openai_error(e)
+                    print(f"[WARN] Chunk {i+1} quiz generation failed: {e}")
+
+            # Deduplicate by question text
+            seen = set()
+            for q in all_questions:
+                q_key = q.get("question", "").lower().strip()
+                if q_key and q_key not in seen:
+                    seen.add(q_key)
+                    questions.append(q)
+
+            print(f"[DEBUG] Total quiz questions after dedup: {len(questions)}")
 
         # Create quiz
         quiz = Quiz(

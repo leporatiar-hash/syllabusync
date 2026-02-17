@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2 } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import posthog from 'posthog-js'
@@ -60,6 +60,7 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [filterCourse, setFilterCourse] = useState<string>('all')
   const [filterType, setFilterType] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -154,8 +155,18 @@ export default function CalendarPage() {
     if (filterType !== 'all') {
       filtered = filtered.filter((d) => d.type === filterType)
     }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      filtered = filtered.filter(
+        (d) =>
+          d.title.toLowerCase().includes(q) ||
+          d.course_name?.toLowerCase().includes(q) ||
+          d.course_code?.toLowerCase().includes(q) ||
+          d.description?.toLowerCase().includes(q)
+      )
+    }
     return filtered
-  }, [deadlines, filterCourse, filterType])
+  }, [deadlines, filterCourse, filterType, searchQuery])
 
   const getDeadlinesForDate = (day: number) => {
     const dateStr = formatDateStr(day)
@@ -522,13 +533,33 @@ export default function CalendarPage() {
               <option value="Deadline">Deadlines</option>
             </select>
           </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-1.5 md:gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-3 py-1.5 md:px-5 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-          >
-            <span className="text-base md:text-lg">+</span>
-            <span>New Deadline</span>
-          </button>
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search deadlines..."
+                className="w-[140px] md:w-[200px] rounded-full border border-slate-200 bg-white py-1.5 md:py-2 pl-8 md:pl-9 pr-7 md:pr-8 text-xs font-medium text-slate-700 shadow-sm outline-none transition-all duration-300 placeholder:text-slate-400 focus:w-[180px] md:focus:w-[260px] focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-1.5 md:gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-3 py-1.5 md:px-5 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+            >
+              <span className="text-base md:text-lg">+</span>
+              <span>New Deadline</span>
+            </button>
+          </div>
         </div>
 
         {loading ? (

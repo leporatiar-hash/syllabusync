@@ -56,12 +56,23 @@ export default function RootLayout({
           <FeedbackButton />
           {/* Deployment marker: d569228-feedback-button-v2 */}
           <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+              <span>&copy; {new Date().getFullYear()} ClassMate</span>
+              <div className="flex items-center gap-4">
+                <Link href="/privacy" className="hover:text-slate-600 transition-colors">
+                  Privacy Policy
+                </Link>
+                <Link href="/terms" className="hover:text-slate-600 transition-colors">
+                  Terms of Service
+                </Link>
+              </div>
+            </div>
             {process.env.NODE_ENV !== "production" && (
-              <>
+              <div className="mt-2">
                 Build: {buildTimestamp} | id: {buildId}
                 {buildSha ? ` | sha: ${buildSha}` : ""}
                 <AuthDebug />
-              </>
+              </div>
             )}
           </footer>
         </AuthWrapper>

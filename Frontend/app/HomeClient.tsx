@@ -35,6 +35,7 @@ const features = [
   {
     title: 'Parse Syllabi',
     description: 'Upload and extract deadlines in seconds with AI-powered parsing.',
+    href: '/courses',
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M8 7h8M8 11h8M8 15h5" />
@@ -45,6 +46,7 @@ const features = [
   {
     title: 'Study Smart',
     description: 'Generate flashcards from your materials and review efficiently.',
+    href: '/study-studio',
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M4 7h12a3 3 0 0 1 3 3v7" />
@@ -56,6 +58,7 @@ const features = [
   {
     title: 'Stay Organized',
     description: 'See all deadlines at a glance with a calendar view.',
+    href: '/calendar',
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
         <rect x="3" y="4" width="18" height="17" rx="3" />
@@ -333,8 +336,9 @@ export default function HomeClient() {
       <section className="mx-auto max-w-6xl px-4 py-16">
         <div className="grid gap-6 md:grid-cols-3">
           {features.map((feature) => (
-            <div
+            <Link
               key={feature.title}
+              href={feature.href}
               className="group rounded-2xl border border-white bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
             >
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
@@ -342,7 +346,7 @@ export default function HomeClient() {
               </div>
               <h3 className="text-lg font-semibold text-slate-900">{feature.title}</h3>
               <p className="mt-2 text-sm text-slate-600">{feature.description}</p>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
