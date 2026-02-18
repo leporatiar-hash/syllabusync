@@ -203,7 +203,7 @@ export default function LandingPage() {
       <section id="how-it-works" className="py-20 px-6 bg-gradient-to-br from-[#F8FAFF] to-[#EEF2FF]">
         <div className="max-w-4xl mx-auto text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">How ClassMate works</h2>
-          <p className="text-xl text-slate-600">Three steps. That's it.</p>
+          <p className="text-xl text-slate-600">Four steps. That's it.</p>
         </div>
 
         <div className="max-w-5xl mx-auto space-y-20">
@@ -295,6 +295,77 @@ export default function LandingPage() {
                 <span className="w-6 h-6 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] text-white text-xs font-bold flex items-center justify-center">
                   3
                 </span>
+                <span className="text-sm font-semibold text-slate-900">Sync your LMS</span>
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-4">
+                Connect Canvas or iCal in one click.
+              </h3>
+              <p className="text-slate-600 leading-relaxed">
+                Already have assignments in Canvas or your school calendar? Connect your LMS and ClassMate imports every due date automatically — no manual entry needed.
+              </p>
+            </div>
+            <div className="relative w-full max-w-[600px] mx-auto">
+              <div className="flex flex-col gap-4 rounded-2xl shadow-2xl border border-slate-200/60 bg-white p-8">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
+                    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h4 className="text-base font-semibold text-slate-900">Canvas LMS</h4>
+                    <p className="text-sm text-slate-500">Import assignments, quizzes & exams</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#A78BFA]">
+                    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <rect x="3" y="4" width="18" height="17" rx="3" />
+                      <path d="M8 2v4M16 2v4M3 10h18" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h4 className="text-base font-semibold text-slate-900">iCal Feed</h4>
+                    <p className="text-sm text-slate-500">Sync any school calendar feed</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 mt-2 rounded-xl bg-green-50 p-4">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-green-500 shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  <p className="text-sm text-green-700 font-medium">Deadlines auto-match to your courses</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 4 */}
+          <div
+            id="step-4"
+            data-reveal
+            className={`grid md:grid-cols-2 gap-12 items-center transition-all duration-700 ${
+              isVisible('step-4') ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-12'
+            }`}
+          >
+            <div className="order-2 md:order-1">
+              <div className="relative w-full max-w-[600px] mx-auto">
+                <div className="relative w-full aspect-[16/10] rounded-2xl shadow-2xl overflow-hidden border border-slate-200/60 bg-white p-4 md:p-5">
+                  <Image
+                    src="/screenshot-study-tools.png"
+                    fill
+                    className="object-contain"
+                    alt="Study tools screenshot"
+                    sizes="(max-width: 768px) 100vw, 600px"
+                    quality={95}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="order-1 md:order-2">
+              <div className="inline-flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-sm mb-4">
+                <span className="w-6 h-6 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] text-white text-xs font-bold flex items-center justify-center">
+                  4
+                </span>
                 <span className="text-sm font-semibold text-slate-900">Study smarter</span>
               </div>
               <h3 className="text-2xl font-bold text-slate-900 mb-4">
@@ -304,18 +375,6 @@ export default function LandingPage() {
                 Upload lecture notes, slides, or readings. ClassMate generates flashcards, practice quizzes, and study
                 summaries instantly.
               </p>
-            </div>
-            <div className="relative w-full max-w-[600px] mx-auto">
-              <div className="relative w-full aspect-[16/10] rounded-2xl shadow-2xl overflow-hidden border border-slate-200/60 bg-white p-4 md:p-5">
-                <Image
-                  src="/screenshot-study-tools.png"
-                  fill
-                  className="object-contain"
-                  alt="Study tools screenshot"
-                  sizes="(max-width: 768px) 100vw, 600px"
-                  quality={95}
-                />
-              </div>
             </div>
           </div>
         </div>
