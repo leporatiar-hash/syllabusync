@@ -495,13 +495,13 @@ export default function LandingPage() {
             <span className="font-bold">ClassMate</span>
           </div>
           <div className="flex gap-6 text-sm text-slate-400">
-            <a href="#" className="hover:text-white transition-colors">
+            <a href="/privacy" className="hover:text-white transition-colors">
               Privacy
             </a>
-            <a href="#" className="hover:text-white transition-colors">
+            <a href="/terms" className="hover:text-white transition-colors">
               Terms
             </a>
-            <a href="#" className="hover:text-white transition-colors">
+            <a href="mailto:leporatialex@gmail.com" className="hover:text-white transition-colors">
               Contact
             </a>
           </div>
