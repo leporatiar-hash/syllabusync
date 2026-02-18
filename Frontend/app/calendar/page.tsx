@@ -788,8 +788,6 @@ export default function CalendarPage() {
                       const dateStr = formatFullDate(d)
                       const isToday = todayStr === dateStr
                       const dayDeadlines = getDeadlinesForFullDate(dateStr)
-                      const weekMobileMax = 3
-
                       return (
                         <div
                           key={dateStr}
@@ -801,32 +799,27 @@ export default function CalendarPage() {
                             {dayDeadlines.length === 0 ? (
                               <div className="text-center text-xs text-slate-300 pt-4">—</div>
                             ) : (
-                              <>
-                                {dayDeadlines.slice(0, weekMobileMax).map((deadline) => {
-                                  const courseColor = courseColors[deadline.course_id]
-                                  return (
-                                    <button
-                                      key={deadline.id}
-                                      onClick={() => setSelectedDeadline(deadline)}
-                                      className={`w-full rounded px-2 py-1.5 text-left transition-all duration-150 ${
-                                        deadline.type === 'Class'
-                                          ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
-                                          : (courseColor?.bg || 'bg-slate-400')
-                                      } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
-                                    >
-                                      <div className={`font-medium truncate text-[10px] md:text-xs ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
-                                        {deadline.title}
-                                      </div>
-                                      {deadline.time && (
-                                        <div className={`hidden sm:block text-[10px] mt-0.5 ${deadline.type === 'Class' ? 'text-slate-400' : 'text-white/80'}`}>{deadline.time}</div>
-                                      )}
-                                    </button>
-                                  )
-                                })}
-                                {dayDeadlines.length > weekMobileMax && (
-                                  <div className="text-center text-[10px] font-medium text-slate-500">+{dayDeadlines.length - weekMobileMax}</div>
-                                )}
-                              </>
+                              dayDeadlines.map((deadline) => {
+                                const courseColor = courseColors[deadline.course_id]
+                                return (
+                                  <button
+                                    key={deadline.id}
+                                    onClick={() => setSelectedDeadline(deadline)}
+                                    className={`w-full rounded px-2 py-1.5 text-left transition-all duration-150 ${
+                                      deadline.type === 'Class'
+                                        ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
+                                        : (courseColor?.bg || 'bg-slate-400')
+                                    } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
+                                  >
+                                    <div className={`font-medium truncate text-[10px] md:text-xs ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
+                                      {deadline.title}
+                                    </div>
+                                    {deadline.time && (
+                                      <div className={`hidden sm:block text-[10px] mt-0.5 ${deadline.type === 'Class' ? 'text-slate-400' : 'text-white/80'}`}>{deadline.time}</div>
+                                    )}
+                                  </button>
+                                )
+                              })
                             )}
                           </div>
                         </div>
