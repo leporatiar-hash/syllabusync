@@ -14,6 +14,43 @@ interface LibraryTabProps {
 
 type TypeFilter = 'all' | 'flashcards' | 'quiz' | 'summary'
 
+// Blue-family color system
+const typeStyles = {
+  flashcards: {
+    btn: 'bg-[#3b82f6]',
+    btnHover: 'hover:bg-[#2563eb] hover:shadow-[0_4px_12px_rgba(59,130,246,0.4)]',
+    bg: 'bg-[#eff6ff]',
+    border: 'border-[#bfdbfe]',
+    text: 'text-[#2563eb]',
+    gradient: 'from-[#2563eb] to-[#60a5fa]',
+    iconBg: 'bg-[#eff6ff] text-[#2563eb]',
+    statBg: 'bg-[#eff6ff]',
+    statIcon: 'bg-[#3b82f6]',
+  },
+  quiz: {
+    btn: 'bg-[#0ea5e9]',
+    btnHover: 'hover:bg-[#0369a1] hover:shadow-[0_4px_12px_rgba(14,165,233,0.4)]',
+    bg: 'bg-[#f0f9ff]',
+    border: 'border-[#bae6fd]',
+    text: 'text-[#0369a1]',
+    gradient: 'from-[#0369a1] to-[#38bdf8]',
+    iconBg: 'bg-[#f0f9ff] text-[#0369a1]',
+    statBg: 'bg-[#f0f9ff]',
+    statIcon: 'bg-[#0ea5e9]',
+  },
+  summary: {
+    btn: 'bg-[#6366f1]',
+    btnHover: 'hover:bg-[#4338ca] hover:shadow-[0_4px_12px_rgba(99,102,241,0.4)]',
+    bg: 'bg-[#eef2ff]',
+    border: 'border-[#c7d2fe]',
+    text: 'text-[#4338ca]',
+    gradient: 'from-[#4338ca] to-[#818cf8]',
+    iconBg: 'bg-[#eef2ff] text-[#4338ca]',
+    statBg: 'bg-[#eef2ff]',
+    statIcon: 'bg-[#6366f1]',
+  },
+}
+
 export default function LibraryTab({ courses, studyTools, loading, onDelete }: LibraryTabProps) {
   const router = useRouter()
   const { fetchWithAuth } = useAuthFetch()
@@ -87,6 +124,12 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
     toolsByCourse[tool.course_id].push(tool)
   })
 
+  const getStyle = (type: string) => {
+    if (type === 'flashcards') return typeStyles.flashcards
+    if (type === 'quiz') return typeStyles.quiz
+    return typeStyles.summary
+  }
+
   const getToolIcon = (type: string) => {
     if (type === 'flashcards') {
       return (
@@ -112,16 +155,10 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
     )
   }
 
-  const getToolGradient = (type: string) => {
-    if (type === 'flashcards') return 'from-[#8B5CF6] to-[#A78BFA]'
-    if (type === 'quiz') return 'from-[#F59E0B] to-[#FBBF24]'
-    return 'from-[#5B8DEF] to-[#7C9BF6]'
-  }
-
   const getToolBadge = (type: string) => {
-    if (type === 'flashcards') return { label: 'Flashcards', bg: 'bg-purple-50 text-purple-700' }
-    if (type === 'quiz') return { label: 'Quiz', bg: 'bg-amber-50 text-amber-700' }
-    return { label: 'Summary', bg: 'bg-blue-50 text-blue-700' }
+    if (type === 'flashcards') return 'Flashcards'
+    if (type === 'quiz') return 'Quiz'
+    return 'Summary'
   }
 
   const getActionLabel = (type: string) => {
@@ -136,13 +173,13 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
         {/* Skeleton stats */}
         <div className="grid grid-cols-3 gap-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+            <div key={i} className="h-20 animate-pulse rounded-[14px] bg-slate-100" />
           ))}
         </div>
         {/* Skeleton cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="h-40 animate-pulse rounded-2xl bg-slate-100" />
+            <div key={i} className="h-40 animate-pulse rounded-[14px] bg-slate-100" />
           ))}
         </div>
       </div>
@@ -153,9 +190,9 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
     <div className="space-y-6">
       {/* Stats bar */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-2xl bg-gradient-to-br from-purple-50 to-purple-100/50 p-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#8B5CF6] text-white">
+        <div className="rounded-[14px] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_4px_16px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-[9px] ${typeStyles.flashcards.statIcon} text-white`}>
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M3 9h18M9 21V9" />
@@ -167,9 +204,9 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
             </div>
           </div>
         </div>
-        <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100/50 p-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F59E0B] text-white">
+        <div className="rounded-[14px] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_4px_16px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-[9px] ${typeStyles.quiz.statIcon} text-white`}>
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 11l3 3L22 4" />
                 <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
@@ -181,9 +218,9 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
             </div>
           </div>
         </div>
-        <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100/50 p-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#5B8DEF] text-white">
+        <div className="rounded-[14px] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_4px_16px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-[9px] ${typeStyles.summary.statIcon} text-white`}>
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                 <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
@@ -210,7 +247,7 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search study tools..."
-            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 shadow-sm transition-all placeholder:text-slate-400 focus:border-[#5B8DEF] focus:outline-none focus:ring-2 focus:ring-[#5B8DEF]/20"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 shadow-sm transition-all duration-200 placeholder:text-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/20"
           />
         </div>
 
@@ -224,10 +261,10 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
               <button
                 key={type}
                 onClick={() => setFilterType(type)}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-all duration-200 ${
                   isActive
-                    ? 'bg-[#5B8DEF] text-white shadow-sm'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#3b82f6] text-white shadow-sm'
+                    : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
                 {labels[type]}
@@ -239,7 +276,7 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
           <select
             value={filterCourse}
             onChange={(e) => setFilterCourse(e.target.value)}
-            className="ml-auto rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all focus:border-[#5B8DEF] focus:outline-none focus:ring-2 focus:ring-[#5B8DEF]/20"
+            className="ml-auto rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-200 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/20"
           >
             <option value="all">All Courses</option>
             {courses.map((course) => (
@@ -253,9 +290,9 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
 
       {/* Tools grouped by course */}
       {Object.keys(toolsByCourse).length === 0 ? (
-        <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-gradient-to-br from-slate-50 to-white p-12 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#EEF2FF]">
-            <svg viewBox="0 0 24 24" className="h-8 w-8 text-[#5B8DEF]" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <div className="rounded-[14px] border-2 border-dashed border-slate-200 bg-white p-12 text-center shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#eff6ff]">
+            <svg viewBox="0 0 24 24" className="h-8 w-8 text-[#3b82f6]" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
           </div>
@@ -278,12 +315,13 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
               <div key={courseId}>
                 {/* Course Header */}
                 <div className="mb-4 flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#5B8DEF] to-[#7C9BF6] text-xs font-bold text-white shadow-sm">
+                  <span className="flex h-6 min-w-[24px] items-center justify-center rounded-md bg-[#eff6ff] px-1.5 text-[11px] font-bold text-[#3b82f6]">
                     {tools.length}
-                  </div>
-                  <h3 className="text-base font-semibold text-slate-900">
+                  </span>
+                  <h3 className="text-sm font-bold text-slate-900">
                     {course.code ? `${course.code} — ${course.name}` : course.name}
                   </h3>
+                  <div className="h-px flex-1 bg-slate-200" />
                 </div>
 
                 {/* Tool Cards */}
@@ -293,24 +331,24 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
                     const createdDate = tool.created_at
                       ? new Date(tool.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                       : ''
-                    const badge = getToolBadge(tool.type)
+                    const style = getStyle(tool.type)
 
                     return (
                       <div
                         key={tool.id}
-                        className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-slate-200"
+                        className={`group relative overflow-hidden rounded-[14px] border bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] ${style.border} shadow-[0_1px_4px_rgba(0,0,0,0.06),0_4px_16px_rgba(0,0,0,0.04)]`}
                       >
-                        {/* Gradient accent bar */}
-                        <div className={`h-1 w-full bg-gradient-to-r ${getToolGradient(tool.type)}`} />
+                        {/* 3px gradient top border */}
+                        <div className={`h-[3px] w-full bg-gradient-to-r ${style.gradient}`} />
 
                         <div className="p-5">
                           {/* Top row: icon + badge */}
                           <div className="mb-3 flex items-start justify-between">
-                            <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${getToolGradient(tool.type)} text-white shadow-sm`}>
+                            <div className={`flex h-9 w-9 items-center justify-center rounded-[9px] ${style.iconBg}`}>
                               {getToolIcon(tool.type)}
                             </div>
-                            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badge.bg}`}>
-                              {badge.label}
+                            <span className={`rounded-full ${style.bg} ${style.border} border ${style.text} px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em]`}>
+                              {getToolBadge(tool.type)}
                             </span>
                           </div>
 
@@ -329,22 +367,22 @@ export default function LibraryTab({ courses, studyTools, loading, onDelete }: L
                             <button
                               onClick={() => handleAction(tool)}
                               disabled={isDeleting}
-                              className={`flex-1 rounded-xl bg-gradient-to-r ${getToolGradient(tool.type)} px-4 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50`}
+                              className={`flex-1 rounded-[9px] ${style.btn} px-4 py-2 text-sm font-semibold text-white transition-all duration-200 ${style.btnHover} disabled:opacity-50`}
                             >
                               {getActionLabel(tool.type)}
                             </button>
                             <button
                               onClick={() => handleDelete(tool)}
                               disabled={isDeleting}
-                              className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-400 transition-all hover:border-red-200 hover:text-red-500 disabled:opacity-50"
+                              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-400 transition-all duration-200 hover:border-red-300 hover:bg-[#fff1f2] hover:text-red-500 disabled:opacity-50"
                             >
                               {isDeleting ? (
-                                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                                 </svg>
                               ) : (
-                                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                                   <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                                 </svg>
                               )}
