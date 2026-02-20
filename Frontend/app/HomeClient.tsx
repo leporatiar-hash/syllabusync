@@ -385,7 +385,7 @@ export default function HomeClient() {
                 <div>
                   <h3 className="text-lg font-semibold text-white">Invite your friends</h3>
                   <p className="text-sm text-white/80">
-                    Share your link and study together on ClassMate.
+                    Know a student who could use this?
                     {referralCount > 0 && (
                       <span className="ml-1 font-semibold text-white">
                         {referralCount} friend{referralCount !== 1 ? 's' : ''} joined!
