@@ -972,7 +972,7 @@ def get_current_user(
     return _get_current_user(request, credentials, db)
 
 
-async def validate_file_upload(file: UploadFile, allowed_extensions: list[str], max_size_mb: int = 10):
+async def validate_file_upload(file: UploadFile, allowed_extensions: list[str], max_size_mb: int = 25):
     """
     Validate uploaded file for security and size constraints.
 
@@ -2027,7 +2027,7 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
     logger.info(f"[DEBUG] /courses/{course_id}/syllabus request received")
 
     # Validate file upload — PDF and DOCX both supported
-    content = await validate_file_upload(file, allowed_extensions=['.pdf', '.docx'], max_size_mb=10)
+    content = await validate_file_upload(file, allowed_extensions=['.pdf', '.docx'], max_size_mb=25)
     filename = (file.filename or "").lower()
 
     if filename.endswith(".docx"):
@@ -2132,7 +2132,7 @@ async def generate_summary(request: Request, course_id: str, file: UploadFile = 
             raise HTTPException(status_code=404, detail="Course not found")
 
         # Validate file upload - allow PDF, TXT, DOCX, and image files
-        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=10)
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=25)
         filename = file.filename.lower()
 
         if filename.endswith(".pdf"):
@@ -2228,7 +2228,7 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
             raise HTTPException(status_code=404, detail="Course not found")
 
         # Validate and extract text from file
-        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=10)
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=25)
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
@@ -2434,7 +2434,7 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
     user_id = current_user.id
 
     # Validate file upload — PDF and DOCX both supported
-    content = await validate_file_upload(file, allowed_extensions=['.pdf', '.docx'], max_size_mb=10)
+    content = await validate_file_upload(file, allowed_extensions=['.pdf', '.docx'], max_size_mb=25)
     filename = (file.filename or "").lower()
 
     try:
@@ -2547,7 +2547,7 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
             raise HTTPException(status_code=404, detail="Course not found")
 
         # Validate and extract text from file
-        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=10)
+        content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=25)
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):

@@ -86,13 +86,13 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
     const allowedExts = ['pdf', 'docx', 'txt', 'png', 'jpg', 'jpeg']
 
     if (!ext || !allowedExts.includes(ext)) {
-      setError('Supported formats: PDF, DOCX, TXT, PNG, JPG (max 10MB)')
+      setError('Supported formats: PDF, DOCX, TXT, PNG, JPG (max 25MB)')
       return
     }
 
     // Validate file size
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File is too large (max 10 MB)')
+    if (file.size > 25 * 1024 * 1024) {
+      setError('File is too large (max 25 MB)')
       return
     }
 
@@ -507,7 +507,7 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
             {uploading ? 'Processing...' : dragOver ? 'Drop file here' : 'Drop file here or click to browse'}
           </p>
           <p className="mt-2 text-sm text-slate-500">
-            PDF, DOCX, TXT, PNG, JPG (max 10MB)
+            PDF, DOCX, TXT, PNG, JPG (max 25MB)
           </p>
         </div>
 
