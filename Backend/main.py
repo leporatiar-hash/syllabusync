@@ -293,6 +293,11 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
+def generate_referral_code():
+    """Generate a short, unique referral code (8 chars)."""
+    return uuid.uuid4().hex[:8]
+
+
 def ensure_user_columns():
     if engine.dialect.name != "sqlite":
         return
@@ -463,6 +468,8 @@ class UserProfile(Base):
     academic_year = Column(String, nullable=True)
     major = Column(String, nullable=True)
     profile_picture = Column(Text, nullable=True)
+    referral_code = Column(String, unique=True, nullable=True, default=generate_referral_code)
+    referred_by = Column(String, nullable=True)  # referral_code of the user who referred them
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -859,11 +866,42 @@ def ensure_deadline_columns():
                 pass
 
 
+def ensure_referral_columns():
+    """Add referral_code and referred_by columns to user_profiles if missing."""
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN referral_code VARCHAR"))
+            logger.info("[Migration] Added 'referral_code' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN referred_by VARCHAR"))
+            logger.info("[Migration] Added 'referred_by' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+        # Backfill referral codes for existing users
+        try:
+            if engine.dialect.name == "postgresql":
+                conn.execute(text(
+                    "UPDATE user_profiles SET referral_code = LEFT(REPLACE(gen_random_uuid()::text, '-', ''), 8) "
+                    "WHERE referral_code IS NULL"
+                ))
+            else:
+                conn.execute(text(
+                    "UPDATE user_profiles SET referral_code = LOWER(HEX(RANDOMBLOB(4))) "
+                    "WHERE referral_code IS NULL"
+                ))
+            logger.info("[Migration] Backfilled referral codes")
+        except Exception:
+            pass
+
+
 # Create tables / migrations
 # Ensure schema exists before running column updates
 Base.metadata.create_all(bind=engine)
 ensure_user_columns()
 ensure_deadline_columns()
+ensure_referral_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -1509,6 +1547,7 @@ def get_me(current_user: User = Depends(get_current_user)):
                 "academic_year": profile.academic_year,
                 "major": profile.major,
                 "profile_picture": profile.profile_picture,
+                "referral_code": profile.referral_code,
             }
         }
     finally:
@@ -1580,6 +1619,75 @@ def upload_profile_picture(payload: ProfilePictureRequest, current_user: User = 
         profile.profile_picture = payload.image_data
         db.commit()
         return {"message": "Profile picture updated", "profile_picture": profile.profile_picture}
+    finally:
+        db.close()
+
+
+@app.get("/me/referral")
+def get_referral_info(current_user: User = Depends(get_current_user)):
+    """Get the current user's referral code and count of people they've referred."""
+    db = SessionLocal()
+    try:
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Ensure the user has a referral code
+        if not profile.referral_code:
+            profile.referral_code = generate_referral_code()
+            db.commit()
+
+        # Count how many users were referred by this user's code
+        referral_count = db.query(UserProfile).filter(
+            UserProfile.referred_by == profile.referral_code
+        ).count()
+
+        return {
+            "referral_code": profile.referral_code,
+            "referral_count": referral_count,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/me/referral")
+def record_referral(current_user: User = Depends(get_current_user), referral_code: str = ""):
+    """Record that the current user was referred by someone. Called once after signup."""
+    if not referral_code:
+        raise HTTPException(status_code=400, detail="referral_code is required")
+
+    db = SessionLocal()
+    try:
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if not profile:
+            # Auto-create profile
+            profile = UserProfile(
+                user_id=current_user.id,
+                email=current_user.email or "",
+                referred_by=referral_code,
+            )
+            db.add(profile)
+            db.commit()
+            return {"message": "Referral recorded"}
+
+        # Don't overwrite if already set
+        if profile.referred_by:
+            return {"message": "Referral already recorded"}
+
+        # Don't allow self-referral
+        if profile.referral_code == referral_code:
+            raise HTTPException(status_code=400, detail="Cannot refer yourself")
+
+        # Verify the referral code exists
+        referrer = db.query(UserProfile).filter(
+            UserProfile.referral_code == referral_code
+        ).first()
+        if not referrer:
+            raise HTTPException(status_code=404, detail="Invalid referral code")
+
+        profile.referred_by = referral_code
+        db.commit()
+        return {"message": "Referral recorded"}
     finally:
         db.close()
 

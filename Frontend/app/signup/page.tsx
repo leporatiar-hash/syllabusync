@@ -1,14 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import posthog from 'posthog-js'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
+import { API_URL } from '../../hooks/useAuthFetch'
 
 export default function SignupPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, loading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -16,6 +18,8 @@ export default function SignupPage() {
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const refCode = searchParams.get('ref') || ''
 
   useEffect(() => {
     if (!loading && user) {
@@ -57,6 +61,23 @@ export default function SignupPage() {
         setSubmitting(false)
       } else {
         posthog.capture('user_signed_up')
+
+        // Record referral if a ref code was provided
+        if (refCode) {
+          try {
+            const session = await supabase.auth.getSession()
+            const token = session.data.session?.access_token
+            if (token) {
+              await fetch(`${API_URL}/me/referral?referral_code=${encodeURIComponent(refCode)}`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+              })
+            }
+          } catch {
+            // Non-fatal — don't block signup flow
+          }
+        }
+
         router.push('/onboarding')
       }
     } catch (err) {

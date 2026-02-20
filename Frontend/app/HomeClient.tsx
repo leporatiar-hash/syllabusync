@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar, Share2, Copy, Check } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
 
@@ -83,6 +83,9 @@ export default function HomeClient() {
   const [lmsLoaded, setLmsLoaded] = useState(false)
   const [showCanvasModal, setShowCanvasModal] = useState(false)
   const [showICalModal, setShowICalModal] = useState(false)
+  const [referralCode, setReferralCode] = useState('')
+  const [referralCount, setReferralCount] = useState(0)
+  const [copied, setCopied] = useState(false)
 
   const loadLmsConnections = useCallback(async () => {
     try {
@@ -129,6 +132,39 @@ export default function HomeClient() {
   useEffect(() => {
     if (user) loadLmsConnections()
   }, [user, loadLmsConnections])
+
+  useEffect(() => {
+    if (!user) return
+    const loadReferral = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/me/referral`)
+        if (res.ok) {
+          const data = await res.json()
+          setReferralCode(data.referral_code)
+          setReferralCount(data.referral_count)
+        }
+      } catch { /* non-fatal */ }
+    }
+    loadReferral()
+  }, [user])
+
+  const referralLink = referralCode ? `https://tryclassmate.com/signup?ref=${referralCode}` : ''
+
+  const copyLink = () => {
+    if (!referralLink) return
+    navigator.clipboard.writeText(referralLink)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const shareLink = () => {
+    if (!referralLink) return
+    if (navigator.share) {
+      navigator.share({ title: 'Join ClassMate', text: 'Check out ClassMate — it helps you stay organized with your courses!', url: referralLink })
+    } else {
+      copyLink()
+    }
+  }
 
   // Show loading while checking auth
   if (authLoading) {
@@ -350,6 +386,50 @@ export default function HomeClient() {
           ))}
         </div>
       </section>
+
+      {/* Share ClassMate Card */}
+      {referralCode && (
+        <section className="mx-auto max-w-6xl px-4 pb-16">
+          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
+                  <Share2 size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Share ClassMate</h3>
+                  <p className="text-sm text-slate-500">
+                    Invite your friends to stay organized together.
+                    {referralCount > 0 && (
+                      <span className="ml-1 font-medium text-[#5B8DEF]">
+                        {referralCount} friend{referralCount !== 1 ? 's' : ''} joined!
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <div className="flex items-center rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
+                  <span className="max-w-[200px] truncate">{referralLink}</span>
+                </div>
+                <button
+                  onClick={copyLink}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  title="Copy link"
+                >
+                  {copied ? <Check size={16} /> : <Copy size={16} />}
+                </button>
+                <button
+                  onClick={shareLink}
+                  className="rounded-full border border-white/70 bg-white/70 px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  Share
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   )
 }
