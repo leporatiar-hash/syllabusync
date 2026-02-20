@@ -369,6 +369,54 @@ export default function HomeClient() {
         />
       )}
 
+      {/* Share ClassMate Card */}
+      {referralCode && (
+        <section className="mx-auto max-w-6xl px-4 pt-8">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] p-8 shadow-lg">
+            {/* Decorative circles */}
+            <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
+            <div className="pointer-events-none absolute -bottom-6 -left-6 h-24 w-24 rounded-full bg-white/10" />
+
+            <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 backdrop-blur">
+                  <Share2 size={24} className="text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Invite your friends</h3>
+                  <p className="text-sm text-white/80">
+                    Share your link and study together on ClassMate.
+                    {referralCount > 0 && (
+                      <span className="ml-1 font-semibold text-white">
+                        {referralCount} friend{referralCount !== 1 ? 's' : ''} joined!
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <div className="flex items-center rounded-full bg-white/20 px-4 py-2.5 text-sm text-white backdrop-blur">
+                  <span className="max-w-[200px] truncate">{referralLink}</span>
+                </div>
+                <button
+                  onClick={copyLink}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#5B8DEF] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  title="Copy link"
+                >
+                  {copied ? <Check size={16} /> : <Copy size={16} />}
+                </button>
+                <button
+                  onClick={shareLink}
+                  className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-[#5B8DEF] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                >
+                  Share
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="mx-auto max-w-6xl px-4 py-16">
         <div className="grid gap-6 md:grid-cols-3">
           {features.map((feature) => (
@@ -386,50 +434,6 @@ export default function HomeClient() {
           ))}
         </div>
       </section>
-
-      {/* Share ClassMate Card */}
-      {referralCode && (
-        <section className="mx-auto max-w-6xl px-4 pb-16">
-          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
-                  <Share2 size={22} />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Share ClassMate</h3>
-                  <p className="text-sm text-slate-500">
-                    Invite your friends to stay organized together.
-                    {referralCount > 0 && (
-                      <span className="ml-1 font-medium text-[#5B8DEF]">
-                        {referralCount} friend{referralCount !== 1 ? 's' : ''} joined!
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <div className="flex items-center rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-                  <span className="max-w-[200px] truncate">{referralLink}</span>
-                </div>
-                <button
-                  onClick={copyLink}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-                  title="Copy link"
-                >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
-                </button>
-                <button
-                  onClick={shareLink}
-                  className="rounded-full border border-white/70 bg-white/70 px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-                >
-                  Share
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
     </main>
   )
 }

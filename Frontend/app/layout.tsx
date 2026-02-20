@@ -10,6 +10,18 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "ClassMate",
   description: "Parse syllabi, track deadlines, and study smarter.",
+  metadataBase: new URL("https://tryclassmate.com"),
+  openGraph: {
+    title: "ClassMate",
+    description: "Parse syllabi, track deadlines, and study smarter.",
+    siteName: "ClassMate",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ClassMate",
+    description: "Parse syllabi, track deadlines, and study smarter.",
+  },
   icons: {
     icon: [
       { url: "/favicon-48x48.png", sizes: "48x48", type: "image/png" },
