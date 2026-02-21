@@ -572,18 +572,32 @@ export default function CalendarPage() {
 
         {/* ── Mobile: iOS-style calendar ── */}
         <div className="md:hidden">
-          {/* Month header — large bold month, year below */}
-          <div className="flex items-start justify-between px-2 pt-2 pb-4">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-                {currentDate.toLocaleString('default', { month: 'long' })}
-              </h1>
-              <p className="text-sm text-slate-400 font-medium">{currentDate.getFullYear()}</p>
+          {/* Month header with inline arrows */}
+          <div className="flex items-center justify-between px-2 pt-1 pb-1">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => navigate('prev')}
+                className="rounded-full p-1.5 text-slate-400 active:bg-slate-100 transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <div className="px-1">
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight">
+                  {currentDate.toLocaleString('default', { month: 'long' })}
+                </h1>
+                <p className="text-[11px] text-slate-400 font-medium leading-tight">{currentDate.getFullYear()}</p>
+              </div>
+              <button
+                onClick={() => navigate('next')}
+                className="rounded-full p-1.5 text-slate-400 active:bg-slate-100 transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
             </div>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2">
               <button
                 onClick={goToToday}
-                className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 transition-colors hover:bg-[#5B8DEF]/10"
+                className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 active:bg-[#5B8DEF]/10 transition-colors"
               >
                 Today
               </button>
@@ -596,26 +610,10 @@ export default function CalendarPage() {
             </div>
           </div>
 
-          {/* Navigation arrows */}
-          <div className="flex items-center justify-between px-2 pb-3">
-            <button
-              onClick={() => navigate('prev')}
-              className="rounded-full p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-            </button>
-            <button
-              onClick={() => navigate('next')}
-              className="rounded-full p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-            </button>
-          </div>
-
-          {/* Compact weekday headers */}
-          <div className="grid grid-cols-7 px-1">
+          {/* Compact weekday headers — tight to header */}
+          <div className="grid grid-cols-7 px-1 mt-1">
             {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
-              <div key={i} className="text-center text-[11px] font-semibold text-slate-400 py-1">
+              <div key={i} className="text-center text-[10px] font-semibold text-slate-400 py-0.5">
                 {day}
               </div>
             ))}
@@ -624,7 +622,7 @@ export default function CalendarPage() {
           {/* Compact calendar grid with dots */}
           <div className="grid grid-cols-7 px-1">
             {Array.from({ length: startingDay }).map((_, i) => (
-              <div key={`empty-${i}`} className="py-1.5" />
+              <div key={`empty-${i}`} className="py-1" />
             ))}
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1
@@ -646,28 +644,26 @@ export default function CalendarPage() {
                 <button
                   key={day}
                   onClick={() => setSelectedDay(day)}
-                  className="flex flex-col items-center py-1.5 transition-colors"
+                  className="flex flex-col items-center py-1 transition-colors"
                 >
                   <div
-                    className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-all duration-200 ${
-                      isToday && isSelected
+                    className={`flex h-8 w-8 items-center justify-center rounded-full text-[13px] transition-all duration-150 ${
+                      isSelected
                         ? 'bg-[#5B8DEF] text-white font-semibold'
                         : isToday
-                          ? 'bg-[#5B8DEF]/15 text-[#5B8DEF] font-semibold'
-                          : isSelected
-                            ? 'bg-slate-200/70 text-slate-900 font-semibold'
-                            : 'text-slate-700'
+                          ? 'text-[#5B8DEF] font-bold'
+                          : 'text-slate-700 font-medium'
                     }`}
                   >
                     {day}
                   </div>
                   {/* Color dots */}
-                  <div className="flex items-center gap-[3px] mt-0.5 h-[6px]">
+                  <div className="flex items-center gap-[3px] h-[5px]">
                     {dotColors.map((color, idx) => (
                       <div
                         key={idx}
-                        className="h-[5px] w-[5px] rounded-full"
-                        style={{ backgroundColor: color }}
+                        className="h-[4px] w-[4px] rounded-full"
+                        style={{ backgroundColor: isSelected ? '#5B8DEF' : color }}
                       />
                     ))}
                   </div>
@@ -676,24 +672,27 @@ export default function CalendarPage() {
             })}
           </div>
 
+          {/* Divider */}
+          <div className="mx-3 mt-1 mb-2 border-t border-slate-100" />
+
           {/* Events list for selected day */}
           {selectedDay && (() => {
             const dateStr = formatDateStr(selectedDay)
             const dayDeadlines = getDeadlinesForDate(selectedDay)
             const selectedDate = new Date(dateStr + 'T00:00:00')
-            const dayLabel = selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
+            const mobileLabel = selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
 
             return (
-              <div className="mt-4 px-1">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-base font-semibold text-slate-900">{dayLabel}</h2>
-                  <span className="text-xs text-slate-400">
+              <div className="px-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-semibold text-slate-900">{mobileLabel}</h2>
+                  <span className="text-[11px] text-slate-400">
                     {dayDeadlines.length} event{dayDeadlines.length !== 1 ? 's' : ''}
                   </span>
                 </div>
 
                 {dayDeadlines.length === 0 ? (
-                  <div className="rounded-2xl bg-white p-6 text-center shadow-sm">
+                  <div className="rounded-xl bg-[#F4F3FF]/60 p-5 text-center">
                     <p className="text-sm text-slate-400">No events this day</p>
                   </div>
                 ) : (
@@ -705,7 +704,7 @@ export default function CalendarPage() {
                         <button
                           key={deadline.id}
                           onClick={() => setSelectedDeadline(deadline)}
-                          className={`w-full flex items-stretch rounded-xl bg-white shadow-sm transition-all duration-200 active:scale-[0.98] ${
+                          className={`w-full flex items-stretch rounded-xl bg-[#F8F7FF] transition-all duration-200 active:scale-[0.98] ${
                             deadline.completed ? 'opacity-50' : ''
                           }`}
                         >
@@ -714,16 +713,19 @@ export default function CalendarPage() {
                             className="w-1 shrink-0 rounded-l-xl"
                             style={{ backgroundColor: hex }}
                           />
-                          <div className="flex-1 px-3.5 py-3 text-left">
+                          <div className="flex-1 px-3 py-2.5 text-left">
                             <div className="flex items-center justify-between gap-2">
-                              <span className={`text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
+                              <span className={`text-[13px] font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
                                 {deadline.title}
                               </span>
-                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${courseColor?.light || 'bg-slate-100'} ${courseColor?.text || 'text-slate-500'}`}>
+                              <span
+                                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                                style={{ backgroundColor: hex }}
+                              >
                                 {deadline.type}
                               </span>
                             </div>
-                            <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
+                            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-400">
                               <span>{deadline.course_code || deadline.course_name}</span>
                               {deadline.time && (
                                 <>
@@ -744,7 +746,7 @@ export default function CalendarPage() {
 
           {/* Mobile course legend */}
           {courses.length > 0 && (
-            <div className="mt-6 px-1">
+            <div className="mt-4 px-3">
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {courses.map((course) => (
                   <Link
