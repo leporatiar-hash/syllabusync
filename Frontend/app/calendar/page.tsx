@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, ReactNode } from 'react'
+import { useEffect, useMemo, useState, useRef, useCallback, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X } from 'lucide-react'
@@ -85,7 +85,15 @@ export default function CalendarPage() {
     course_id: '',
   })
   const [creating, setCreating] = useState(false)
-  const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate())
+
+  // Infinite scroll: selected full date and month range
+  const [selectedFullDate, setSelectedFullDate] = useState<string>(new Date().toISOString().split('T')[0])
+  const [monthRange, setMonthRange] = useState<{ start: number; end: number }>({ start: -3, end: 9 })
+  const todayMonthRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const hasScrolledToToday = useRef(false)
+  const topSentinelRef = useRef<HTMLDivElement>(null)
+  const bottomSentinelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (courses.length > 0 && !newDeadline.course_id) {
@@ -183,6 +191,71 @@ export default function CalendarPage() {
     const match = bgClass.match(/#[A-Fa-f0-9]+/)
     return match ? match[0] : '#94a3b8'
   }
+
+  // Infinite scroll month helpers
+  const getMonthData = useCallback((offset: number) => {
+    const now = new Date()
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+    const year = d.getFullYear()
+    const month = d.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+    return {
+      year,
+      month,
+      daysInMonth: lastDay.getDate(),
+      startingDay: firstDay.getDay(),
+      key: `${year}-${month}`,
+      label: d.toLocaleString('default', { month: 'long' }),
+    }
+  }, [])
+
+  const monthOffsets = useMemo(() => {
+    const offsets: number[] = []
+    for (let i = monthRange.start; i <= monthRange.end; i++) offsets.push(i)
+    return offsets
+  }, [monthRange])
+
+  const formatFullDateFromParts = (year: number, month: number, day: number) => {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
+
+  const getDeadlinesForFullDateStr = useCallback((dateStr: string) => {
+    return filteredDeadlines.filter((d) => d.date === dateStr)
+  }, [filteredDeadlines])
+
+  // Scroll to today's month on mount
+  useEffect(() => {
+    if (!hasScrolledToToday.current && todayMonthRef.current && scrollContainerRef.current) {
+      todayMonthRef.current.scrollIntoView({ block: 'start' })
+      hasScrolledToToday.current = true
+    }
+  })
+
+  // IntersectionObserver to load more months
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          if (entry.target === topSentinelRef.current) {
+            setMonthRange((prev) => ({ ...prev, start: prev.start - 3 }))
+          } else if (entry.target === bottomSentinelRef.current) {
+            setMonthRange((prev) => ({ ...prev, end: prev.end + 3 }))
+          }
+        }
+      },
+      { root: container, rootMargin: '200px' }
+    )
+
+    if (topSentinelRef.current) observer.observe(topSentinelRef.current)
+    if (bottomSentinelRef.current) observer.observe(bottomSentinelRef.current)
+
+    return () => observer.disconnect()
+  }, [monthRange])
 
   const upcomingWeek = useMemo(() => {
     const today = new Date()
@@ -570,197 +643,202 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* ── Mobile: iOS-style calendar ── */}
-        <div className="md:hidden">
-          {/* Month header with inline arrows */}
-          <div className="flex items-center justify-between px-2 pt-1 pb-1">
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => navigate('prev')}
-                className="rounded-full p-1.5 text-slate-400 active:bg-slate-100 transition-colors"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6"/></svg>
-              </button>
-              <div className="px-1">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight">
-                  {currentDate.toLocaleString('default', { month: 'long' })}
-                </h1>
-                <p className="text-[11px] text-slate-400 font-medium leading-tight">{currentDate.getFullYear()}</p>
-              </div>
-              <button
-                onClick={() => navigate('next')}
-                className="rounded-full p-1.5 text-slate-400 active:bg-slate-100 transition-colors"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={goToToday}
-                className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 active:bg-[#5B8DEF]/10 transition-colors"
-              >
-                Today
-              </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white shadow-sm"
-              >
-                <span className="text-lg leading-none">+</span>
-              </button>
-            </div>
+        {/* ── Mobile: iOS-style infinite scroll calendar ── */}
+        <div className="md:hidden flex flex-col" style={{ height: 'calc(100vh - 64px)' }}>
+          {/* Sticky top bar */}
+          <div className="flex items-center justify-between px-4 py-2 bg-[#FAFAFA]">
+            <button
+              onClick={() => {
+                hasScrolledToToday.current = false
+                setSelectedFullDate(todayStr)
+                setTimeout(() => {
+                  todayMonthRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                }, 50)
+              }}
+              className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 active:bg-[#5B8DEF]/10 transition-colors"
+            >
+              Today
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white"
+            >
+              <span className="text-lg leading-none">+</span>
+            </button>
           </div>
 
-          {/* Compact weekday headers — tight to header */}
-          <div className="grid grid-cols-7 px-1 mt-1">
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
-              <div key={i} className="text-center text-[10px] font-semibold text-slate-400 py-0.5">
-                {day}
-              </div>
-            ))}
-          </div>
+          {/* Scrollable months */}
+          <div
+            ref={scrollContainerRef}
+            className="flex-1 overflow-y-auto overscroll-contain"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
+            {/* Top sentinel for loading earlier months */}
+            <div ref={topSentinelRef} className="h-1" />
 
-          {/* Compact calendar grid with dots */}
-          <div className="grid grid-cols-7 px-1">
-            {Array.from({ length: startingDay }).map((_, i) => (
-              <div key={`empty-${i}`} className="py-1" />
-            ))}
-            {Array.from({ length: daysInMonth }).map((_, i) => {
-              const day = i + 1
-              const dateStr = formatDateStr(day)
-              const dayDeadlines = getDeadlinesForDate(day)
-              const isToday = todayStr === dateStr
-              const isSelected = selectedDay === day
-
-              // Collect unique course colors for dots (max 3)
-              const dotColors = dayDeadlines
-                .reduce<string[]>((acc, d) => {
-                  const hex = getHexColor(courseColors[d.course_id]?.bg || 'bg-[#94a3b8]')
-                  if (!acc.includes(hex)) acc.push(hex)
-                  return acc
-                }, [])
-                .slice(0, 3)
+            {monthOffsets.map((offset) => {
+              const m = getMonthData(offset)
+              const isCurrentMonth = offset === 0
 
               return (
-                <button
-                  key={day}
-                  onClick={() => setSelectedDay(day)}
-                  className="flex flex-col items-center py-1 transition-colors"
+                <div
+                  key={m.key}
+                  ref={isCurrentMonth ? todayMonthRef : undefined}
+                  className="px-4 pt-6 pb-2"
                 >
-                  <div
-                    className={`flex h-8 w-8 items-center justify-center rounded-full text-[13px] transition-all duration-150 ${
-                      isSelected
-                        ? 'bg-[#5B8DEF] text-white font-semibold'
-                        : isToday
-                          ? 'text-[#5B8DEF] font-bold'
-                          : 'text-slate-700 font-medium'
-                    }`}
-                  >
-                    {day}
-                  </div>
-                  {/* Color dots */}
-                  <div className="flex items-center gap-[3px] h-[5px]">
-                    {dotColors.map((color, idx) => (
-                      <div
-                        key={idx}
-                        className="h-[4px] w-[4px] rounded-full"
-                        style={{ backgroundColor: isSelected ? '#5B8DEF' : color }}
-                      />
+                  {/* Month title */}
+                  <h2 className="text-[22px] font-bold text-slate-900 tracking-tight leading-tight mb-0.5">
+                    {m.label}
+                  </h2>
+                  <p className="text-[11px] text-slate-400 font-medium mb-3">{m.year}</p>
+
+                  {/* Weekday headers */}
+                  <div className="grid grid-cols-7 mb-1">
+                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+                      <div key={i} className="text-center text-[10px] font-semibold text-slate-400">
+                        {day}
+                      </div>
                     ))}
                   </div>
-                </button>
-              )
-            })}
-          </div>
 
-          {/* Divider */}
-          <div className="mx-3 mt-1 mb-2 border-t border-slate-100" />
+                  {/* Day grid */}
+                  <div className="grid grid-cols-7">
+                    {/* Empty cells for offset */}
+                    {Array.from({ length: m.startingDay }).map((_, i) => (
+                      <div key={`e-${i}`} className="h-11" />
+                    ))}
 
-          {/* Events list for selected day */}
-          {selectedDay && (() => {
-            const dateStr = formatDateStr(selectedDay)
-            const dayDeadlines = getDeadlinesForDate(selectedDay)
-            const selectedDate = new Date(dateStr + 'T00:00:00')
-            const mobileLabel = selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
+                    {Array.from({ length: m.daysInMonth }).map((_, i) => {
+                      const day = i + 1
+                      const dateStr = formatFullDateFromParts(m.year, m.month, day)
+                      const dayDeadlines = getDeadlinesForFullDateStr(dateStr)
+                      const isToday = todayStr === dateStr
+                      const isSelected = selectedFullDate === dateStr
 
-            return (
-              <div className="px-3">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-semibold text-slate-900">{mobileLabel}</h2>
-                  <span className="text-[11px] text-slate-400">
-                    {dayDeadlines.length} event{dayDeadlines.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
+                      // Dots: unique course colors, max 3
+                      const dotColors = dayDeadlines
+                        .reduce<string[]>((acc, d) => {
+                          const hex = getHexColor(courseColors[d.course_id]?.bg || 'bg-[#94a3b8]')
+                          if (!acc.includes(hex)) acc.push(hex)
+                          return acc
+                        }, [])
+                        .slice(0, 3)
 
-                {dayDeadlines.length === 0 ? (
-                  <div className="rounded-xl bg-[#F4F3FF]/60 p-5 text-center">
-                    <p className="text-sm text-slate-400">No events this day</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {dayDeadlines.map((deadline) => {
-                      const courseColor = courseColors[deadline.course_id]
-                      const hex = getHexColor(courseColor?.bg || 'bg-[#94a3b8]')
+                      const extraCount = dayDeadlines.length - 3
+
                       return (
                         <button
-                          key={deadline.id}
-                          onClick={() => setSelectedDeadline(deadline)}
-                          className={`w-full flex items-stretch rounded-xl bg-[#F8F7FF] transition-all duration-200 active:scale-[0.98] ${
-                            deadline.completed ? 'opacity-50' : ''
-                          }`}
+                          key={day}
+                          onClick={() => setSelectedFullDate(dateStr)}
+                          className="flex flex-col items-center justify-start h-11"
                         >
-                          {/* Left color accent bar */}
                           <div
-                            className="w-1 shrink-0 rounded-l-xl"
-                            style={{ backgroundColor: hex }}
-                          />
-                          <div className="flex-1 px-3 py-2.5 text-left">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className={`text-[13px] font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
-                                {deadline.title}
-                              </span>
-                              <span
-                                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                                style={{ backgroundColor: hex }}
-                              >
-                                {deadline.type}
-                              </span>
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-400">
-                              <span>{deadline.course_code || deadline.course_name}</span>
-                              {deadline.time && (
-                                <>
-                                  <span>·</span>
-                                  <span>{deadline.time}</span>
-                                </>
-                              )}
-                            </div>
+                            className={`flex h-8 w-8 items-center justify-center rounded-full text-[13px] transition-all duration-100 ${
+                              isToday
+                                ? 'bg-[#5B8DEF] text-white font-semibold'
+                                : isSelected
+                                  ? 'bg-slate-200/80 text-slate-900 font-semibold'
+                                  : 'text-slate-600 font-normal'
+                            }`}
+                          >
+                            {day}
+                          </div>
+                          {/* Dots or +N */}
+                          <div className="flex items-center gap-[3px] h-[6px] mt-px">
+                            {extraCount > 0 ? (
+                              <>
+                                {dotColors.map((color, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="h-[4px] w-[4px] rounded-full"
+                                    style={{ backgroundColor: color }}
+                                  />
+                                ))}
+                                <span className="text-[7px] text-slate-400 font-medium leading-none">+{extraCount}</span>
+                              </>
+                            ) : (
+                              dotColors.map((color, idx) => (
+                                <div
+                                  key={idx}
+                                  className="h-[4px] w-[4px] rounded-full"
+                                  style={{ backgroundColor: color }}
+                                />
+                              ))
+                            )}
                           </div>
                         </button>
                       )
                     })}
                   </div>
-                )}
-              </div>
-            )
-          })()}
+                </div>
+              )
+            })}
 
-          {/* Mobile course legend */}
-          {courses.length > 0 && (
-            <div className="mt-4 px-3">
-              <div className="flex gap-2 overflow-x-auto pb-2">
-                {courses.map((course) => (
-                  <Link
-                    key={course.id}
-                    href={`/courses/${course.id}`}
-                    className="flex shrink-0 items-center gap-1.5 rounded-full bg-white border border-slate-100 px-3 py-1.5 shadow-sm text-xs text-slate-600 hover:text-slate-900 transition-colors"
-                  >
-                    <span className={`h-2.5 w-2.5 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
-                    <span className="whitespace-nowrap">{course.code || course.name}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
+            {/* Bottom sentinel for loading later months */}
+            <div ref={bottomSentinelRef} className="h-1" />
+          </div>
+
+          {/* Bottom events panel — always visible */}
+          <div className="border-t border-slate-100 bg-white px-4 pt-3 pb-4 max-h-[40vh] overflow-y-auto">
+            {(() => {
+              const dayDeadlines = getDeadlinesForFullDateStr(selectedFullDate)
+              const selDate = new Date(selectedFullDate + 'T00:00:00')
+              const label = selDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
+
+              return (
+                <>
+                  <h3 className="text-sm font-semibold text-slate-900 mb-2">{label}</h3>
+
+                  {dayDeadlines.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-2">No events</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {dayDeadlines.map((deadline) => {
+                        const courseColor = courseColors[deadline.course_id]
+                        const hex = getHexColor(courseColor?.bg || 'bg-[#94a3b8]')
+                        return (
+                          <button
+                            key={deadline.id}
+                            onClick={() => setSelectedDeadline(deadline)}
+                            className={`w-full flex items-stretch rounded-xl bg-[#F8F7FF] transition-all duration-200 active:scale-[0.98] ${
+                              deadline.completed ? 'opacity-50' : ''
+                            }`}
+                          >
+                            <div
+                              className="w-1 shrink-0 rounded-l-xl"
+                              style={{ backgroundColor: hex }}
+                            />
+                            <div className="flex-1 px-3 py-2.5 text-left">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-[13px] font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
+                                  {deadline.title}
+                                </span>
+                                <span
+                                  className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                                  style={{ backgroundColor: hex }}
+                                >
+                                  {deadline.type}
+                                </span>
+                              </div>
+                              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-400">
+                                <span>{deadline.course_code || deadline.course_name}</span>
+                                {deadline.time && (
+                                  <>
+                                    <span>·</span>
+                                    <span>{deadline.time}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+          </div>
         </div>
 
         {loading ? (
