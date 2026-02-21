@@ -85,6 +85,7 @@ export default function CalendarPage() {
     course_id: '',
   })
   const [creating, setCreating] = useState(false)
+  const [showDaySheet, setShowDaySheet] = useState(false)
 
   // Infinite scroll: selected full date and month range
   const [selectedFullDate, setSelectedFullDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -643,69 +644,79 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* ── Mobile: iOS-style infinite scroll calendar ── */}
-        <div className="md:hidden flex flex-col" style={{ height: 'calc(100vh - 64px)' }}>
-          {/* Sticky top bar */}
-          <div className="flex items-center justify-between px-4 py-2 bg-[#FAFAFA]">
-            <button
-              onClick={() => {
-                hasScrolledToToday.current = false
-                setSelectedFullDate(todayStr)
-                setTimeout(() => {
-                  todayMonthRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-                }, 50)
-              }}
-              className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 active:bg-[#5B8DEF]/10 transition-colors"
-            >
-              Today
-            </button>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white"
-            >
-              <span className="text-lg leading-none">+</span>
-            </button>
-          </div>
-
-          {/* Scrollable months */}
+        {/* ── Mobile: iOS-style month pager (one month per screen, scroll-snap) ── */}
+        <div className="md:hidden flex flex-col" style={{ height: 'calc(100dvh - 64px)' }}>
+          {/* Scroll-snap container — each child is one full-screen month page */}
           <div
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto overscroll-contain"
-            style={{ WebkitOverflowScrolling: 'touch' }}
+            style={{
+              scrollSnapType: 'y mandatory',
+              WebkitOverflowScrolling: 'touch',
+            }}
           >
             {/* Top sentinel for loading earlier months */}
-            <div ref={topSentinelRef} className="h-1" />
+            <div ref={topSentinelRef} className="h-px" />
 
             {monthOffsets.map((offset) => {
               const m = getMonthData(offset)
               const isCurrentMonth = offset === 0
+              const totalCells = m.startingDay + m.daysInMonth
+              const weekRows = Math.ceil(totalCells / 7)
 
               return (
                 <div
                   key={m.key}
                   ref={isCurrentMonth ? todayMonthRef : undefined}
-                  className="px-4 pt-6 pb-2"
+                  className="flex flex-col px-4"
+                  style={{
+                    height: 'calc(100dvh - 64px)',
+                    scrollSnapAlign: 'start',
+                    scrollSnapStop: 'always',
+                  }}
                 >
-                  {/* Month title */}
-                  <h2 className="text-[22px] font-bold text-slate-900 tracking-tight leading-tight mb-0.5">
-                    {m.label}
-                  </h2>
-                  <p className="text-[11px] text-slate-400 font-medium mb-3">{m.year}</p>
+                  {/* Top bar: Today button + month title + add button */}
+                  <div className="flex items-center justify-between pt-3 pb-2">
+                    <button
+                      onClick={() => {
+                        hasScrolledToToday.current = false
+                        setSelectedFullDate(todayStr)
+                        setTimeout(() => {
+                          todayMonthRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                        }, 50)
+                      }}
+                      className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 active:bg-[#5B8DEF]/10 transition-colors"
+                    >
+                      Today
+                    </button>
+                    <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">
+                      {m.label} {m.year}
+                    </h2>
+                    <button
+                      onClick={() => setShowCreateModal(true)}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white"
+                    >
+                      <span className="text-lg leading-none">+</span>
+                    </button>
+                  </div>
 
                   {/* Weekday headers */}
                   <div className="grid grid-cols-7 mb-1">
                     {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
-                      <div key={i} className="text-center text-[10px] font-semibold text-slate-400">
+                      <div key={i} className="text-center text-[11px] font-semibold text-slate-400">
                         {day}
                       </div>
                     ))}
                   </div>
 
-                  {/* Day grid */}
-                  <div className="grid grid-cols-7">
-                    {/* Empty cells for offset */}
+                  {/* Day grid — stretches to fill remaining height */}
+                  <div
+                    className="grid grid-cols-7 flex-1"
+                    style={{ gridTemplateRows: `repeat(${weekRows}, 1fr)` }}
+                  >
+                    {/* Empty cells for start-of-month offset */}
                     {Array.from({ length: m.startingDay }).map((_, i) => (
-                      <div key={`e-${i}`} className="h-11" />
+                      <div key={`e-${i}`} />
                     ))}
 
                     {Array.from({ length: m.daysInMonth }).map((_, i) => {
@@ -724,47 +735,40 @@ export default function CalendarPage() {
                         }, [])
                         .slice(0, 3)
 
-                      const extraCount = dayDeadlines.length - 3
-
                       return (
                         <button
                           key={day}
-                          onClick={() => setSelectedFullDate(dateStr)}
-                          className="flex flex-col items-center justify-start h-11"
+                          onClick={() => {
+                            setSelectedFullDate(dateStr)
+                            // Show bottom sheet if there are events
+                            if (dayDeadlines.length > 0) {
+                              setShowDaySheet(true)
+                            } else {
+                              setShowDaySheet(true)
+                            }
+                          }}
+                          className="flex flex-col items-center justify-center"
                         >
                           <div
-                            className={`flex h-8 w-8 items-center justify-center rounded-full text-[13px] transition-all duration-100 ${
+                            className={`flex h-9 w-9 items-center justify-center rounded-full text-[14px] transition-all duration-100 ${
                               isToday
                                 ? 'bg-[#5B8DEF] text-white font-semibold'
                                 : isSelected
                                   ? 'bg-slate-200/80 text-slate-900 font-semibold'
-                                  : 'text-slate-600 font-normal'
+                                  : 'text-slate-700 font-normal'
                             }`}
                           >
                             {day}
                           </div>
-                          {/* Dots or +N */}
-                          <div className="flex items-center gap-[3px] h-[6px] mt-px">
-                            {extraCount > 0 ? (
-                              <>
-                                {dotColors.map((color, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="h-[4px] w-[4px] rounded-full"
-                                    style={{ backgroundColor: color }}
-                                  />
-                                ))}
-                                <span className="text-[7px] text-slate-400 font-medium leading-none">+{extraCount}</span>
-                              </>
-                            ) : (
-                              dotColors.map((color, idx) => (
-                                <div
-                                  key={idx}
-                                  className="h-[4px] w-[4px] rounded-full"
-                                  style={{ backgroundColor: color }}
-                                />
-                              ))
-                            )}
+                          {/* Event dots */}
+                          <div className="flex items-center gap-[3px] h-[6px] mt-0.5">
+                            {dotColors.map((color, idx) => (
+                              <div
+                                key={idx}
+                                className="h-[5px] w-[5px] rounded-full"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
                           </div>
                         </button>
                       )
@@ -775,71 +779,102 @@ export default function CalendarPage() {
             })}
 
             {/* Bottom sentinel for loading later months */}
-            <div ref={bottomSentinelRef} className="h-1" />
-          </div>
-
-          {/* Bottom events panel — always visible */}
-          <div className="border-t border-slate-100 bg-white px-4 pt-3 pb-4 max-h-[40vh] overflow-y-auto">
-            {(() => {
-              const dayDeadlines = getDeadlinesForFullDateStr(selectedFullDate)
-              const selDate = new Date(selectedFullDate + 'T00:00:00')
-              const label = selDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
-
-              return (
-                <>
-                  <h3 className="text-sm font-semibold text-slate-900 mb-2">{label}</h3>
-
-                  {dayDeadlines.length === 0 ? (
-                    <p className="text-sm text-slate-400 py-2">No events</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {dayDeadlines.map((deadline) => {
-                        const courseColor = courseColors[deadline.course_id]
-                        const hex = getHexColor(courseColor?.bg || 'bg-[#94a3b8]')
-                        return (
-                          <button
-                            key={deadline.id}
-                            onClick={() => setSelectedDeadline(deadline)}
-                            className={`w-full flex items-stretch rounded-xl bg-[#F8F7FF] transition-all duration-200 active:scale-[0.98] ${
-                              deadline.completed ? 'opacity-50' : ''
-                            }`}
-                          >
-                            <div
-                              className="w-1 shrink-0 rounded-l-xl"
-                              style={{ backgroundColor: hex }}
-                            />
-                            <div className="flex-1 px-3 py-2.5 text-left">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className={`text-[13px] font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
-                                  {deadline.title}
-                                </span>
-                                <span
-                                  className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                                  style={{ backgroundColor: hex }}
-                                >
-                                  {deadline.type}
-                                </span>
-                              </div>
-                              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-400">
-                                <span>{deadline.course_code || deadline.course_name}</span>
-                                {deadline.time && (
-                                  <>
-                                    <span>·</span>
-                                    <span>{deadline.time}</span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </>
-              )
-            })()}
+            <div ref={bottomSentinelRef} className="h-px" />
           </div>
         </div>
+
+        {/* Mobile day detail bottom sheet */}
+        {showDaySheet && (
+          <div className="md:hidden fixed inset-0 z-50" onClick={() => setShowDaySheet(false)}>
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/20" />
+            {/* Sheet */}
+            <div
+              className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-xl max-h-[60vh] flex flex-col animate-[slideUp_0.25s_ease-out]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Handle */}
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="h-1 w-10 rounded-full bg-slate-300" />
+              </div>
+              {/* Content */}
+              <div className="px-5 pb-6 overflow-y-auto flex-1">
+                {(() => {
+                  const dayDeadlines = getDeadlinesForFullDateStr(selectedFullDate)
+                  const selDate = new Date(selectedFullDate + 'T00:00:00')
+                  const label = selDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
+
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-base font-bold text-slate-900">{label}</h3>
+                        <button
+                          onClick={() => {
+                            setShowDaySheet(false)
+                            openCreateModal(selectedFullDate)
+                          }}
+                          className="text-[#5B8DEF] text-sm font-semibold"
+                        >
+                          + Add
+                        </button>
+                      </div>
+
+                      {dayDeadlines.length === 0 ? (
+                        <p className="text-sm text-slate-400 py-6 text-center">No events this day</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {dayDeadlines.map((deadline) => {
+                            const courseColor = courseColors[deadline.course_id]
+                            const hex = getHexColor(courseColor?.bg || 'bg-[#94a3b8]')
+                            return (
+                              <button
+                                key={deadline.id}
+                                onClick={() => {
+                                  setShowDaySheet(false)
+                                  setSelectedDeadline(deadline)
+                                }}
+                                className={`w-full flex items-stretch rounded-xl bg-[#F8F7FF] transition-all duration-200 active:scale-[0.98] ${
+                                  deadline.completed ? 'opacity-50' : ''
+                                }`}
+                              >
+                                <div
+                                  className="w-1 shrink-0 rounded-l-xl"
+                                  style={{ backgroundColor: hex }}
+                                />
+                                <div className="flex-1 px-3 py-2.5 text-left">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className={`text-[13px] font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
+                                      {deadline.title}
+                                    </span>
+                                    <span
+                                      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                                      style={{ backgroundColor: hex }}
+                                    >
+                                      {deadline.type}
+                                    </span>
+                                  </div>
+                                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-400">
+                                    <span>{deadline.course_code || deadline.course_name}</span>
+                                    {deadline.time && (
+                                      <>
+                                        <span>·</span>
+                                        <span>{deadline.time}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="mt-8 text-sm text-slate-500 hidden md:block">Loading calendar...</div>
