@@ -85,6 +85,7 @@ export default function CalendarPage() {
     course_id: '',
   })
   const [creating, setCreating] = useState(false)
+  const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate())
 
   useEffect(() => {
     if (courses.length > 0 && !newDeadline.course_id) {
@@ -175,6 +176,12 @@ export default function CalendarPage() {
 
   const getDeadlineColor = (deadline: Deadline) => {
     return courseColors[deadline.course_id]?.bg || 'bg-slate-400'
+  }
+
+  // Extract hex color from Tailwind bg class like 'bg-[#5B8DEF]'
+  const getHexColor = (bgClass: string) => {
+    const match = bgClass.match(/#[A-Fa-f0-9]+/)
+    return match ? match[0] : '#94a3b8'
   }
 
   const upcomingWeek = useMemo(() => {
@@ -490,14 +497,15 @@ export default function CalendarPage() {
   return (
     <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6">
       <div className="mx-auto w-full max-w-[1600px]">
-        <div className="flex items-center justify-between gap-2 md:gap-4">
-          <div className="flex items-center gap-2 md:gap-3">
-            <div className="flex rounded-full bg-white p-0.5 md:p-1 shadow-sm">
+        {/* ── Desktop toolbar ── */}
+        <div className="hidden md:flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex rounded-full bg-white p-1 shadow-sm">
               {viewOptions.map((option) => (
                 <button
                   key={option}
                   onClick={() => setView(option)}
-                  className={`rounded-full px-2.5 py-1 md:px-4 md:py-2 text-xs font-semibold transition-all duration-300 ${
+                  className={`rounded-full px-4 py-2 text-xs font-semibold transition-all duration-300 ${
                     view === option ? 'bg-[#5B8DEF] text-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
@@ -508,7 +516,7 @@ export default function CalendarPage() {
             <select
               value={filterCourse}
               onChange={(event) => setFilterCourse(event.target.value)}
-              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 md:px-4 md:py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
             >
               <option value="all">All courses</option>
               {courses.map((course) => (
@@ -520,7 +528,7 @@ export default function CalendarPage() {
             <select
               value={filterType}
               onChange={(event) => setFilterType(event.target.value)}
-              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 md:px-4 md:py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-300 focus:border-[#5B8DEF] focus:outline-none"
             >
               <option value="all">All types</option>
               <option value="Assignment">Assignments</option>
@@ -533,7 +541,7 @@ export default function CalendarPage() {
               <option value="Deadline">Deadlines</option>
             </select>
           </div>
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-3">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -541,7 +549,7 @@ export default function CalendarPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search deadlines..."
-                className="w-[140px] md:w-[200px] rounded-full border border-slate-200 bg-white py-1.5 md:py-2 pl-8 md:pl-9 pr-7 md:pr-8 text-xs font-medium text-slate-700 shadow-sm outline-none transition-all duration-300 placeholder:text-slate-400 focus:w-[180px] md:focus:w-[260px] focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+                className="w-[200px] rounded-full border border-slate-200 bg-white py-2 pl-9 pr-8 text-xs font-medium text-slate-700 shadow-sm outline-none transition-all duration-300 placeholder:text-slate-400 focus:w-[260px] focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
               />
               {searchQuery && (
                 <button
@@ -554,60 +562,250 @@ export default function CalendarPage() {
             </div>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-1.5 md:gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-3 py-1.5 md:px-5 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+              className="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
             >
-              <span className="text-base md:text-lg">+</span>
+              <span className="text-lg">+</span>
               <span>New Deadline</span>
             </button>
           </div>
         </div>
 
+        {/* ── Mobile: iOS-style calendar ── */}
+        <div className="md:hidden">
+          {/* Month header — large bold month, year below */}
+          <div className="flex items-start justify-between px-2 pt-2 pb-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+                {currentDate.toLocaleString('default', { month: 'long' })}
+              </h1>
+              <p className="text-sm text-slate-400 font-medium">{currentDate.getFullYear()}</p>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                onClick={goToToday}
+                className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 transition-colors hover:bg-[#5B8DEF]/10"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white shadow-sm"
+              >
+                <span className="text-lg leading-none">+</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Navigation arrows */}
+          <div className="flex items-center justify-between px-2 pb-3">
+            <button
+              onClick={() => navigate('prev')}
+              className="rounded-full p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <button
+              onClick={() => navigate('next')}
+              className="rounded-full p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+
+          {/* Compact weekday headers */}
+          <div className="grid grid-cols-7 px-1">
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+              <div key={i} className="text-center text-[11px] font-semibold text-slate-400 py-1">
+                {day}
+              </div>
+            ))}
+          </div>
+
+          {/* Compact calendar grid with dots */}
+          <div className="grid grid-cols-7 px-1">
+            {Array.from({ length: startingDay }).map((_, i) => (
+              <div key={`empty-${i}`} className="py-1.5" />
+            ))}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1
+              const dateStr = formatDateStr(day)
+              const dayDeadlines = getDeadlinesForDate(day)
+              const isToday = todayStr === dateStr
+              const isSelected = selectedDay === day
+
+              // Collect unique course colors for dots (max 3)
+              const dotColors = dayDeadlines
+                .reduce<string[]>((acc, d) => {
+                  const hex = getHexColor(courseColors[d.course_id]?.bg || 'bg-[#94a3b8]')
+                  if (!acc.includes(hex)) acc.push(hex)
+                  return acc
+                }, [])
+                .slice(0, 3)
+
+              return (
+                <button
+                  key={day}
+                  onClick={() => setSelectedDay(day)}
+                  className="flex flex-col items-center py-1.5 transition-colors"
+                >
+                  <div
+                    className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-all duration-200 ${
+                      isToday && isSelected
+                        ? 'bg-[#5B8DEF] text-white font-semibold'
+                        : isToday
+                          ? 'bg-[#5B8DEF]/15 text-[#5B8DEF] font-semibold'
+                          : isSelected
+                            ? 'bg-slate-200/70 text-slate-900 font-semibold'
+                            : 'text-slate-700'
+                    }`}
+                  >
+                    {day}
+                  </div>
+                  {/* Color dots */}
+                  <div className="flex items-center gap-[3px] mt-0.5 h-[6px]">
+                    {dotColors.map((color, idx) => (
+                      <div
+                        key={idx}
+                        className="h-[5px] w-[5px] rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Events list for selected day */}
+          {selectedDay && (() => {
+            const dateStr = formatDateStr(selectedDay)
+            const dayDeadlines = getDeadlinesForDate(selectedDay)
+            const selectedDate = new Date(dateStr + 'T00:00:00')
+            const dayLabel = selectedDate.toLocaleDateString('default', { weekday: 'long', month: 'long', day: 'numeric' })
+
+            return (
+              <div className="mt-4 px-1">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-base font-semibold text-slate-900">{dayLabel}</h2>
+                  <span className="text-xs text-slate-400">
+                    {dayDeadlines.length} event{dayDeadlines.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                {dayDeadlines.length === 0 ? (
+                  <div className="rounded-2xl bg-white p-6 text-center shadow-sm">
+                    <p className="text-sm text-slate-400">No events this day</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {dayDeadlines.map((deadline) => {
+                      const courseColor = courseColors[deadline.course_id]
+                      const hex = getHexColor(courseColor?.bg || 'bg-[#94a3b8]')
+                      return (
+                        <button
+                          key={deadline.id}
+                          onClick={() => setSelectedDeadline(deadline)}
+                          className={`w-full flex items-stretch rounded-xl bg-white shadow-sm transition-all duration-200 active:scale-[0.98] ${
+                            deadline.completed ? 'opacity-50' : ''
+                          }`}
+                        >
+                          {/* Left color accent bar */}
+                          <div
+                            className="w-1 shrink-0 rounded-l-xl"
+                            style={{ backgroundColor: hex }}
+                          />
+                          <div className="flex-1 px-3.5 py-3 text-left">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
+                                {deadline.title}
+                              </span>
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${courseColor?.light || 'bg-slate-100'} ${courseColor?.text || 'text-slate-500'}`}>
+                                {deadline.type}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
+                              <span>{deadline.course_code || deadline.course_name}</span>
+                              {deadline.time && (
+                                <>
+                                  <span>·</span>
+                                  <span>{deadline.time}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Mobile course legend */}
+          {courses.length > 0 && (
+            <div className="mt-6 px-1">
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {courses.map((course) => (
+                  <Link
+                    key={course.id}
+                    href={`/courses/${course.id}`}
+                    className="flex shrink-0 items-center gap-1.5 rounded-full bg-white border border-slate-100 px-3 py-1.5 shadow-sm text-xs text-slate-600 hover:text-slate-900 transition-colors"
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
+                    <span className="whitespace-nowrap">{course.code || course.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         {loading ? (
-          <div className="mt-8 text-sm text-slate-500">Loading calendar...</div>
+          <div className="mt-8 text-sm text-slate-500 hidden md:block">Loading calendar...</div>
         ) : (
-          <div className="mt-4 md:mt-8 grid gap-4 md:gap-8 lg:grid-cols-[4fr_1fr]">
-            <div className="rounded-3xl bg-white p-3 md:p-6 shadow-sm">
+          <div className="mt-4 md:mt-8 hidden md:grid gap-8 lg:grid-cols-[4fr_1fr]">
+            <div className="rounded-3xl bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between gap-1">
                 <button
                   onClick={() => navigate('prev')}
-                  className="rounded-full border border-slate-200 px-2 py-1 md:px-5 md:py-3 text-sm md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
+                  className="rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
                 >
                   ←
                 </button>
-                <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
+                <div className="flex items-center gap-3 min-w-0">
                   <button
                     onClick={goToToday}
-                    className="rounded-full border border-[#5B8DEF] px-2 py-0.5 md:px-4 md:py-2 text-[11px] md:text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:bg-[#5B8DEF] hover:text-white"
+                    className="rounded-full border border-[#5B8DEF] px-4 py-2 text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:bg-[#5B8DEF] hover:text-white"
                   >
                     Today
                   </button>
-                  <span className="truncate text-sm md:text-xl font-semibold text-slate-900">
+                  <span className="truncate text-xl font-semibold text-slate-900">
                     {view === 'Month' ? monthName : view === 'Week' ? weekRangeLabel : dayLabel}
                   </span>
                 </div>
                 <button
                   onClick={() => navigate('next')}
-                  className="rounded-full border border-slate-200 px-2 py-1 md:px-5 md:py-3 text-sm md:text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
+                  className="rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-500 transition-all duration-300 hover:border-slate-300"
                 >
                   →
                 </button>
               </div>
 
               {view === 'Month' ? (
-                <div className="mt-4 md:mt-6">
+                <div className="mt-6">
                   {/* Weekday headers */}
                   <div className="grid grid-cols-7 border-b border-slate-200">
                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
                       <div key={day} className="text-center py-3 text-xs font-medium text-slate-600">
-                        <span className="hidden sm:inline">{day}</span>
-                        <span className="sm:hidden">{day.slice(0, 1)}</span>
+                        {day}
                       </div>
                     ))}
                   </div>
                   {/* Calendar grid */}
                   <div className="grid grid-cols-7 border-l border-slate-200">
                     {Array.from({ length: startingDay }).map((_, i) => (
-                      <div key={`empty-${i}`} className="min-h-[80px] md:min-h-[120px] border-r border-b border-slate-200 bg-slate-50/30" />
+                      <div key={`empty-${i}`} className="min-h-[120px] border-r border-b border-slate-200 bg-slate-50/30" />
                     ))}
 
                     {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -616,8 +814,6 @@ export default function CalendarPage() {
                       const dayDeadlines = getDeadlinesForDate(day)
                       const isToday = todayStr === dateStr
                       const isWeekend = [0, 6].includes(new Date(dateStr).getDay())
-                      // mobile: show 2 badges max; desktop (sm+): show 3
-                      const mobileMax = 2
                       const desktopMax = 3
 
                       return (
@@ -636,49 +832,17 @@ export default function CalendarPage() {
                             if (deadline) moveDeadline(deadline, dateStr)
                           }}
                           onClick={() => openCreateModal(dateStr)}
-                          className={`group relative min-h-[80px] md:min-h-[120px] cursor-pointer border-r border-b border-slate-200 p-2 md:p-3 transition-colors duration-150 hover:bg-slate-50/50 ${
+                          className={`group relative min-h-[120px] cursor-pointer border-r border-b border-slate-200 p-3 transition-colors duration-150 hover:bg-slate-50/50 ${
                             isToday ? 'bg-blue-50/30' : isWeekend ? 'bg-slate-50/30' : 'bg-white'
                           } ${
                             dropTarget === dateStr ? 'bg-blue-50' : ''
                           }`}
                         >
-                          <div className="hidden md:block absolute right-2 top-2 text-xs text-slate-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">+</div>
-                          <div className={`text-xs md:text-sm font-medium mb-1 ${isToday ? 'bg-[#5B8DEF] text-white rounded-full w-6 h-6 md:w-7 md:h-7 flex items-center justify-center' : 'text-slate-700'}`}>
+                          <div className="absolute right-2 top-2 text-xs text-slate-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">+</div>
+                          <div className={`text-sm font-medium mb-1 ${isToday ? 'bg-[#5B8DEF] text-white rounded-full w-7 h-7 flex items-center justify-center' : 'text-slate-700'}`}>
                             {day}
                           </div>
                           <div className="mt-1 space-y-1">
-                            {/* Mobile badges: simple solid-color rounded pills */}
-                            {dayDeadlines.slice(0, mobileMax).map((deadline) => {
-                              const courseColor = courseColors[deadline.course_id]
-                              return (
-                                <div
-                                  key={deadline.id}
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    setSelectedDeadline(deadline)
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                      setSelectedDeadline(deadline)
-                                    }
-                                  }}
-                                  className={`sm:hidden w-full cursor-pointer rounded px-1.5 py-0.5 text-left transition-colors duration-150 ${
-                                    deadline.type === 'Class'
-                                      ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
-                                      : (courseColor?.bg || 'bg-slate-400')
-                                  } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
-                                >
-                                  <span className={`truncate block text-[9px] font-medium ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
-                                    {deadline.title}
-                                  </span>
-                                </div>
-                              )
-                            })}
-                            {/* Desktop badges: clean pill style */}
                             {dayDeadlines.slice(0, desktopMax).map((deadline) => {
                               const courseColor = courseColors[deadline.course_id]
                               return (
@@ -705,7 +869,7 @@ export default function CalendarPage() {
                                     }
                                   }}
                                   title={`${deadline.title} • ${deadline.course_name}${deadline.time ? ` • ${deadline.time}` : ''}`}
-                                  className={`group/badge relative hidden sm:block w-full cursor-pointer rounded px-2 py-1 text-left transition-all duration-150 ${
+                                  className={`group/badge relative w-full cursor-pointer rounded px-2 py-1 text-left transition-all duration-150 ${
                                     deadline.type === 'Class'
                                       ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
                                       : (courseColor?.bg || 'bg-slate-400')
@@ -721,7 +885,7 @@ export default function CalendarPage() {
                                       <span className={`text-[9px] shrink-0 ${deadline.type === 'Class' ? 'text-slate-400' : 'text-white/80'}`}>{deadline.time}</span>
                                     )}
                                   </div>
-                                  {/* Hover tooltip — desktop only, smart positioning to avoid clipping */}
+                                  {/* Hover tooltip */}
                                   <div className="absolute left-1/2 -translate-x-1/2 top-full z-50 mt-2 hidden min-w-[220px] max-w-xs rounded-xl bg-slate-900 px-3 py-2.5 text-white shadow-2xl group-hover/badge:block before:absolute before:-top-1 before:left-1/2 before:-translate-x-1/2 before:h-2 before:w-2 before:rotate-45 before:bg-slate-900">
                                     <div className="flex items-start gap-2">
                                       <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} />
@@ -742,7 +906,7 @@ export default function CalendarPage() {
                               )
                             })}
                             {/* +N more indicator */}
-                            {dayDeadlines.length > mobileMax && (
+                            {dayDeadlines.length > desktopMax && (
                               <button
                                 type="button"
                                 onClick={(event) => {
@@ -751,8 +915,7 @@ export default function CalendarPage() {
                                 }}
                                 className="text-[10px] font-medium text-slate-500 hover:text-[#5B8DEF] transition-colors"
                               >
-                                <span className="inline sm:hidden">+{dayDeadlines.length - mobileMax}</span>
-                                <span className="hidden sm:inline">{dayDeadlines.length > desktopMax ? `+${dayDeadlines.length - desktopMax}` : ''}</span>
+                                +{dayDeadlines.length - desktopMax}
                               </button>
                             )}
                           </div>
@@ -910,62 +1073,7 @@ export default function CalendarPage() {
             </div>
 
             <aside>
-              {/* Mobile: horizontal scroll strip for upcoming + course legend pills */}
-              <div className="lg:hidden">
-                {/* Course legend — horizontal pill row */}
-                {courses.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pb-2">
-                    {courses.map((course) => (
-                      <Link
-                        key={course.id}
-                        href={`/courses/${course.id}`}
-                        className="flex shrink-0 items-center gap-1.5 rounded-full bg-white border border-slate-100 px-3 py-1 shadow-sm text-xs text-slate-600 hover:text-slate-900 transition-colors"
-                      >
-                        <span className={`h-2.5 w-2.5 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
-                        <span className="whitespace-nowrap">{course.code || course.name}</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-                {/* Upcoming this week — horizontal scroll */}
-                {upcomingWeek.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Upcoming</p>
-                    <div className="flex gap-2 overflow-x-auto pb-2">
-                      {upcomingWeek.slice(0, 6).map((deadline) => {
-                        const courseColor = courseColors[deadline.course_id]
-                        return (
-                          <button
-                            key={deadline.id}
-                            onClick={() => setSelectedDeadline(deadline)}
-                            className={`shrink-0 w-[140px] text-left rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:shadow-md`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] text-slate-400">{deadline.date.slice(5)}</span>
-                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${courseColor?.light || 'bg-slate-100'} ${courseColor?.text || 'text-slate-500'}`}>
-                                {deadline.type}
-                              </span>
-                            </div>
-                            <div className={`mt-1 text-xs font-semibold text-slate-900 truncate ${deadline.completed ? 'line-through opacity-60' : ''}`}>
-                              {deadline.title}
-                            </div>
-                            <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                              <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
-                              {deadline.source && deadline.source !== 'manual' && (
-                                <span className="rounded bg-indigo-100 px-1 text-[8px] font-semibold text-indigo-600">
-                                  {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
-                                </span>
-                              )}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Desktop sidebar: full cards */}
+              {/* Desktop sidebar */}
               <div className="hidden lg:flex lg:flex-col lg:gap-6">
                 <div className="rounded-3xl bg-white p-6 shadow-sm">
                   <h3 className="text-lg font-semibold text-slate-900">Upcoming this week</h3>
