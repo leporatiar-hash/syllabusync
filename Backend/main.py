@@ -1906,7 +1906,14 @@ def create_checkout_session(
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
-            raise HTTPException(status_code=400, detail="Profile required")
+            # Auto-create profile so checkout isn't blocked
+            profile = UserProfile(
+                user_id=current_user.id,
+                email=current_user.email or "",
+            )
+            db.add(profile)
+            db.commit()
+            db.refresh(profile)
 
         lookup_key = (
             "classmate_pro_monthly"

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { Sparkles, PlusCircle, FileUp, BookOpen, ChevronLeft } from 'lucide-react'
+import { Sparkles, PlusCircle, FileUp, BookOpen, ChevronLeft, Check } from 'lucide-react'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 
@@ -34,6 +34,12 @@ export default function OnboardingPage() {
   const [academicYear, setAcademicYear] = useState('')
   const [major, setMajor] = useState('')
   const [qsLoading, setQsLoading] = useState(false)
+  const [createdCourses, setCreatedCourses] = useState<{ id: string; name: string }[]>([])
+  const [coursesCreating, setCoursesCreating] = useState(false)
+  const [syllabusUploading, setSyllabusUploading] = useState<string | null>(null) // course id being uploaded
+  const [syllabusUploaded, setSyllabusUploaded] = useState<Set<string>>(new Set()) // course ids with syllabi
+  const qsSyllabusInputRef = useRef<HTMLInputElement>(null)
+  const [qsSyllabusError, setQsSyllabusError] = useState<string | null>(null)
 
   // Add Course state
   const [formName, setFormName] = useState('')
@@ -100,6 +106,64 @@ export default function OnboardingPage() {
     })
   }
 
+  const handleCreateCoursesAndAdvance = async () => {
+    setCoursesCreating(true)
+    try {
+      const toCreate = courseNames.filter((n) => n.trim()).slice(0, 3)
+      const created: { id: string; name: string }[] = []
+      for (const name of toCreate) {
+        const res = await fetchWithAuth(`${API_URL}/courses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), semester: term || null }),
+        })
+        if (res.ok) {
+          const course = await res.json()
+          created.push({ id: course.id, name: course.name })
+        }
+      }
+      setCreatedCourses(created)
+      setQsStep(3) // advance to syllabus upload step
+    } catch {
+      setQsStep(3) // still advance even on error
+    } finally {
+      setCoursesCreating(false)
+    }
+  }
+
+  const handleQsSyllabusUpload = async (courseId: string, file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext !== 'pdf' && ext !== 'docx') {
+      setQsSyllabusError('Only PDF or Word (.docx) files are supported.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setQsSyllabusError('File is too large (max 10 MB).')
+      return
+    }
+    setSyllabusUploading(courseId)
+    setQsSyllabusError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('course_id', courseId)
+      const res = await fetchWithAuth(`${API_URL}/upload`, {
+        method: 'POST',
+        body: fd,
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Failed to process syllabus')
+      }
+      setSyllabusUploaded((prev) => new Set(prev).add(courseId))
+    } catch (err) {
+      setQsSyllabusError(err instanceof Error ? err.message : 'Upload failed.')
+    } finally {
+      setSyllabusUploading(null)
+      if (qsSyllabusInputRef.current) qsSyllabusInputRef.current.value = ''
+    }
+  }
+
   const handleQsSubmit = async () => {
     setQsLoading(true)
     try {
@@ -114,16 +178,6 @@ export default function OnboardingPage() {
           major: major || undefined,
         }),
       })
-
-      // Create courses (up to 3 for free tier)
-      const toCreate = courseNames.filter((n) => n.trim()).slice(0, 3)
-      for (const name of toCreate) {
-        await fetchWithAuth(`${API_URL}/courses`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name.trim(), semester: term || null }),
-        })
-      }
 
       await completeOnboarding()
       router.push('/home')
@@ -362,7 +416,7 @@ export default function OnboardingPage() {
         {path === 'quick-setup' && (
           <>
             {backButton()}
-            {progressBar(qsStep, 4)}
+            {progressBar(qsStep, 5)}
 
             {/* Step 1: School & Term */}
             {qsStep === 0 && (
@@ -479,10 +533,11 @@ export default function OnboardingPage() {
                   </button>
                 </div>
                 <button
-                  onClick={() => setQsStep(3)}
-                  className="w-full rounded-full border-2 border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition-all hover:bg-slate-50"
+                  onClick={handleCreateCoursesAndAdvance}
+                  disabled={coursesCreating}
+                  className="w-full rounded-full border-2 border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition-all hover:bg-slate-50 disabled:opacity-50"
                 >
-                  Not now — continue
+                  {coursesCreating ? 'Setting up courses...' : 'Not now — continue'}
                 </button>
 
                 {showCanvasModal && (
@@ -490,7 +545,7 @@ export default function OnboardingPage() {
                     onClose={() => setShowCanvasModal(false)}
                     onSuccess={() => {
                       setShowCanvasModal(false)
-                      setQsStep(3)
+                      handleCreateCoursesAndAdvance()
                     }}
                   />
                 )}
@@ -499,15 +554,88 @@ export default function OnboardingPage() {
                     onClose={() => setShowICalModal(false)}
                     onSuccess={() => {
                       setShowICalModal(false)
-                      setQsStep(3)
+                      handleCreateCoursesAndAdvance()
                     }}
                   />
                 )}
               </div>
             )}
 
-            {/* Step 4: Profile */}
+            {/* Step 4: Upload syllabi for courses */}
             {qsStep === 3 && (
+              <div className="space-y-5">
+                <h2 className="text-xl font-bold text-slate-900">Upload syllabi for your courses</h2>
+                <p className="text-sm text-slate-500">
+                  Add a syllabus to auto-extract deadlines and policies. You can skip any course.
+                </p>
+
+                <input
+                  ref={qsSyllabusInputRef}
+                  type="file"
+                  accept=".pdf,.docx"
+                  className="hidden"
+                />
+
+                {createdCourses.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4">No courses were created. Continue to finish setup.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {createdCourses.map((course) => (
+                      <div
+                        key={course.id}
+                        className={`flex items-center gap-3 rounded-2xl border p-4 transition-all ${
+                          syllabusUploaded.has(course.id)
+                            ? 'border-green-200 bg-green-50'
+                            : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                          syllabusUploaded.has(course.id) ? 'bg-green-100 text-green-600' : 'bg-[#EEF2FF] text-[#5B8DEF]'
+                        }`}>
+                          {syllabusUploaded.has(course.id) ? <Check size={18} /> : <FileUp size={18} />}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-sm font-medium text-slate-900">{course.name}</p>
+                          {syllabusUploaded.has(course.id) && (
+                            <p className="text-xs text-green-600">Syllabus uploaded</p>
+                          )}
+                        </div>
+                        {!syllabusUploaded.has(course.id) && (
+                          <label className={`cursor-pointer rounded-full border border-[#5B8DEF] px-3 py-1.5 text-xs font-semibold text-[#5B8DEF] transition-all hover:bg-[#5B8DEF] hover:text-white ${
+                            syllabusUploading === course.id ? 'opacity-50 pointer-events-none' : ''
+                          }`}>
+                            {syllabusUploading === course.id ? 'Uploading...' : 'Upload'}
+                            <input
+                              type="file"
+                              accept=".pdf,.docx"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) handleQsSyllabusUpload(course.id, f)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {qsSyllabusError && <p className="text-sm text-red-500">{qsSyllabusError}</p>}
+
+                <button
+                  onClick={() => setQsStep(4)}
+                  disabled={!!syllabusUploading}
+                  className="w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
+                >
+                  Continue
+                </button>
+              </div>
+            )}
+
+            {/* Step 5: Profile */}
+            {qsStep === 4 && (
               <div className="space-y-5">
                 <h2 className="text-xl font-bold text-slate-900">Almost done — tell us about you</h2>
                 <p className="text-sm text-slate-500">All fields are optional.</p>
