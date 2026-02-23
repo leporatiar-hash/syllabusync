@@ -923,7 +923,6 @@ def ensure_referral_columns():
 
 
 # ── Subscription tier constants ──
-FREE_COURSE_LIMIT = 3
 FREE_AI_GENERATION_LIMIT = 5
 GRANDFATHER_CUTOFF = "2026-03-01T00:00:00"  # Users created before this get grandfathered
 
@@ -986,18 +985,8 @@ def check_tier_limit(db, user_id: str, check_type: str):
         return
 
     if check_type == "course":
-        course_count = db.query(Course).filter(Course.user_id == user_id).count()
-        if course_count >= FREE_COURSE_LIMIT:
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "error": "limit_reached",
-                    "limit_type": "courses",
-                    "current": course_count,
-                    "max": FREE_COURSE_LIMIT,
-                    "message": "Free plan allows up to 3 courses. Upgrade to Pro for unlimited.",
-                },
-            )
+        # Courses are unlimited on free tier — no limit check needed
+        return
 
     elif check_type == "ai_generation":
         if not profile:
@@ -1902,7 +1891,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
             "ai_generations_used": profile.ai_generations_used if profile else 0,
             "ai_generations_max": None if tier in ("pro", "grandfathered") else FREE_AI_GENERATION_LIMIT,
             "courses_used": course_count,
-            "courses_max": None if tier in ("pro", "grandfathered") else FREE_COURSE_LIMIT,
+            "courses_max": None,  # Courses are unlimited on all tiers
         }
     finally:
         db.close()

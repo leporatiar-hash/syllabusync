@@ -7,8 +7,6 @@ export interface SubscriptionInfo {
   isPro: boolean
   aiGenerationsUsed: number
   aiGenerationsMax: number | null // null = unlimited
-  coursesUsed: number
-  coursesMax: number | null // null = unlimited
 }
 
 const DEFAULT_SUB: SubscriptionInfo = {
@@ -16,8 +14,6 @@ const DEFAULT_SUB: SubscriptionInfo = {
   isPro: false,
   aiGenerationsUsed: 0,
   aiGenerationsMax: 5,
-  coursesUsed: 0,
-  coursesMax: 2,
 }
 
 export function useSubscription() {
@@ -37,8 +33,6 @@ export function useSubscription() {
           isPro: data.is_pro,
           aiGenerationsUsed: data.ai_generations_used,
           aiGenerationsMax: data.ai_generations_max,
-          coursesUsed: data.courses_used,
-          coursesMax: data.courses_max,
         })
       }
     } catch {
@@ -52,11 +46,9 @@ export function useSubscription() {
     refresh()
   }, [refresh])
 
-  const canCreateCourse =
-    sub.isPro || (sub.coursesMax !== null && sub.coursesUsed < sub.coursesMax)
   const canGenerate =
     sub.isPro ||
     (sub.aiGenerationsMax !== null && sub.aiGenerationsUsed < sub.aiGenerationsMax)
 
-  return { ...sub, loading, refresh, canCreateCourse, canGenerate }
+  return { ...sub, loading, refresh, canGenerate }
 }

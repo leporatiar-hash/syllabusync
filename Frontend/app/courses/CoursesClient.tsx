@@ -7,7 +7,6 @@ import posthog from 'posthog-js'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import { getCourseColor } from '../../lib/courseColors'
-import { useSubscription } from '../../hooks/useSubscription'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -29,7 +28,6 @@ export default function CoursesClient() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const { canCreateCourse, coursesUsed, coursesMax } = useSubscription()
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -348,21 +346,12 @@ export default function CoursesClient() {
             <h1 className="text-3xl font-semibold text-slate-900">Courses</h1>
             <p className="mt-2 text-sm text-slate-600">Your syllabi, deadlines, and study materials in one place.</p>
           </div>
-          {canCreateCourse ? (
-            <button
-              onClick={() => setShowModal(true)}
-              className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-            >
-              + Add Course
-            </button>
-          ) : (
-            <a
-              href="/upgrade"
-              className="rounded-full bg-gradient-to-r from-amber-400 to-amber-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-            >
-              Upgrade to add more
-            </a>
-          )}
+          <button
+            onClick={() => setShowModal(true)}
+            className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+          >
+            + Add Course
+          </button>
         </div>
 
         <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -483,27 +472,13 @@ export default function CoursesClient() {
             </div>
           )}
 
-          {canCreateCourse ? (
-            <button
-              onClick={() => setShowModal(true)}
-              className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/70 p-6 text-slate-500 transition-all duration-300 hover:-translate-y-1 hover:border-slate-400 hover:shadow-lg"
-            >
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#EEF2FF] text-[#5B8DEF]">+</span>
-              <span className="text-sm font-semibold">Add Course</span>
-            </button>
-          ) : (
-            <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-center">
-              <span className="text-sm font-semibold text-amber-700">
-                {coursesUsed}/{coursesMax} courses used
-              </span>
-              <a
-                href="/upgrade"
-                className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-4 py-1.5 text-xs font-semibold text-white"
-              >
-                Upgrade to Pro
-              </a>
-            </div>
-          )}
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/70 p-6 text-slate-500 transition-all duration-300 hover:-translate-y-1 hover:border-slate-400 hover:shadow-lg"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#EEF2FF] text-[#5B8DEF]">+</span>
+            <span className="text-sm font-semibold">Add Course</span>
+          </button>
         </div>
 
         {loading && (

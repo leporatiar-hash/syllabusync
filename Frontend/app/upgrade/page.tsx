@@ -49,12 +49,12 @@ export default function UpgradePage() {
   }
 
   const features = [
-    { label: 'Courses', free: '3 courses', pro: 'Unlimited' },
+    { label: 'Courses', free: 'Unlimited', pro: 'Unlimited' },
+    { label: 'Calendar & Deadlines', free: 'Full access', pro: 'Full access' },
+    { label: 'Canvas / iCal Sync', free: 'Full access', pro: 'Full access' },
     { label: 'AI Flashcards', free: '5/month', pro: 'Unlimited' },
     { label: 'AI Quizzes', free: '5/month', pro: 'Unlimited' },
     { label: 'AI Summaries', free: '5/month', pro: 'Unlimited' },
-    { label: 'Calendar & Deadlines', free: 'Full access', pro: 'Full access' },
-    { label: 'Canvas / iCal Sync', free: 'Full access', pro: 'Full access' },
   ]
 
   return (
@@ -70,7 +70,7 @@ export default function UpgradePage() {
             Unlock the full ClassMate experience
           </h1>
           <p className="mt-3 text-slate-500 max-w-md mx-auto">
-            Unlimited courses, unlimited AI-powered study tools. Everything you need to ace your classes.
+            Unlimited AI-powered study tools. Flashcards, quizzes, and summaries with no limits.
           </p>
         </div>
 

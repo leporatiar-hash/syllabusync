@@ -401,7 +401,7 @@ export default function SettingsPage() {
                 Pro
               </span>
               <span className="text-sm text-slate-500">
-                {sub.tier === 'pro' && 'Unlimited courses & AI generations'}
+                {sub.tier === 'pro' && 'Unlimited AI generations'}
               </span>
             </div>
             <button
@@ -426,19 +426,11 @@ export default function SettingsPage() {
                 Free
               </span>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-xl bg-slate-50 p-3 text-center">
-                <div className="text-lg font-bold text-slate-900">
-                  {sub.coursesUsed}/{sub.coursesMax ?? '∞'}
-                </div>
-                <div className="text-xs text-slate-500">Courses</div>
+            <div className="rounded-xl bg-slate-50 p-3 text-center">
+              <div className="text-lg font-bold text-slate-900">
+                {sub.aiGenerationsUsed}/{sub.aiGenerationsMax ?? '∞'}
               </div>
-              <div className="rounded-xl bg-slate-50 p-3 text-center">
-                <div className="text-lg font-bold text-slate-900">
-                  {sub.aiGenerationsUsed}/{sub.aiGenerationsMax ?? '∞'}
-                </div>
-                <div className="text-xs text-slate-500">AI generations this month</div>
-              </div>
+              <div className="text-xs text-slate-500">AI generations this month</div>
             </div>
             <Link
               href="/upgrade"
