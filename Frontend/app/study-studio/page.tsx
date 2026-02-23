@@ -7,12 +7,13 @@ import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import posthog from 'posthog-js'
 import CreateTab from './CreateTab'
 import LibraryTab from './LibraryTab'
+import ChatTab from './ChatTab'
 
 export default function StudyStudioPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const [activeTab, setActiveTab] = useState<'create' | 'library'>('library')
+  const [activeTab, setActiveTab] = useState<'create' | 'library' | 'chat'>('library')
   const [courses, setCourses] = useState<any[]>([])
   const [studyTools, setStudyTools] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,13 +145,25 @@ export default function StudyStudioPage() {
           >
             Library
           </button>
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`flex-1 rounded-full px-6 py-2.5 text-sm font-semibold transition-all duration-300 ${
+              activeTab === 'chat'
+                ? 'bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Chat
+          </button>
         </div>
 
         {/* Tab Content */}
         {activeTab === 'create' ? (
           <CreateTab courses={courses} onSuccess={loadData} />
-        ) : (
+        ) : activeTab === 'library' ? (
           <LibraryTab courses={courses} studyTools={studyTools} loading={loading} onDelete={loadData} />
+        ) : (
+          <ChatTab />
         )}
       </div>
     </main>

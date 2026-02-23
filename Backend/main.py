@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -124,9 +124,15 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.middleware("http")
 async def timeout_middleware(request: Request, call_next):
     try:
-        return await asyncio.wait_for(call_next(request), timeout=60.0)
+        return await asyncio.wait_for(call_next(request), timeout=120.0)
     except asyncio.TimeoutError:
-        return JSONResponse({"detail": "Request timeout"}, status_code=504)
+        # Include CORS headers on timeout responses
+        origin = request.headers.get("origin", "")
+        headers = {}
+        if origin in ALLOWED_ORIGINS:
+            headers["access-control-allow-origin"] = origin
+            headers["access-control-allow-credentials"] = "true"
+        return JSONResponse({"detail": "Request timeout"}, status_code=504, headers=headers)
 
 
 # Initialize OpenAI client
@@ -497,6 +503,9 @@ class UserProfile(Base):
     ai_generations_used = Column(Integer, nullable=False, default=0)
     ai_generations_reset_at = Column(DateTime, nullable=True)
     has_completed_onboarding = Column(Boolean, nullable=False, default=False)
+    # Chat usage tracking
+    chat_messages_used = Column(Integer, nullable=False, default=0)
+    chat_messages_reset_at = Column(DateTime, nullable=True)
 
 
 class CalendarEntry(Base):
@@ -562,6 +571,31 @@ class Feedback(Base):
     feedback_type = Column(String, nullable=False)
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ChatConversation(Base):
+    """A chat conversation between a user and the AI assistant."""
+    __tablename__ = "chat_conversations"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False, default="New Chat")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    messages = relationship("ChatMessage", back_populates="conversation", cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    """A single message in a chat conversation."""
+    __tablename__ = "chat_messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    conversation_id = Column(String, ForeignKey("chat_conversations.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # "user" or "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    conversation = relationship("ChatConversation", back_populates="messages")
 
 
 class ProfilePictureRequest(BaseModel):
@@ -748,15 +782,14 @@ Focus on key concepts, definitions, and important facts.
             _raise_if_openai_error(e)
             raise
 
-    # For long documents, use chunked summarization with map-reduce approach
+    # For long documents, use chunked summarization with map-reduce approach - PARALLEL
     print(f"[DEBUG] Large document detected ({len(text)} chars). Using chunked summarization.")
 
     chunks = split_text_into_chunks(text, chunk_size=10000)
     print(f"[DEBUG] Split into {len(chunks)} chunks for summarization")
 
-    # Generate summaries for each chunk
-    chunk_summaries = []
-    for i, chunk in enumerate(chunks):
+    async def summarize_chunk(i: int, chunk: str) -> str:
+        """Generate summary for a single chunk."""
         chunk_prompt = f"""You are a study assistant. This is part {i+1} of {len(chunks)} from a larger document.
 Summarize this section clearly and concisely, focusing on key concepts, definitions, and important facts.
 Return 3-5 bullet points covering the main ideas in this section.
@@ -771,10 +804,15 @@ Return 3-5 bullet points covering the main ideas in this section.
                 temperature=0.3,
                 max_tokens=500
             )
-            chunk_summaries.append(response.choices[0].message.content.strip())
+            return response.choices[0].message.content.strip()
         except Exception as e:
             _raise_if_openai_error(e)
             raise
+
+    # Process all chunks in parallel
+    chunk_summaries = await asyncio.gather(
+        *[summarize_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+    )
 
     # Combine chunk summaries into final comprehensive summary
     combined_text = "\n\n".join([f"Section {i+1}:\n{summary}" for i, summary in enumerate(chunk_summaries)])
@@ -926,6 +964,18 @@ def ensure_referral_columns():
 FREE_AI_GENERATION_LIMIT = 5
 GRANDFATHER_CUTOFF = "2026-03-01T00:00:00"  # Users created before this get grandfathered
 
+# Emails that always get Pro access regardless of subscription status
+ALWAYS_PRO_EMAILS: set[str] = {
+    "leporatiar@g.cofc.edu",
+}
+
+
+def _effective_tier(profile) -> str:
+    """Return the effective tier, accounting for always-pro overrides."""
+    if profile and profile.email and profile.email.lower() in ALWAYS_PRO_EMAILS:
+        return "pro"
+    return profile.subscription_tier if profile else "free"
+
 
 def ensure_subscription_columns():
     """Add subscription-related columns to user_profiles."""
@@ -971,6 +1021,75 @@ def ensure_subscription_columns():
             pass
 
 
+def ensure_chat_columns():
+    """Add chat-related columns to user_profiles."""
+    chat_cols = [
+        ("chat_messages_used", "INTEGER DEFAULT 0"),
+        ("chat_messages_reset_at", "TIMESTAMP"),
+    ]
+    with engine.begin() as conn:
+        for col_name, col_def in chat_cols:
+            try:
+                conn.execute(text(
+                    f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"
+                ))
+                logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
+            except Exception:
+                pass  # Column already exists
+
+
+PRO_CHAT_MESSAGE_LIMIT = 50
+
+
+def check_chat_limit(db, user_id: str):
+    """Check if user can send a chat message.
+
+    Free users cannot use chat at all (raises 403 pro_required).
+    Pro users get PRO_CHAT_MESSAGE_LIMIT messages per month.
+    Raises HTTPException(403) with structured JSON if limit reached.
+    """
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    tier = _effective_tier(profile)
+
+    if tier not in ("pro", "grandfathered"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "pro_required",
+                "message": "AI Chat is a Pro feature. Upgrade to Pro to start chatting.",
+            },
+        )
+
+    # Monthly reset for pro users
+    now = datetime.utcnow()
+    if (
+        not profile.chat_messages_reset_at
+        or profile.chat_messages_reset_at.month != now.month
+        or profile.chat_messages_reset_at.year != now.year
+    ):
+        profile.chat_messages_used = 0
+        profile.chat_messages_reset_at = now
+        db.commit()
+
+    if (profile.chat_messages_used or 0) >= PRO_CHAT_MESSAGE_LIMIT:
+        # Calculate next reset date (1st of next month)
+        if now.month == 12:
+            resets_at = datetime(now.year + 1, 1, 1)
+        else:
+            resets_at = datetime(now.year, now.month + 1, 1)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "limit_reached",
+                "limit_type": "chat_messages",
+                "used": profile.chat_messages_used,
+                "max": PRO_CHAT_MESSAGE_LIMIT,
+                "resets_at": resets_at.isoformat(),
+                "message": f"You've used all {PRO_CHAT_MESSAGE_LIMIT} chat messages this month. Your limit resets on {resets_at.strftime('%B %d, %Y')}.",
+            },
+        )
+
+
 def check_tier_limit(db, user_id: str, check_type: str):
     """Check if user can perform the action under their tier.
 
@@ -978,7 +1097,7 @@ def check_tier_limit(db, user_id: str, check_type: str):
     Raises HTTPException(403) with structured JSON if limit reached.
     """
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
-    tier = profile.subscription_tier if profile else "free"
+    tier = _effective_tier(profile)
 
     # Pro and grandfathered users have no limits
     if tier in ("pro", "grandfathered"):
@@ -1030,6 +1149,7 @@ ensure_user_columns()
 ensure_deadline_columns()
 ensure_referral_columns()
 ensure_subscription_columns()
+ensure_chat_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -1055,6 +1175,9 @@ def ensure_indexes():
         "CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id)",
         # user email uniqueness
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+        # chat tables
+        "CREATE INDEX IF NOT EXISTS idx_chat_conversations_user_id ON chat_conversations(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id ON chat_messages(conversation_id)",
     ]
     with engine.begin() as conn:
         for stmt in index_statements:
@@ -1666,7 +1789,7 @@ def get_me(current_user: User = Depends(get_current_user)):
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
             return {"user_id": current_user.id, "profile": None, "subscription": {"tier": "free", "is_pro": False}, "has_completed_onboarding": False}
-        tier = profile.subscription_tier or "free"
+        tier = _effective_tier(profile)
         return {
             "user_id": current_user.id,
             "profile": {
@@ -1861,7 +1984,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
         profile = db.query(UserProfile).filter(
             UserProfile.user_id == current_user.id
         ).first()
-        tier = profile.subscription_tier if profile else "free"
+        tier = _effective_tier(profile)
 
         # Monthly reset check for free users
         if profile and tier == "free":
@@ -1892,6 +2015,13 @@ def get_subscription(current_user: User = Depends(get_current_user)):
             "ai_generations_max": None if tier in ("pro", "grandfathered") else FREE_AI_GENERATION_LIMIT,
             "courses_used": course_count,
             "courses_max": None,  # Courses are unlimited on all tiers
+            "chat_messages_used": profile.chat_messages_used if profile else 0,
+            "chat_messages_max": PRO_CHAT_MESSAGE_LIMIT if tier in ("pro", "grandfathered") else None,
+            "chat_messages_reset_at": (
+                profile.chat_messages_reset_at.isoformat()
+                if profile and profile.chat_messages_reset_at
+                else None
+            ),
         }
     finally:
         db.close()
@@ -2058,7 +2188,7 @@ async def stripe_webhook(request: Request):
                 )
                 if status in ("canceled", "unpaid", "incomplete_expired"):
                     profile.subscription_tier = "free"
-                elif status == "active":
+                elif status in ("active", "trialing"):
                     profile.subscription_tier = "pro"
                 db.commit()
                 logger.info(f"[Stripe] User {profile.user_id} subscription status: {status}")
@@ -2784,13 +2914,14 @@ Make questions clear and answers concise but complete."""
                     print(f"[WARN] OpenAI flashcard generation failed: {e}")
                     flashcards_data = generate_flashcards_fallback(text)
             else:
-                # Chunked generation for large documents
+                # Chunked generation for large documents - process in PARALLEL for speed
                 chunks = split_text_into_chunks(text, chunk_size=12000)
                 print(f"[DEBUG] Large document detected ({len(text)} chars). Split into {len(chunks)} chunks for flashcard generation.")
 
                 cards_per_chunk = max(5, 20 // len(chunks))
-                all_cards = []
-                for i, chunk in enumerate(chunks):
+
+                async def generate_chunk_flashcards(i: int, chunk: str) -> list:
+                    """Generate flashcards for a single chunk."""
                     chunk_prompt = f"""You are a study assistant. This is section {i+1} of {len(chunks)} from a larger document.
 Generate {cards_per_chunk}-{cards_per_chunk + 5} flashcards from THIS section only.
 
@@ -2810,11 +2941,19 @@ Focus on key concepts, definitions, important facts, and formulas. Make question
                         )
                         chunk_cards = parse_json_response(response.choices[0].message.content)
                         if isinstance(chunk_cards, list):
-                            all_cards.extend(chunk_cards)
-                        print(f"[DEBUG] Chunk {i+1}/{len(chunks)}: generated {len(chunk_cards)} flashcards")
+                            print(f"[DEBUG] Chunk {i+1}/{len(chunks)}: generated {len(chunk_cards)} flashcards")
+                            return chunk_cards
+                        return []
                     except Exception as e:
                         _raise_if_openai_error(e)
                         print(f"[WARN] Chunk {i+1} flashcard generation failed: {e}")
+                        return []
+
+                # Process all chunks in parallel
+                chunk_results = await asyncio.gather(
+                    *[generate_chunk_flashcards(i, chunk) for i, chunk in enumerate(chunks)]
+                )
+                all_cards = [card for chunk_cards in chunk_results for card in chunk_cards]
 
                 # Deduplicate: remove cards with very similar fronts
                 seen_fronts = set()
@@ -3120,13 +3259,14 @@ Guidelines:
                 print(f"[ERROR] Quiz generation failed: {e}")
                 raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
         else:
-            # Chunked generation for large documents
+            # Chunked generation for large documents - process in PARALLEL for speed
             chunks = split_text_into_chunks(text, chunk_size=12000)
             print(f"[DEBUG] Large document detected ({len(text)} chars). Split into {len(chunks)} chunks for quiz generation.")
 
             qs_per_chunk = max(2, 10 // len(chunks))
-            all_questions = []
-            for i, chunk in enumerate(chunks):
+
+            async def generate_chunk_questions(i: int, chunk: str) -> list:
+                """Generate quiz questions for a single chunk."""
                 chunk_prompt = f"""You are a study assistant. This is section {i+1} of {len(chunks)} from a larger document.
 Generate {qs_per_chunk}-{qs_per_chunk + 2} multiple-choice questions from THIS section only.
 
@@ -3151,11 +3291,18 @@ Each question must have exactly 4 options (A, B, C, D). Test understanding, not 
                         chunk_qs = chunk_data["questions"]
                     else:
                         chunk_qs = []
-                    all_questions.extend(chunk_qs)
                     print(f"[DEBUG] Chunk {i+1}/{len(chunks)}: generated {len(chunk_qs)} quiz questions")
+                    return chunk_qs
                 except Exception as e:
                     _raise_if_openai_error(e)
                     print(f"[WARN] Chunk {i+1} quiz generation failed: {e}")
+                    return []
+
+            # Process all chunks in parallel
+            chunk_results = await asyncio.gather(
+                *[generate_chunk_questions(i, chunk) for i, chunk in enumerate(chunks)]
+            )
+            all_questions = [q for chunk_qs in chunk_results for q in chunk_qs]
 
             # Deduplicate by question text
             seen = set()
@@ -3861,5 +4008,344 @@ def manual_lms_sync(
     try:
         synced, errors = sync_all_connections(current_user.id, db)
         return {"synced_count": synced, "errors": errors}
+    finally:
+        db.close()
+
+
+# ── Chat API ────────────────────────────────────────────────────────────────
+
+MAX_CHAT_MESSAGE_LENGTH = 4000  # Max chars per user message
+MAX_FILE_CONTEXT_LENGTH = 20000  # Max chars of extracted file text to include
+
+
+def _build_chat_context(db, user_id: str) -> str:
+    """Build system context from user's courses, deadlines, and course materials."""
+    parts: list[str] = []
+
+    # Courses
+    courses = db.query(Course).filter(Course.user_id == user_id).all()
+    if courses:
+        parts.append("## Student's Courses")
+        for c in courses:
+            info = f"- {c.name}"
+            if c.code:
+                info += f" ({c.code})"
+            if c.semester:
+                info += f" — {c.semester}"
+            parts.append(info)
+            # Include course_info if available (extracted syllabus details)
+            if c.course_info and isinstance(c.course_info, dict):
+                for key, val in c.course_info.items():
+                    if val:
+                        parts.append(f"  {key}: {str(val)[:500]}")
+
+    # Upcoming deadlines (next 30 days)
+    today = date.today()
+    thirty_days = today + timedelta(days=30)
+    deadlines = (
+        db.query(Deadline)
+        .filter(
+            Deadline.user_id == user_id,
+            Deadline.completed == False,
+            Deadline.date >= today.isoformat(),
+            Deadline.date <= thirty_days.isoformat(),
+        )
+        .order_by(Deadline.date)
+        .limit(30)
+        .all()
+    )
+    if deadlines:
+        parts.append("\n## Upcoming Deadlines (next 30 days)")
+        for d in deadlines:
+            course = db.query(Course).filter(Course.id == d.course_id).first() if d.course_id else None
+            course_name = course.name if course else "General"
+            parts.append(f"- [{d.date}] {d.title} ({course_name}) — {d.type or 'deadline'}")
+
+    # Summaries as course material context (truncated)
+    summaries = (
+        db.query(Summary)
+        .filter(Summary.user_id == user_id)
+        .order_by(Summary.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    if summaries:
+        parts.append("\n## Recent Course Material Summaries")
+        remaining = MAX_FILE_CONTEXT_LENGTH
+        for s in summaries:
+            course = db.query(Course).filter(Course.id == s.course_id).first()
+            course_name = course.name if course else "Unknown"
+            excerpt = s.content[:min(2000, remaining)]
+            parts.append(f"[Source: {s.title} | Course: {course_name}]\n{excerpt}")
+            remaining -= len(excerpt)
+            if remaining <= 0:
+                break
+
+    return "\n".join(parts)
+
+
+CHAT_SYSTEM_PROMPT = """You are ClassMate AI, a personal academic assistant. You have access to the student's courses, upcoming deadlines, and course materials provided below.
+
+Help them study, understand concepts, prepare for exams, and stay organized. Be concise, helpful, and encouraging.
+
+When referencing course material, only cite sources that appear in the context below. If the student asks about something not covered in their materials, say so honestly and provide general help.
+
+{context}"""
+
+
+@app.post("/chat/conversations")
+@limiter.limit("10/minute")
+def create_chat_conversation(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new chat conversation. Pro only."""
+    db = SessionLocal()
+    try:
+        check_chat_limit(db, current_user.id)
+        conv = ChatConversation(user_id=current_user.id)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+        return {
+            "id": conv.id,
+            "title": conv.title,
+            "created_at": conv.created_at.isoformat(),
+        }
+    finally:
+        db.close()
+
+
+@app.get("/chat/conversations")
+def list_chat_conversations(
+    current_user: User = Depends(get_current_user),
+):
+    """List user's chat conversations."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        tier = _effective_tier(profile)
+        if tier not in ("pro", "grandfathered"):
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "pro_required", "message": "AI Chat is a Pro feature."},
+            )
+        convs = (
+            db.query(ChatConversation)
+            .filter(ChatConversation.user_id == current_user.id)
+            .order_by(ChatConversation.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "id": c.id,
+                "title": c.title,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in convs
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/chat/conversations/{conversation_id}/messages")
+def get_chat_messages(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Get messages for a conversation."""
+    db = SessionLocal()
+    try:
+        conv = db.query(ChatConversation).filter(
+            ChatConversation.id == conversation_id,
+            ChatConversation.user_id == current_user.id,
+        ).first()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.conversation_id == conversation_id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
+        return [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in messages
+        ]
+    finally:
+        db.close()
+
+
+@app.post("/chat/conversations/{conversation_id}/messages")
+@limiter.limit("10/minute")
+async def send_chat_message(
+    request: Request,
+    conversation_id: str,
+    content: str = Form(None),
+    file: UploadFile = File(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Send a message and get AI response. Pro only, 50 msgs/month."""
+    db = SessionLocal()
+    try:
+        # Verify conversation ownership
+        conv = db.query(ChatConversation).filter(
+            ChatConversation.id == conversation_id,
+            ChatConversation.user_id == current_user.id,
+        ).first()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check chat limit (pro-only + 50/month)
+        check_chat_limit(db, current_user.id)
+
+        message_content = content or ""
+
+        if not message_content and not file:
+            raise HTTPException(status_code=400, detail="Message content or file is required")
+
+        # Enforce message length
+        if message_content and len(message_content) > MAX_CHAT_MESSAGE_LENGTH:
+            message_content = message_content[:MAX_CHAT_MESSAGE_LENGTH]
+
+        # Handle file upload
+        file_text = ""
+        file_name = ""
+        if file and file.filename:
+            file_name = file.filename
+            file_ext = os.path.splitext(file_name)[1].lower()
+            allowed = [".pdf", ".docx", ".txt"]
+            if file_ext not in allowed:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid file type. Allowed: {', '.join(allowed)}"
+                )
+            file_bytes = await file.read()
+            if len(file_bytes) > 25 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="File too large (max 25MB)")
+
+            if file_ext == ".pdf":
+                file_text = extract_text_from_pdf(file_bytes)
+            elif file_ext == ".docx":
+                file_text = extract_text_from_docx(file_bytes)
+            elif file_ext == ".txt":
+                file_text = file_bytes.decode("utf-8", errors="ignore")
+
+            # Truncate file text
+            if len(file_text) > MAX_FILE_CONTEXT_LENGTH:
+                file_text = file_text[:MAX_FILE_CONTEXT_LENGTH] + "\n[... truncated]"
+
+        # Build user message
+        user_content = message_content or ""
+        if file_text:
+            user_content += f"\n\n[Uploaded file: {file_name}]\n{file_text}"
+
+        # Save user message
+        user_msg = ChatMessage(
+            conversation_id=conversation_id,
+            role="user",
+            content=user_content,
+        )
+        db.add(user_msg)
+
+        # Increment chat usage in same transaction
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if profile:
+            profile.chat_messages_used = (profile.chat_messages_used or 0) + 1
+        db.commit()
+        db.refresh(user_msg)
+
+        # Build context and get last 20 messages
+        context = _build_chat_context(db, current_user.id)
+        system_prompt = CHAT_SYSTEM_PROMPT.format(context=context)
+
+        history = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.conversation_id == conversation_id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        history.reverse()
+
+        openai_messages = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            openai_messages.append({"role": msg.role, "content": msg.content})
+
+        # Call OpenAI
+        try:
+            completion = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=openai_messages,
+                max_tokens=2000,
+                temperature=0.7,
+            )
+            assistant_content = completion.choices[0].message.content
+        except Exception as e:
+            logger.error(f"[Chat] OpenAI error: {e}")
+            assistant_content = "I'm sorry, I encountered an error. Please try again."
+
+        # Save assistant message
+        assistant_msg = ChatMessage(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=assistant_content,
+        )
+        db.add(assistant_msg)
+
+        # Auto-title conversation on first message
+        msg_count = db.query(ChatMessage).filter(
+            ChatMessage.conversation_id == conversation_id
+        ).count()
+        if msg_count <= 2:  # First exchange (user + assistant)
+            # Use first ~50 chars of user message as title
+            title = (message_content or file_name or "New Chat")[:50]
+            if len(message_content or "") > 50:
+                title += "..."
+            conv.title = title
+
+        db.commit()
+        db.refresh(assistant_msg)
+
+        return {
+            "user_message": {
+                "id": user_msg.id,
+                "role": "user",
+                "content": user_msg.content,
+                "created_at": user_msg.created_at.isoformat(),
+            },
+            "assistant_message": {
+                "id": assistant_msg.id,
+                "role": "assistant",
+                "content": assistant_content,
+                "created_at": assistant_msg.created_at.isoformat(),
+            },
+        }
+    finally:
+        db.close()
+
+
+@app.delete("/chat/conversations/{conversation_id}")
+def delete_chat_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a conversation and all its messages."""
+    db = SessionLocal()
+    try:
+        conv = db.query(ChatConversation).filter(
+            ChatConversation.id == conversation_id,
+            ChatConversation.user_id == current_user.id,
+        ).first()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        db.delete(conv)
+        db.commit()
+        return {"success": True}
     finally:
         db.close()

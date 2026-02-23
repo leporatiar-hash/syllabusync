@@ -7,6 +7,9 @@ export interface SubscriptionInfo {
   isPro: boolean
   aiGenerationsUsed: number
   aiGenerationsMax: number | null // null = unlimited
+  chatMessagesUsed: number
+  chatMessagesMax: number | null // null = not available (free) or unlimited (future)
+  chatMessagesResetAt: string | null
 }
 
 const DEFAULT_SUB: SubscriptionInfo = {
@@ -14,6 +17,9 @@ const DEFAULT_SUB: SubscriptionInfo = {
   isPro: false,
   aiGenerationsUsed: 0,
   aiGenerationsMax: 5,
+  chatMessagesUsed: 0,
+  chatMessagesMax: null,
+  chatMessagesResetAt: null,
 }
 
 export function useSubscription() {
@@ -33,6 +39,9 @@ export function useSubscription() {
           isPro: data.is_pro,
           aiGenerationsUsed: data.ai_generations_used,
           aiGenerationsMax: data.ai_generations_max,
+          chatMessagesUsed: data.chat_messages_used ?? 0,
+          chatMessagesMax: data.chat_messages_max ?? null,
+          chatMessagesResetAt: data.chat_messages_reset_at ?? null,
         })
       }
     } catch {
@@ -50,5 +59,9 @@ export function useSubscription() {
     sub.isPro ||
     (sub.aiGenerationsMax !== null && sub.aiGenerationsUsed < sub.aiGenerationsMax)
 
-  return { ...sub, loading, refresh, canGenerate }
+  const canChat =
+    sub.isPro &&
+    (sub.chatMessagesMax === null || sub.chatMessagesUsed < sub.chatMessagesMax)
+
+  return { ...sub, loading, refresh, canGenerate, canChat }
 }
