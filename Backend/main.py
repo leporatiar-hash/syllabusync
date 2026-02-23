@@ -104,6 +104,22 @@ app.add_middleware(
 )
 
 
+# Global exception handler to ensure CORS headers are present on all error responses
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin", "")
+    headers = {}
+    if origin in ALLOWED_ORIGINS:
+        headers["access-control-allow-origin"] = origin
+        headers["access-control-allow-credentials"] = "true"
+    logger.error(f"[Unhandled] {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        {"detail": "Internal server error"},
+        status_code=500,
+        headers=headers,
+    )
+
+
 # Request timeout middleware
 @app.middleware("http")
 async def timeout_middleware(request: Request, call_next):
@@ -1907,20 +1923,31 @@ def create_checkout_session(
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
             # Auto-create profile so checkout isn't blocked
-            profile = UserProfile(
-                user_id=current_user.id,
-                email=current_user.email or "",
-            )
-            db.add(profile)
-            db.commit()
-            db.refresh(profile)
+            try:
+                profile = UserProfile(
+                    user_id=current_user.id,
+                    email=current_user.email or "",
+                )
+                db.add(profile)
+                db.commit()
+                db.refresh(profile)
+            except Exception:
+                db.rollback()
+                # Re-fetch in case of race condition (profile created between check and insert)
+                profile = _resolve_profile(db, current_user.id, current_user.email)
+                if not profile:
+                    raise HTTPException(status_code=500, detail="Unable to create user profile")
 
         lookup_key = (
             "classmate_pro_monthly"
             if payload.plan == "monthly"
             else "classmate_pro_yearly"
         )
-        prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
+        try:
+            prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
+        except Exception as e:
+            logger.error(f"[Checkout] Stripe Price.list failed: {e}")
+            raise HTTPException(status_code=500, detail="Unable to fetch pricing from Stripe")
         if not prices.data:
             raise HTTPException(
                 status_code=500,
@@ -1930,21 +1957,35 @@ def create_checkout_session(
         # Reuse existing Stripe customer or create new one
         customer_id = profile.stripe_customer_id
         if not customer_id:
-            customer = stripe_lib.Customer.create(email=current_user.email)
-            customer_id = customer.id
-            profile.stripe_customer_id = customer_id
-            db.commit()
+            try:
+                customer = stripe_lib.Customer.create(email=current_user.email)
+                customer_id = customer.id
+                profile.stripe_customer_id = customer_id
+                db.commit()
+            except Exception as e:
+                logger.error(f"[Checkout] Stripe Customer.create failed: {e}")
+                db.rollback()
+                raise HTTPException(status_code=500, detail="Unable to create Stripe customer")
 
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        session = stripe_lib.checkout.Session.create(
-            customer=customer_id,
-            mode="subscription",
-            line_items=[{"price": prices.data[0].id, "quantity": 1}],
-            subscription_data={"trial_period_days": 10},
-            success_url=f"{frontend_url}/settings?checkout=success",
-            cancel_url=f"{frontend_url}/settings?checkout=canceled",
-        )
+        try:
+            session = stripe_lib.checkout.Session.create(
+                customer=customer_id,
+                mode="subscription",
+                line_items=[{"price": prices.data[0].id, "quantity": 1}],
+                subscription_data={"trial_period_days": 10},
+                success_url=f"{frontend_url}/settings?checkout=success",
+                cancel_url=f"{frontend_url}/settings?checkout=canceled",
+            )
+        except Exception as e:
+            logger.error(f"[Checkout] Stripe Session.create failed: {e}")
+            raise HTTPException(status_code=500, detail="Unable to create checkout session")
         return {"checkout_url": session.url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Checkout] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during checkout")
     finally:
         db.close()
 
