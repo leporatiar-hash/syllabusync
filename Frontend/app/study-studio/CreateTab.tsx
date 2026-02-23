@@ -445,7 +445,6 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
 
       {!canGenerate && (
         <UpgradePrompt
-          type="ai_generations"
           current={aiGenerationsUsed}
           max={aiGenerationsMax ?? 5}
         />
@@ -514,15 +513,17 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         onChange={handleFileChange}
       />
       <div
-        onClick={() => !uploading && fileInputRef.current?.click()}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        className={`relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition-all duration-300 ${
-          dragOver
-            ? 'border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.01]'
-            : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
+        onClick={() => !uploading && canGenerate && fileInputRef.current?.click()}
+        onDragEnter={canGenerate ? handleDragEnter : undefined}
+        onDragLeave={canGenerate ? handleDragLeave : undefined}
+        onDragOver={canGenerate ? handleDragOver : undefined}
+        onDrop={canGenerate ? handleDrop : undefined}
+        className={`relative flex min-h-[280px] flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition-all duration-300 ${
+          !canGenerate
+            ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-50'
+            : dragOver
+              ? 'cursor-pointer border-[#5B8DEF] bg-[#EEF2FF]/60 scale-[1.01]'
+              : 'cursor-pointer border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'
         } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
       >
         <div className={`flex h-16 w-16 items-center justify-center rounded-full transition-colors ${dragOver ? 'bg-[#5B8DEF]/10' : 'bg-[#EEF2FF]'}`}>
@@ -534,10 +535,10 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         </div>
         <div>
           <p className="text-lg font-semibold text-slate-900">
-            {uploading ? 'Processing...' : dragOver ? 'Drop file here' : 'Drop file here or click to browse'}
+            {!canGenerate ? 'Generation limit reached' : uploading ? 'Processing...' : dragOver ? 'Drop file here' : 'Drop file here or click to browse'}
           </p>
           <p className="mt-2 text-sm text-slate-500">
-            PDF, DOCX, TXT, PNG, JPG (max 25MB)
+            {!canGenerate ? 'Upgrade to Pro to continue generating study materials' : 'PDF, DOCX, TXT, PNG, JPG (max 25MB)'}
           </p>
         </div>
 

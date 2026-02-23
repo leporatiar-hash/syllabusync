@@ -7,6 +7,8 @@ import dynamic from 'next/dynamic'
 import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar, Share2, Copy, Check } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
+import { useSubscription } from '../hooks/useSubscription'
+import UpgradePrompt from '../components/UpgradePrompt'
 
 const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
 const ICalConnectModal = dynamic(() => import('../components/ICalConnectModal'), { ssr: false })
@@ -77,6 +79,7 @@ export default function HomeClient() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
+  const { canGenerate, isPro } = useSubscription()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
   const [lmsConnections, setLmsConnections] = useState<any[]>([])
@@ -226,6 +229,11 @@ export default function HomeClient() {
   // Logged in - show dashboard
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
+      {!isPro && !canGenerate && (
+        <div className="mx-auto max-w-6xl px-4 pt-8">
+          <UpgradePrompt variant="banner" />
+        </div>
+      )}
       <section className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-16 md:flex-row md:items-start md:justify-between">
         <div className="flex-1 space-y-4">
           <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
