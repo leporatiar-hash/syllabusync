@@ -42,12 +42,10 @@ export default function ChatTab() {
   useEffect(() => {
     if (!subLoading && isPro && chatMessagesMax !== null && chatMessagesUsed >= chatMessagesMax) {
       setLimitReached(true)
-      const resetDate = chatMessagesResetAt ? new Date(chatMessagesResetAt) : null
-      // Calculate first of next month
-      const now = new Date()
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-      const displayDate = nextMonth.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-      setLimitMessage(`You've used all ${chatMessagesMax} chat messages this month. Your limit resets on ${displayDate}.`)
+      // Calculate reset date (7 days from reset_at)
+      const resetDate = chatMessagesResetAt ? new Date(new Date(chatMessagesResetAt).getTime() + 7 * 24 * 60 * 60 * 1000) : null
+      const displayDate = resetDate ? resetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : 'soon'
+      setLimitMessage(`You've used all ${chatMessagesMax} chat messages this week. Your limit resets on ${displayDate}.`)
     }
   }, [subLoading, isPro, chatMessagesUsed, chatMessagesMax, chatMessagesResetAt])
 

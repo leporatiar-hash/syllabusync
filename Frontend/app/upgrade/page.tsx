@@ -55,7 +55,7 @@ export default function UpgradePage() {
     { label: 'AI Flashcards', free: '5/month', pro: 'Unlimited' },
     { label: 'AI Quizzes', free: '5/month', pro: 'Unlimited' },
     { label: 'AI Summaries', free: '5/month', pro: 'Unlimited' },
-    { label: 'AI Course Chat', free: 'Not available', pro: '50 msgs/month' },
+    { label: 'AI Course Chat', free: 'Not available', pro: '50 msgs/week' },
   ]
 
   return (

@@ -1038,14 +1038,14 @@ def ensure_chat_columns():
                 pass  # Column already exists
 
 
-PRO_CHAT_MESSAGE_LIMIT = 50
+PRO_CHAT_MESSAGE_LIMIT = 50  # Per week
 
 
 def check_chat_limit(db, user_id: str):
     """Check if user can send a chat message.
 
     Free users cannot use chat at all (raises 403 pro_required).
-    Pro users get PRO_CHAT_MESSAGE_LIMIT messages per month.
+    Pro users get PRO_CHAT_MESSAGE_LIMIT messages per week.
     Raises HTTPException(403) with structured JSON if limit reached.
     """
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
@@ -1060,23 +1060,22 @@ def check_chat_limit(db, user_id: str):
             },
         )
 
-    # Monthly reset for pro users
+    # Weekly reset for pro users
     now = datetime.utcnow()
-    if (
-        not profile.chat_messages_reset_at
-        or profile.chat_messages_reset_at.month != now.month
-        or profile.chat_messages_reset_at.year != now.year
-    ):
-        profile.chat_messages_used = 0
+    if profile.chat_messages_reset_at:
+        # Check if more than 7 days have passed
+        days_since_reset = (now - profile.chat_messages_reset_at).days
+        if days_since_reset >= 7:
+            profile.chat_messages_used = 0
+            profile.chat_messages_reset_at = now
+            db.commit()
+    else:
         profile.chat_messages_reset_at = now
         db.commit()
 
     if (profile.chat_messages_used or 0) >= PRO_CHAT_MESSAGE_LIMIT:
-        # Calculate next reset date (1st of next month)
-        if now.month == 12:
-            resets_at = datetime(now.year + 1, 1, 1)
-        else:
-            resets_at = datetime(now.year, now.month + 1, 1)
+        # Calculate next reset date (7 days from last reset)
+        resets_at = profile.chat_messages_reset_at + timedelta(days=7)
         raise HTTPException(
             status_code=403,
             detail={
@@ -1085,7 +1084,7 @@ def check_chat_limit(db, user_id: str):
                 "used": profile.chat_messages_used,
                 "max": PRO_CHAT_MESSAGE_LIMIT,
                 "resets_at": resets_at.isoformat(),
-                "message": f"You've used all {PRO_CHAT_MESSAGE_LIMIT} chat messages this month. Your limit resets on {resets_at.strftime('%B %d, %Y')}.",
+                "message": f"You've used all {PRO_CHAT_MESSAGE_LIMIT} chat messages this week. Your limit resets on {resets_at.strftime('%B %d, %Y')}.",
             },
         )
 
@@ -4201,7 +4200,7 @@ async def send_chat_message(
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Check chat limit (pro-only + 50/month)
+        # Check chat limit (pro-only + 50/week)
         check_chat_limit(db, current_user.id)
 
         message_content = content or ""

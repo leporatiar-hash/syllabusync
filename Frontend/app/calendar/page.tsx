@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
+import { useSubscription } from '../../hooks/useSubscription'
+import UpgradePrompt from '../../components/UpgradePrompt'
 import posthog from 'posthog-js'
 import { buildCourseColorMap } from '../../lib/courseColors'
 
@@ -55,6 +57,7 @@ export default function CalendarPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
+  const { isPro } = useSubscription()
 
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -571,6 +574,12 @@ export default function CalendarPage() {
   return (
     <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6">
       <div className="mx-auto w-full max-w-[1600px]">
+        {/* Pro Promotion Banner */}
+        {!isPro && (
+          <div className="mb-4">
+            <UpgradePrompt variant="promo" />
+          </div>
+        )}
         {/* ── Desktop toolbar ── */}
         <div className="hidden md:flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">

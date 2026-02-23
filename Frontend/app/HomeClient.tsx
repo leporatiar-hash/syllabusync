@@ -229,9 +229,9 @@ export default function HomeClient() {
   // Logged in - show dashboard
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
-      {!isPro && !canGenerate && (
+      {!isPro && (
         <div className="mx-auto max-w-6xl px-4 pt-8">
-          <UpgradePrompt variant="banner" />
+          <UpgradePrompt variant="promo" />
         </div>
       )}
       <section className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-16 md:flex-row md:items-start md:justify-between">
@@ -395,45 +395,38 @@ export default function HomeClient() {
         />
       )}
 
-      {/* Share ClassMate Card */}
+      {/* Share ClassMate Card - Compact */}
       {referralCode && (
-        <section className="mx-auto max-w-6xl px-4 pt-8">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] p-8 shadow-lg">
-            {/* Decorative circles */}
-            <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
-            <div className="pointer-events-none absolute -bottom-6 -left-6 h-24 w-24 rounded-full bg-white/10" />
-
-            <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 backdrop-blur">
-                  <Share2 size={24} className="text-white" />
+        <section className="mx-auto max-w-6xl px-4 pt-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                  <Share2 size={16} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-white">Invite your friends</h3>
-                  <p className="text-sm text-white/80">
-                    Know a student who could use this?
-                    {referralCount > 0 && (
-                      <span className="ml-1 font-semibold text-white">
-                        {referralCount} friend{referralCount !== 1 ? 's' : ''} joined!
-                      </span>
-                    )}
-                  </p>
+                  <span className="text-sm font-medium text-slate-700">Share with friends</span>
+                  {referralCount > 0 && (
+                    <span className="ml-2 text-xs text-slate-500">
+                      {referralCount} joined
+                    </span>
+                  )}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <div className="flex items-center rounded-full bg-white/20 px-4 py-2.5 text-sm text-white backdrop-blur">
-                  <span className="max-w-[200px] truncate">{referralLink}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <div className="hidden sm:flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500">
+                  <span className="max-w-[140px] truncate">{referralLink}</span>
                 </div>
                 <button
                   onClick={copyLink}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#5B8DEF] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50"
                   title="Copy link"
                 >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
                 </button>
                 <button
                   onClick={shareLink}
-                  className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-[#5B8DEF] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
                 >
                   Share
                 </button>
