@@ -92,12 +92,31 @@ allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 allowed_origins_str = allowed_origins_str.strip().strip('"').strip("'")
 ALLOWED_ORIGINS = [origin.strip().strip('"').strip("'") for origin in allowed_origins_str.split(",") if origin.strip()]
 
+# Vercel preview URL patterns to allow
+VERCEL_PREVIEW_PATTERNS = [
+    "syllabusync",  # matches syllabusync-*.vercel.app preview URLs
+]
+
+
+def is_origin_allowed(origin: str) -> bool:
+    """Check if origin is allowed, including Vercel preview URLs."""
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    # Check Vercel preview patterns
+    for pattern in VERCEL_PREVIEW_PATTERNS:
+        if pattern in origin and ".vercel.app" in origin:
+            return True
+    return False
+
+
 # Log CORS configuration at module load
 logger.info(f"[CORS] Configured origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],  # Allow all origins, we'll validate in middleware
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -109,7 +128,7 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     origin = request.headers.get("origin", "")
     headers = {}
-    if origin in ALLOWED_ORIGINS:
+    if is_origin_allowed(origin):
         headers["access-control-allow-origin"] = origin
         headers["access-control-allow-credentials"] = "true"
     logger.error(f"[Unhandled] {request.method} {request.url.path}: {exc}")
@@ -129,7 +148,7 @@ async def timeout_middleware(request: Request, call_next):
         # Include CORS headers on timeout responses
         origin = request.headers.get("origin", "")
         headers = {}
-        if origin in ALLOWED_ORIGINS:
+        if is_origin_allowed(origin):
             headers["access-control-allow-origin"] = origin
             headers["access-control-allow-credentials"] = "true"
         return JSONResponse({"detail": "Request timeout"}, status_code=504, headers=headers)
