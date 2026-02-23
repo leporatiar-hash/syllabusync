@@ -8,6 +8,7 @@ import posthog from 'posthog-js'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
+import { useSubscription } from '../../hooks/useSubscription'
 
 const CanvasConnectModal = dynamic(() => import('../../components/CanvasConnectModal'), { ssr: false })
 const ICalConnectModal = dynamic(() => import('../../components/ICalConnectModal'), { ssr: false })
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   const router = useRouter()
   const { user, loading: authLoading, signOut } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
+  const sub = useSubscription()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [fullName, setFullName] = useState('')
@@ -377,6 +379,76 @@ export default function SettingsPage() {
           )}
         </div>
       </form>
+
+      {/* Subscription */}
+      <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-base font-semibold text-slate-900 mb-4">Subscription</h2>
+        {sub.tier === 'grandfathered' ? (
+          <div className="rounded-xl bg-gradient-to-r from-[#5B8DEF]/10 to-[#7C9BF6]/10 p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="rounded-full bg-[#5B8DEF] px-3 py-0.5 text-xs font-bold text-white">
+                Pro — Early Supporter
+              </span>
+            </div>
+            <p className="text-sm text-slate-600">
+              You have unlimited access as an early user. Thank you for being here from the start!
+            </p>
+          </div>
+        ) : sub.isPro ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-[#5B8DEF] px-3 py-0.5 text-xs font-bold text-white">
+                Pro
+              </span>
+              <span className="text-sm text-slate-500">
+                {sub.tier === 'pro' && 'Unlimited courses & AI generations'}
+              </span>
+            </div>
+            <button
+              onClick={async () => {
+                const res = await fetchWithAuth(`${API_URL}/create-portal-session`, {
+                  method: 'POST',
+                })
+                if (res.ok) {
+                  const data = await res.json()
+                  window.location.href = data.portal_url
+                }
+              }}
+              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-all hover:bg-slate-50"
+            >
+              Manage Subscription
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-slate-200 px-3 py-0.5 text-xs font-bold text-slate-600">
+                Free
+              </span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-xl bg-slate-50 p-3 text-center">
+                <div className="text-lg font-bold text-slate-900">
+                  {sub.coursesUsed}/{sub.coursesMax ?? '∞'}
+                </div>
+                <div className="text-xs text-slate-500">Courses</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3 text-center">
+                <div className="text-lg font-bold text-slate-900">
+                  {sub.aiGenerationsUsed}/{sub.aiGenerationsMax ?? '∞'}
+                </div>
+                <div className="text-xs text-slate-500">AI generations this month</div>
+              </div>
+            </div>
+            <Link
+              href="/upgrade"
+              className="inline-block rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            >
+              Upgrade to Pro
+            </Link>
+          </div>
+        )}
+      </div>
 
       {/* LMS Connections */}
       <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

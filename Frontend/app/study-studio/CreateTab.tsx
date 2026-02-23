@@ -3,6 +3,8 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
+import { useSubscription } from '../../hooks/useSubscription'
+import UpgradePrompt from '../../components/UpgradePrompt'
 import posthog from 'posthog-js'
 
 interface CreateTabProps {
@@ -28,6 +30,7 @@ interface SavedResult {
 export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
   const router = useRouter()
   const { fetchWithAuth } = useAuthFetch()
+  const { canGenerate, aiGenerationsUsed, aiGenerationsMax, isPro } = useSubscription()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [selectedCourse, setSelectedCourse] = useState('')
@@ -157,7 +160,11 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         )
         if (!flashcardsRes.ok) {
           const data = await flashcardsRes.json().catch(() => ({}))
-          throw new Error(data.detail || 'Failed to generate flashcards')
+          const detail = data.detail
+          if (typeof detail === 'object' && detail?.error === 'limit_reached') {
+            throw new Error(detail.message)
+          }
+          throw new Error((typeof detail === 'string' ? detail : null) || 'Failed to generate flashcards')
         }
         const flashcardsData = await flashcardsRes.json().catch(() => ({}))
         flashcardSetId = flashcardsData.id
@@ -177,7 +184,11 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         )
         if (!quizRes.ok) {
           const data = await quizRes.json().catch(() => ({}))
-          throw new Error(data.detail || 'Failed to generate quiz')
+          const detail = data.detail
+          if (typeof detail === 'object' && detail?.error === 'limit_reached') {
+            throw new Error(detail.message)
+          }
+          throw new Error((typeof detail === 'string' ? detail : null) || 'Failed to generate quiz')
         }
         const quizData = await quizRes.json().catch(() => ({}))
         quizId = quizData.id
@@ -197,7 +208,11 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
         )
         if (!summaryRes.ok) {
           const data = await summaryRes.json().catch(() => ({}))
-          throw new Error(data.detail || 'Failed to generate summary')
+          const detail = data.detail
+          if (typeof detail === 'object' && detail?.error === 'limit_reached') {
+            throw new Error(detail.message)
+          }
+          throw new Error((typeof detail === 'string' ? detail : null) || 'Failed to generate summary')
         }
         const summaryData = await summaryRes.json().catch(() => ({}))
         summaryId = summaryData.id
@@ -425,6 +440,21 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
       {error && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {!canGenerate && (
+        <UpgradePrompt
+          type="ai_generations"
+          current={aiGenerationsUsed}
+          max={aiGenerationsMax ?? 5}
+        />
+      )}
+
+      {/* Usage counter for free users */}
+      {!isPro && canGenerate && aiGenerationsMax !== null && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 text-center">
+          {aiGenerationsUsed}/{aiGenerationsMax} AI generations used this month
         </div>
       )}
 

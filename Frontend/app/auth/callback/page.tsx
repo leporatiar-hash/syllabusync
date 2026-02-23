@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../../lib/supabaseClient'
+import { authFetch, API_URL } from '../../../hooks/useAuthFetch'
 
 function AuthCallbackContent() {
   const router = useRouter()
@@ -18,10 +19,23 @@ function AuthCallbackContent() {
     }
 
     supabase.auth.exchangeCodeForSession(code)
-      .then(({ error: exchangeError }) => {
+      .then(async ({ error: exchangeError }) => {
         if (exchangeError) {
           setError(exchangeError.message)
           return
+        }
+        // Check if user has completed onboarding
+        try {
+          const res = await authFetch(`${API_URL}/me`)
+          if (res.ok) {
+            const data = await res.json()
+            if (!data.has_completed_onboarding) {
+              router.replace('/onboarding')
+              return
+            }
+          }
+        } catch {
+          // Fall through to home on error
         }
         router.replace('/home')
       })

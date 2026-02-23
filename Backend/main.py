@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, De
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
 from jose import JWTError, jwt, jwk
@@ -28,6 +28,7 @@ import base64
 import time
 import asyncio
 import logging
+import stripe as stripe_lib
 import resend
 import httpx
 from icalendar import Calendar as ICalCalendar
@@ -471,6 +472,15 @@ class UserProfile(Base):
     referral_code = Column(String, unique=True, nullable=True, default=generate_referral_code)
     referred_by = Column(String, nullable=True)  # referral_code of the user who referred them
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Subscription / billing
+    subscription_tier = Column(String, nullable=False, default="free")  # "free", "pro", "grandfathered"
+    stripe_customer_id = Column(String, nullable=True, unique=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    subscription_status = Column(String, nullable=True)  # "active", "canceled", "past_due", etc.
+    subscription_period_end = Column(DateTime, nullable=True)
+    ai_generations_used = Column(Integer, nullable=False, default=0)
+    ai_generations_reset_at = Column(DateTime, nullable=True)
+    has_completed_onboarding = Column(Boolean, nullable=False, default=False)
 
 
 class CalendarEntry(Base):
@@ -896,12 +906,125 @@ def ensure_referral_columns():
             pass
 
 
+# ── Subscription tier constants ──
+FREE_COURSE_LIMIT = 3
+FREE_AI_GENERATION_LIMIT = 5
+GRANDFATHER_CUTOFF = "2026-03-01T00:00:00"  # Users created before this get grandfathered
+
+
+def ensure_subscription_columns():
+    """Add subscription-related columns to user_profiles."""
+    subscription_cols = [
+        ("subscription_tier", "VARCHAR DEFAULT 'free'"),
+        ("stripe_customer_id", "VARCHAR"),
+        ("stripe_subscription_id", "VARCHAR"),
+        ("subscription_status", "VARCHAR"),
+        ("subscription_period_end", "TIMESTAMP"),
+        ("ai_generations_used", "INTEGER DEFAULT 0"),
+        ("ai_generations_reset_at", "TIMESTAMP"),
+        ("has_completed_onboarding", "BOOLEAN DEFAULT FALSE"),
+    ]
+    with engine.begin() as conn:
+        for col_name, col_def in subscription_cols:
+            try:
+                conn.execute(text(
+                    f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"
+                ))
+                logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
+            except Exception:
+                pass  # Column already exists
+
+        # Grandfather existing users created before cutoff
+        try:
+            conn.execute(text(
+                f"UPDATE user_profiles SET subscription_tier = 'grandfathered' "
+                f"WHERE (subscription_tier = 'free' OR subscription_tier IS NULL) "
+                f"AND created_at < '{GRANDFATHER_CUTOFF}'"
+            ))
+            logger.info("[Migration] Grandfathered existing users")
+        except Exception:
+            pass
+
+        # Mark all existing users as having completed onboarding
+        try:
+            conn.execute(text(
+                "UPDATE user_profiles SET has_completed_onboarding = TRUE "
+                "WHERE has_completed_onboarding = FALSE OR has_completed_onboarding IS NULL"
+            ))
+            logger.info("[Migration] Marked existing users as onboarded")
+        except Exception:
+            pass
+
+
+def check_tier_limit(db, user_id: str, check_type: str):
+    """Check if user can perform the action under their tier.
+
+    check_type: "course" or "ai_generation"
+    Raises HTTPException(403) with structured JSON if limit reached.
+    """
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    tier = profile.subscription_tier if profile else "free"
+
+    # Pro and grandfathered users have no limits
+    if tier in ("pro", "grandfathered"):
+        return
+
+    if check_type == "course":
+        course_count = db.query(Course).filter(Course.user_id == user_id).count()
+        if course_count >= FREE_COURSE_LIMIT:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "limit_reached",
+                    "limit_type": "courses",
+                    "current": course_count,
+                    "max": FREE_COURSE_LIMIT,
+                    "message": "Free plan allows up to 3 courses. Upgrade to Pro for unlimited.",
+                },
+            )
+
+    elif check_type == "ai_generation":
+        if not profile:
+            return  # No profile yet = no generations tracked
+        # Reset counter if we've rolled into a new month
+        now = datetime.utcnow()
+        if (
+            not profile.ai_generations_reset_at
+            or profile.ai_generations_reset_at.month != now.month
+            or profile.ai_generations_reset_at.year != now.year
+        ):
+            profile.ai_generations_used = 0
+            profile.ai_generations_reset_at = now
+            db.commit()
+
+        if (profile.ai_generations_used or 0) >= FREE_AI_GENERATION_LIMIT:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "limit_reached",
+                    "limit_type": "ai_generations",
+                    "current": profile.ai_generations_used,
+                    "max": FREE_AI_GENERATION_LIMIT,
+                    "message": "Free plan allows 5 AI generations per month. Upgrade to Pro for unlimited.",
+                },
+            )
+
+
+def increment_ai_generation(db, user_id: str):
+    """Increment the AI generation counter for free-tier users."""
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if profile and profile.subscription_tier == "free":
+        profile.ai_generations_used = (profile.ai_generations_used or 0) + 1
+        db.commit()
+
+
 # Create tables / migrations
 # Ensure schema exists before running column updates
 Base.metadata.create_all(bind=engine)
 ensure_user_columns()
 ensure_deadline_columns()
 ensure_referral_columns()
+ensure_subscription_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -1464,6 +1587,7 @@ def create_course(payload: CreateCourseRequest, current_user: User = Depends(get
     db = SessionLocal()
     try:
         user_id = current_user.id
+        check_tier_limit(db, user_id, "course")
         if not payload.name:
             raise HTTPException(status_code=400, detail="Course name is required")
 
@@ -1536,7 +1660,8 @@ def get_me(current_user: User = Depends(get_current_user)):
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
-            return {"user_id": current_user.id, "profile": None}
+            return {"user_id": current_user.id, "profile": None, "subscription": {"tier": "free", "is_pro": False}, "has_completed_onboarding": False}
+        tier = profile.subscription_tier or "free"
         return {
             "user_id": current_user.id,
             "profile": {
@@ -1548,7 +1673,12 @@ def get_me(current_user: User = Depends(get_current_user)):
                 "major": profile.major,
                 "profile_picture": profile.profile_picture,
                 "referral_code": profile.referral_code,
-            }
+            },
+            "subscription": {
+                "tier": tier,
+                "is_pro": tier in ("pro", "grandfathered"),
+            },
+            "has_completed_onboarding": bool(profile.has_completed_onboarding),
         }
     finally:
         db.close()
@@ -1593,6 +1723,20 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                 "profile_picture": profile.profile_picture,
             }
         }
+    finally:
+        db.close()
+
+
+@app.post("/me/complete-onboarding")
+def complete_onboarding(current_user: User = Depends(get_current_user)):
+    """Mark the user as having completed the onboarding ritual."""
+    db = SessionLocal()
+    try:
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if profile:
+            profile.has_completed_onboarding = True
+            db.commit()
+        return {"ok": True}
     finally:
         db.close()
 
@@ -1688,6 +1832,201 @@ def record_referral(current_user: User = Depends(get_current_user), referral_cod
         profile.referred_by = referral_code
         db.commit()
         return {"message": "Referral recorded"}
+    finally:
+        db.close()
+
+
+# ── Subscription / Stripe endpoints ──
+
+class CheckoutRequest(BaseModel):
+    plan: str  # "monthly" or "yearly"
+
+    @validator("plan")
+    def plan_must_be_valid(cls, v):
+        if v not in ("monthly", "yearly"):
+            raise ValueError("plan must be 'monthly' or 'yearly'")
+        return v
+
+
+@app.get("/me/subscription")
+def get_subscription(current_user: User = Depends(get_current_user)):
+    """Get current subscription status and usage."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(
+            UserProfile.user_id == current_user.id
+        ).first()
+        tier = profile.subscription_tier if profile else "free"
+
+        # Monthly reset check for free users
+        if profile and tier == "free":
+            now = datetime.utcnow()
+            if (
+                not profile.ai_generations_reset_at
+                or profile.ai_generations_reset_at.month != now.month
+                or profile.ai_generations_reset_at.year != now.year
+            ):
+                profile.ai_generations_used = 0
+                profile.ai_generations_reset_at = now
+                db.commit()
+
+        course_count = db.query(Course).filter(
+            Course.user_id == current_user.id
+        ).count()
+
+        return {
+            "tier": tier,
+            "is_pro": tier in ("pro", "grandfathered"),
+            "status": profile.subscription_status if profile else None,
+            "period_end": (
+                profile.subscription_period_end.isoformat()
+                if profile and profile.subscription_period_end
+                else None
+            ),
+            "ai_generations_used": profile.ai_generations_used if profile else 0,
+            "ai_generations_max": None if tier in ("pro", "grandfathered") else FREE_AI_GENERATION_LIMIT,
+            "courses_used": course_count,
+            "courses_max": None if tier in ("pro", "grandfathered") else FREE_COURSE_LIMIT,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/create-checkout-session")
+def create_checkout_session(
+    payload: CheckoutRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Create a Stripe Checkout session for subscribing to Pro."""
+    stripe_lib.api_key = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_lib.api_key:
+        raise HTTPException(status_code=500, detail="Stripe is not configured")
+
+    db = SessionLocal()
+    try:
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if not profile:
+            raise HTTPException(status_code=400, detail="Profile required")
+
+        lookup_key = (
+            "classmate_pro_monthly"
+            if payload.plan == "monthly"
+            else "classmate_pro_yearly"
+        )
+        prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
+        if not prices.data:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Stripe price not found for lookup key: {lookup_key}",
+            )
+
+        # Reuse existing Stripe customer or create new one
+        customer_id = profile.stripe_customer_id
+        if not customer_id:
+            customer = stripe_lib.Customer.create(email=current_user.email)
+            customer_id = customer.id
+            profile.stripe_customer_id = customer_id
+            db.commit()
+
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        session = stripe_lib.checkout.Session.create(
+            customer=customer_id,
+            mode="subscription",
+            line_items=[{"price": prices.data[0].id, "quantity": 1}],
+            subscription_data={"trial_period_days": 10},
+            success_url=f"{frontend_url}/settings?checkout=success",
+            cancel_url=f"{frontend_url}/settings?checkout=canceled",
+        )
+        return {"checkout_url": session.url}
+    finally:
+        db.close()
+
+
+@app.post("/create-portal-session")
+def create_portal_session(current_user: User = Depends(get_current_user)):
+    """Create a Stripe Customer Portal session for managing subscription."""
+    stripe_lib.api_key = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_lib.api_key:
+        raise HTTPException(status_code=500, detail="Stripe is not configured")
+
+    db = SessionLocal()
+    try:
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if not profile or not profile.stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No active subscription")
+
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        session = stripe_lib.billing_portal.Session.create(
+            customer=profile.stripe_customer_id,
+            return_url=f"{frontend_url}/settings",
+        )
+        return {"portal_url": session.url}
+    finally:
+        db.close()
+
+
+@app.post("/stripe-webhook")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events (no auth — Stripe calls this directly)."""
+    stripe_lib.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature")
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+    if not webhook_secret:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+
+    try:
+        event = stripe_lib.Webhook.construct_event(payload, sig, webhook_secret)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+    except Exception as e:
+        if "SignatureVerification" in type(e).__name__:
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+        raise
+
+    db = SessionLocal()
+    try:
+        if event["type"] == "checkout.session.completed":
+            session_obj = event["data"]["object"]
+            customer_id = session_obj["customer"]
+            subscription_id = session_obj.get("subscription")
+
+            profile = db.query(UserProfile).filter(
+                UserProfile.stripe_customer_id == customer_id
+            ).first()
+            if profile:
+                profile.subscription_tier = "pro"
+                profile.stripe_subscription_id = subscription_id
+                profile.subscription_status = "active"
+                db.commit()
+                logger.info(f"[Stripe] User {profile.user_id} upgraded to pro")
+
+        elif event["type"] in (
+            "customer.subscription.updated",
+            "customer.subscription.deleted",
+        ):
+            subscription = event["data"]["object"]
+            customer_id = subscription["customer"]
+
+            profile = db.query(UserProfile).filter(
+                UserProfile.stripe_customer_id == customer_id
+            ).first()
+            if profile:
+                status = subscription["status"]
+                profile.subscription_status = status
+                profile.subscription_period_end = datetime.fromtimestamp(
+                    subscription["current_period_end"]
+                )
+                if status in ("canceled", "unpaid", "incomplete_expired"):
+                    profile.subscription_tier = "free"
+                elif status == "active":
+                    profile.subscription_tier = "pro"
+                db.commit()
+                logger.info(f"[Stripe] User {profile.user_id} subscription status: {status}")
+
+        return {"received": True}
     finally:
         db.close()
 
@@ -2238,6 +2577,7 @@ async def generate_summary(request: Request, course_id: str, file: UploadFile = 
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
+        check_tier_limit(db, user_id, "ai_generation")
 
         # Validate file upload - allow PDF, TXT, DOCX, and image files
         content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=25)
@@ -2272,6 +2612,7 @@ async def generate_summary(request: Request, course_id: str, file: UploadFile = 
         db.refresh(summary)
 
         print(f"[DEBUG] Summary created {summary.id}")
+        increment_ai_generation(db, user_id)
         return {
             "id": summary.id,
             "course_id": course_id,
@@ -2334,6 +2675,7 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
+        check_tier_limit(db, user_id, "ai_generation")
 
         # Validate and extract text from file
         content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=25)
@@ -2471,6 +2813,7 @@ Focus on key concepts, definitions, important facts, and formulas. Make question
 
         db.commit()
         print(f"[DEBUG] Inserted {len(flashcards_data)} flashcards for course {course_id}")
+        increment_ai_generation(db, user_id)
 
         return {
             "flashcard_set": {
@@ -2653,6 +2996,7 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
+        check_tier_limit(db, user_id, "ai_generation")
 
         # Validate and extract text from file
         content = await validate_file_upload(file, allowed_extensions=['.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg'], max_size_mb=25)
@@ -2816,6 +3160,7 @@ Each question must have exactly 4 options (A, B, C, D). Test understanding, not 
 
         db.commit()
         print(f"[DEBUG] Created quiz with {len(questions)} questions for course {course_id}")
+        increment_ai_generation(db, user_id)
 
         return {
             "quiz": {

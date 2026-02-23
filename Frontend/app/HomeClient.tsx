@@ -86,6 +86,24 @@ export default function HomeClient() {
   const [referralCode, setReferralCode] = useState('')
   const [referralCount, setReferralCount] = useState(0)
   const [copied, setCopied] = useState(false)
+  // Check if user needs onboarding
+  useEffect(() => {
+    if (!user) return
+    const checkOnboarding = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/me`)
+        if (res.ok) {
+          const data = await res.json()
+          if (!data.has_completed_onboarding) {
+            router.replace('/onboarding')
+          }
+        }
+      } catch {
+        // non-fatal — let them through
+      }
+    }
+    checkOnboarding()
+  }, [user, fetchWithAuth, router])
 
   const loadLmsConnections = useCallback(async () => {
     try {
