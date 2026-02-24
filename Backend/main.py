@@ -981,7 +981,7 @@ def ensure_referral_columns():
 
 # ── Subscription tier constants ──
 FREE_AI_GENERATION_LIMIT = 5
-GRANDFATHER_CUTOFF = "2026-03-01T00:00:00"  # Users created before this get grandfathered
+GRANDFATHER_CUTOFF = "2025-01-01T00:00:00"  # Moved to past date - no more grandfathering
 
 # Emails that always get Pro access regardless of subscription status
 ALWAYS_PRO_EMAILS: set[str] = {
@@ -1018,14 +1018,13 @@ def ensure_subscription_columns():
             except Exception:
                 pass  # Column already exists
 
-        # Grandfather existing users created before cutoff
+        # Reset all grandfathered users back to free (grandfathering removed)
         try:
             conn.execute(text(
-                f"UPDATE user_profiles SET subscription_tier = 'grandfathered' "
-                f"WHERE (subscription_tier = 'free' OR subscription_tier IS NULL) "
-                f"AND created_at < '{GRANDFATHER_CUTOFF}'"
+                "UPDATE user_profiles SET subscription_tier = 'free' "
+                "WHERE subscription_tier = 'grandfathered'"
             ))
-            logger.info("[Migration] Grandfathered existing users")
+            logger.info("[Migration] Reset grandfathered users to free tier")
         except Exception:
             pass
 
