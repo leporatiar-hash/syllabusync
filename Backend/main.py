@@ -1070,7 +1070,7 @@ def check_chat_limit(db, user_id: str):
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
     tier = _effective_tier(profile)
 
-    if tier not in ("pro", "grandfathered"):
+    if tier != "pro":
         raise HTTPException(
             status_code=403,
             detail={
@@ -2034,7 +2034,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
             "courses_used": course_count,
             "courses_max": None,  # Courses are unlimited on all tiers
             "chat_messages_used": profile.chat_messages_used if profile else 0,
-            "chat_messages_max": PRO_CHAT_MESSAGE_LIMIT if tier in ("pro", "grandfathered") else None,
+            "chat_messages_max": PRO_CHAT_MESSAGE_LIMIT if tier == "pro" else None,
             "chat_messages_reset_at": (
                 profile.chat_messages_reset_at.isoformat()
                 if profile and profile.chat_messages_reset_at
@@ -4084,16 +4084,16 @@ def _build_chat_context(db, user_id: str) -> str:
         db.query(Summary)
         .filter(Summary.user_id == user_id)
         .order_by(Summary.created_at.desc())
-        .limit(5)
+        .limit(8)
         .all()
     )
     if summaries:
-        parts.append("\n## Recent Course Material Summaries")
+        parts.append("\n## Course Material Summaries (Use these to answer questions with specific details)")
         remaining = MAX_FILE_CONTEXT_LENGTH
         for s in summaries:
             course = db.query(Course).filter(Course.id == s.course_id).first()
             course_name = course.name if course else "Unknown"
-            excerpt = s.content[:min(2000, remaining)]
+            excerpt = s.content[:min(4000, remaining)]
             parts.append(f"[Source: {s.title} | Course: {course_name}]\n{excerpt}")
             remaining -= len(excerpt)
             if remaining <= 0:
@@ -4104,9 +4104,25 @@ def _build_chat_context(db, user_id: str) -> str:
 
 CHAT_SYSTEM_PROMPT = """You are ClassMate AI, a personal academic assistant. You have access to the student's courses, upcoming deadlines, and course materials provided below.
 
-Help them study, understand concepts, prepare for exams, and stay organized. Be concise, helpful, and encouraging.
+YOUR PRIMARY JOB: Answer questions by pulling SPECIFIC information directly from their course materials. Don't just tell them what to study — TEACH them the actual content.
 
-When referencing course material, only cite sources that appear in the context below. If the student asks about something not covered in their materials, say so honestly and provide general help.
+Guidelines:
+1. **Be specific and detailed**: When they ask about a topic, explain the actual concepts, definitions, formulas, or facts from their materials. Quote or paraphrase directly.
+2. **Give real answers**: If they ask "What is X?", explain X in detail using their course content. Don't say "You should review X" — actually explain it.
+3. **Use examples**: Provide specific examples, dates, names, formulas, or facts from their uploaded notes and summaries.
+4. **Help them understand**: Break down complex topics step-by-step. Use analogies and clear explanations.
+5. **Reference sources**: When using their materials, mention which course or document it came from (e.g., "According to your Biology notes...").
+6. **Be direct**: Skip filler like "Great question!" — just answer the question.
+
+If the student asks about something NOT covered in their materials below:
+- Say clearly: "I don't see this topic in your uploaded materials."
+- Then provide helpful general information on the topic.
+- Suggest they upload relevant notes for more targeted help.
+
+IMPORTANT — Empty State Handling:
+If the context below shows no courses, no materials, and no deadlines, the student has not set up their account yet.
+Do NOT say "error" or give a technical response.
+Instead, warmly guide them: "Looks like you haven't added any courses or materials yet! Head to the Courses tab, upload a syllabus or some notes, and I'll be ready to help you study, quiz yourself, track deadlines, and more."
 
 {context}"""
 
@@ -4143,7 +4159,7 @@ def list_chat_conversations(
     try:
         profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
         tier = _effective_tier(profile)
-        if tier not in ("pro", "grandfathered"):
+        if tier != "pro":
             raise HTTPException(
                 status_code=403,
                 detail={"error": "pro_required", "message": "AI Chat is a Pro feature."},
@@ -4297,6 +4313,9 @@ async def send_chat_message(
 
         # Call OpenAI
         try:
+            # Log context size for debugging
+            total_chars = sum(len(m["content"]) for m in openai_messages)
+            logger.info(f"[Chat] Sending {len(openai_messages)} messages to OpenAI ({total_chars} total chars)")
             completion = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=openai_messages,
@@ -4304,9 +4323,18 @@ async def send_chat_message(
                 temperature=0.7,
             )
             assistant_content = completion.choices[0].message.content
+        except OAIRateLimitError as e:
+            logger.error(f"[Chat] OpenAI rate limit: {e}")
+            assistant_content = "I'm a little busy right now — please wait a moment and try again!"
+        except OAIAuthError as e:
+            logger.error(f"[Chat] OpenAI auth error: {e}")
+            assistant_content = "I ran into a configuration issue. Please contact support."
+        except OAIAPIStatusError as e:
+            logger.error(f"[Chat] OpenAI API error (status {e.status_code}): {e}")
+            assistant_content = "I ran into a hiccup — please try sending your message again! If it keeps happening, try refreshing the page."
         except Exception as e:
-            logger.error(f"[Chat] OpenAI error: {e}")
-            assistant_content = "I'm sorry, I encountered an error. Please try again."
+            logger.error(f"[Chat] Unexpected OpenAI error ({type(e).__name__}): {e}")
+            assistant_content = "I ran into a hiccup — please try sending your message again! If it keeps happening, try refreshing the page."
 
         # Save assistant message
         assistant_msg = ChatMessage(

@@ -112,3 +112,15 @@ body {
     transform: translateY(0);
   }
 }
+
+/* Landing page: hide global layout header, footer, and feedback button */
+body.landing-page header.sticky {
+  display: none !important;
+}
+body.landing-page > footer,
+body.landing-page footer.mx-auto {
+  display: none !important;
+}
+body.landing-page .fixed.bottom-6.right-6 {
+  display: none !important;
+}
