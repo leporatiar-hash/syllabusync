@@ -3,7 +3,7 @@ import { useAuth } from '../lib/useAuth'
 import { API_URL, useAuthFetch } from './useAuthFetch'
 
 export interface SubscriptionInfo {
-  tier: 'free' | 'pro' | 'grandfathered'
+  tier: 'free' | 'pro'
   isPro: boolean
   aiGenerationsUsed: number
   aiGenerationsMax: number | null // null = unlimited

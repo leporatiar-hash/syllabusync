@@ -514,7 +514,7 @@ class UserProfile(Base):
     referred_by = Column(String, nullable=True)  # referral_code of the user who referred them
     created_at = Column(DateTime, default=datetime.utcnow)
     # Subscription / billing
-    subscription_tier = Column(String, nullable=False, default="free")  # "free", "pro", "grandfathered"
+    subscription_tier = Column(String, nullable=False, default="free")  # "free" or "pro"
     stripe_customer_id = Column(String, nullable=True, unique=True)
     stripe_subscription_id = Column(String, nullable=True)
     subscription_status = Column(String, nullable=True)  # "active", "canceled", "past_due", etc.
@@ -1116,8 +1116,8 @@ def check_tier_limit(db, user_id: str, check_type: str):
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
     tier = _effective_tier(profile)
 
-    # Pro and grandfathered users have no limits
-    if tier in ("pro", "grandfathered"):
+    # Pro users have no limits
+    if tier == "pro":
         return
 
     if check_type == "course":
@@ -1821,7 +1821,7 @@ def get_me(current_user: User = Depends(get_current_user)):
             },
             "subscription": {
                 "tier": tier,
-                "is_pro": tier in ("pro", "grandfathered"),
+                "is_pro": tier == "pro",
             },
             "has_completed_onboarding": bool(profile.has_completed_onboarding),
         }
@@ -2021,7 +2021,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
 
         return {
             "tier": tier,
-            "is_pro": tier in ("pro", "grandfathered"),
+            "is_pro": tier == "pro",
             "status": profile.subscription_status if profile else None,
             "period_end": (
                 profile.subscription_period_end.isoformat()
@@ -2029,7 +2029,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
                 else None
             ),
             "ai_generations_used": profile.ai_generations_used if profile else 0,
-            "ai_generations_max": None if tier in ("pro", "grandfathered") else FREE_AI_GENERATION_LIMIT,
+            "ai_generations_max": None if tier == "pro" else FREE_AI_GENERATION_LIMIT,
             "courses_used": course_count,
             "courses_max": None,  # Courses are unlimited on all tiers
             "chat_messages_used": profile.chat_messages_used if profile else 0,

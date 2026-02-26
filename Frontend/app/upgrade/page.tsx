@@ -11,7 +11,7 @@ export default function UpgradePage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const { isPro, tier, loading: subLoading } = useSubscription()
+  const { isPro, loading: subLoading } = useSubscription()
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
 
   if (authLoading || subLoading) {
@@ -79,14 +79,10 @@ export default function UpgradePage() {
         {isPro && (
           <div className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center mb-8">
             <h3 className="text-lg font-semibold text-green-800">
-              {tier === 'grandfathered'
-                ? "You're a Pro member (Early Supporter)"
-                : "You're already on Pro!"}
+              You&apos;re already on Pro!
             </h3>
             <p className="mt-1 text-sm text-green-600">
-              {tier === 'grandfathered'
-                ? 'You have unlimited access as an early user. Thank you for being here from the start!'
-                : 'You have unlimited access to all features.'}
+              You have unlimited access to all features.
             </p>
             <button
               onClick={() => router.push('/settings')}
