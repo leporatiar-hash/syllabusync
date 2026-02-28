@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import Nav from "../components/Nav";
 import FeedbackButton from "../components/FeedbackButton";
 import AuthWrapper from "../components/AuthWrapper";
 import AuthDebug from "../components/AuthDebug";
 import BuildVerifier from "../components/BuildVerifier";
-import CrowWidget from "../components/CrowWidget";
 import "./globals.css";
+
+// Crow SDK uses browser-only APIs (window) — must be client-only, no SSR
+const CrowWidget = dynamic(() => import("../components/CrowWidget"), { ssr: false });
 
 export const metadata: Metadata = {
   title: "ClassMate",
