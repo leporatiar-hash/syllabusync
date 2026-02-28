@@ -5,6 +5,7 @@ import FeedbackButton from "../components/FeedbackButton";
 import AuthWrapper from "../components/AuthWrapper";
 import AuthDebug from "../components/AuthDebug";
 import BuildVerifier from "../components/BuildVerifier";
+import CrowWidget from "../components/CrowWidget";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -66,6 +67,7 @@ export default function RootLayout({
           </header>
           {children}
           <FeedbackButton />
+          <CrowWidget />
           {/* Deployment marker: d569228-feedback-button-v2 */}
           <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-2">

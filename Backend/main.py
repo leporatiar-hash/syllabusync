@@ -2,7 +2,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Reque
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
+from typing import Any, Optional
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
 from jose import JWTError, jwt, jwk
@@ -34,6 +35,7 @@ import httpx
 from icalendar import Calendar as ICalCalendar
 from cryptography.fernet import Fernet
 import sentry_sdk
+import hmac
 
 # Configure logging
 logging.basicConfig(
@@ -71,6 +73,14 @@ SUPABASE_ISSUER = os.getenv("SUPABASE_ISSUER") or (
 SUPABASE_JWT_AUD = os.getenv("SUPABASE_JWT_AUD", "authenticated")
 SUPABASE_JWKS_CACHE_TTL = int(os.getenv("SUPABASE_JWKS_CACHE_TTL", "3600"))
 
+# Crow MCP server integration
+# MCP_SERVICE_KEY: shared secret that the Crow MCP server presents via X-Service-Key header.
+# When present and valid, the backend trusts X-User-ID instead of requiring a Supabase JWT.
+MCP_SERVICE_KEY = os.getenv("MCP_SERVICE_KEY", "")
+# CROW_VERIFICATION_SECRET: used to sign Identity Verification JWTs for the Crow widget.
+# Get this from your Crow dashboard → Product Settings → Identity Verification.
+CROW_VERIFICATION_SECRET = os.getenv("CROW_VERIFICATION_SECRET", "")
+
 # Log Supabase auth configuration at startup
 print(f"[Auth] SUPABASE_URL={'SET (' + SUPABASE_URL[:40] + '...)' if SUPABASE_URL else 'NOT SET'}")
 print(f"[Auth] SUPABASE_JWKS_URL={'SET' if SUPABASE_JWKS_URL else 'NOT SET'}")
@@ -78,7 +88,15 @@ print(f"[Auth] SUPABASE_ISSUER={'SET' if SUPABASE_ISSUER else 'NOT SET'}")
 
 bearer_scheme = HTTPBearer(auto_error=True)
 
-app = FastAPI()
+app = FastAPI(
+    title="ClassMate API",
+    description=(
+        "AI-powered study platform. Parses syllabi, tracks deadlines, and generates "
+        "flashcards, summaries, and quizzes from uploaded course materials. "
+        "All endpoints require a Supabase Bearer token."
+    ),
+    version="1.0.0",
+)
 
 # Rate limiting setup
 limiter = Limiter(key_func=get_remote_address)
@@ -618,64 +636,184 @@ class ChatMessage(Base):
 
 
 class ProfilePictureRequest(BaseModel):
-    image_data: str  # base64-encoded image
+    image_data: str = Field(description="Base64-encoded image string (PNG or JPG) for the user's profile picture")
 
 class CreateCourseRequest(BaseModel):
-    name: str
-    code: str | None = None
-    semester: str | None = None
-    start_date: str | None = None
-    end_date: str | None = None
+    name: str = Field(description="Course name, e.g. 'Biology 101'")
+    code: str | None = Field(None, description="Course code/number, e.g. 'BIO 101'")
+    semester: str | None = Field(None, description="Semester or term, e.g. 'Spring 2025'")
+    start_date: str | None = Field(None, description="Course start date in YYYY-MM-DD format")
+    end_date: str | None = Field(None, description="Course end date in YYYY-MM-DD format")
 
 
 class UpdateCourseRequest(BaseModel):
-    name: str | None = None
-    code: str | None = None
-    semester: str | None = None
-    start_date: str | None = None
-    end_date: str | None = None
-    course_info: dict | None = None
+    name: str | None = Field(None, description="Updated course name")
+    code: str | None = Field(None, description="Updated course code/number")
+    semester: str | None = Field(None, description="Updated semester/term")
+    start_date: str | None = Field(None, description="Updated start date in YYYY-MM-DD format")
+    end_date: str | None = Field(None, description="Updated end date in YYYY-MM-DD format")
+    course_info: dict | None = Field(None, description="Structured course metadata (instructor, location, office hours, etc.)")
 
 
 class UpdateDeadlineRequest(BaseModel):
-    date: str | None = None
-    course_id: str | None = None
+    date: str | None = Field(None, description="New due date in YYYY-MM-DD format")
+    course_id: str | None = Field(None, description="Move deadline to a different course ID")
 
 
 class UserProfileRequest(BaseModel):
-    email: str | None = None
-    full_name: str | None = None
-    school_name: str | None = None
-    school_type: str | None = None
-    academic_year: str | None = None
-    major: str | None = None
+    email: str | None = Field(None, description="User's email address")
+    full_name: str | None = Field(None, description="User's full name")
+    school_name: str | None = Field(None, description="Name of the user's school or university")
+    school_type: str | None = Field(None, description="Type: 'university', 'community_college', 'high_school', etc.")
+    academic_year: str | None = Field(None, description="Academic year: 'Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', etc.")
+    major: str | None = Field(None, description="User's major or field of study")
 
 
 class CreateDeadlineRequest(BaseModel):
-    title: str
-    date: str
-    time: str | None = None
-    type: str = "Deadline"
-    description: str | None = None
-    course_id: str | None = None
+    title: str = Field(description="Title or name of the assignment/deadline")
+    date: str = Field(description="Due date in YYYY-MM-DD format")
+    time: str | None = Field(None, description="Due time in HH:MM format (24-hour), optional")
+    type: str = Field(default="Deadline", description="Type: 'Assignment', 'Exam', 'Quiz', 'Project', 'Deadline', etc.")
+    description: str | None = Field(None, description="Additional details about the assignment")
+    course_id: str | None = Field(None, description="ID of the course this deadline belongs to (required)")
 
 
 class QuizSubmission(BaseModel):
-    answers: dict[str, str]  # question_id -> selected answer (A, B, C, D)
+    answers: dict[str, str] = Field(description="Map of question_id to selected answer letter: {'<question_id>': 'A'|'B'|'C'|'D'}")
 
 
 class FeedbackRequest(BaseModel):
-    feedback_type: str
-    message: str
+    feedback_type: str = Field(description="Category of feedback: 'bug', 'feature', 'general', etc.")
+    message: str = Field(description="The feedback message text from the user")
 
 
 class LMSConnectCanvas(BaseModel):
-    instance_url: str
-    access_token: str
+    instance_url: str = Field(description="Canvas LMS instance URL, e.g. 'https://canvas.university.edu'")
+    access_token: str = Field(description="Canvas API access token (generated in Canvas Account Settings → New Access Token)")
 
 
 class LMSConnectICal(BaseModel):
-    ical_url: str
+    ical_url: str = Field(description="Public iCal feed URL from your LMS or calendar app (must be publicly accessible)")
+
+
+# ── Response schemas (used by FastAPI for OpenAPI docs / Crow Envoy tool generation) ──
+
+class CourseOut(BaseModel):
+    """A course belonging to the authenticated user."""
+    id: str = Field(description="Unique course identifier (UUID)")
+    name: str = Field(description="Course name, e.g. 'Biology 101'")
+    code: str | None = Field(None, description="Course code/number, e.g. 'BIO 101'")
+    semester: str = Field(description="Semester or term, e.g. 'Spring 2025'")
+    start_date: str | None = Field(None, description="Course start date (YYYY-MM-DD)")
+    end_date: str | None = Field(None, description="Course end date (YYYY-MM-DD)")
+    deadline_count: int = Field(description="Number of deadlines/assignments in this course")
+    flashcard_set_count: int = Field(description="Number of flashcard sets in this course")
+    created_at: str = Field(description="ISO 8601 timestamp when the course was created")
+
+
+class DeadlineOut(BaseModel):
+    """An assignment, exam, or deadline for a course."""
+    id: str = Field(description="Unique deadline identifier (UUID)")
+    course_id: str | None = Field(None, description="ID of the parent course")
+    course_name: str | None = Field(None, description="Name of the parent course")
+    course_code: str | None = Field(None, description="Code of the parent course")
+    date: str | None = Field(None, description="Due date in YYYY-MM-DD format")
+    time: str | None = Field(None, description="Due time in HH:MM format (24-hour)")
+    type: str | None = Field(None, description="Type: 'Assignment', 'Exam', 'Quiz', 'Project', 'Deadline', etc.")
+    title: str | None = Field(None, description="Title of the assignment or event")
+    description: str | None = Field(None, description="Additional details about the assignment")
+    recurring: bool | None = Field(None, description="True if this is a recurring event (e.g. weekly lecture)")
+    frequency: str | None = Field(None, description="Recurrence frequency, e.g. 'weekly'")
+    day_of_week: str | None = Field(None, description="Day of week for recurring events, e.g. 'Monday'")
+    completed: bool = Field(description="Whether the user has marked this deadline as done")
+    source: str | None = Field(None, description="'manual' (user-created) or 'lms' (synced from Canvas/iCal)")
+
+
+class FlashcardOut(BaseModel):
+    """A single flashcard with a question and answer."""
+    id: str = Field(description="Unique flashcard identifier")
+    front: str = Field(description="The question or term on the front of the card")
+    back: str = Field(description="The answer or definition on the back of the card")
+
+
+class FlashcardSetOut(BaseModel):
+    """A named set of AI-generated flashcards for a course."""
+    id: str = Field(description="Unique flashcard set identifier")
+    name: str = Field(description="Name of the set (usually the source filename)")
+    course_id: str = Field(description="ID of the course this set belongs to")
+    flashcards: list[FlashcardOut] = Field(description="All flashcards in this set")
+
+
+class SummaryOut(BaseModel):
+    """An AI-generated study summary created from uploaded notes or a syllabus."""
+    id: str = Field(description="Unique summary identifier")
+    title: str = Field(description="Title of the summary (usually the source filename)")
+    content: str = Field(description="Full AI-generated summary text in markdown/bullet format")
+    created_at: str = Field(description="ISO 8601 timestamp when the summary was created")
+    course_id: str = Field(description="ID of the course this summary belongs to")
+    course_name: str | None = Field(None, description="Name of the course")
+    course_code: str | None = Field(None, description="Code of the course")
+
+
+class QuizQuestionOut(BaseModel):
+    """A single multiple-choice quiz question (correct answer hidden until submission)."""
+    id: str = Field(description="Unique question identifier")
+    question: str = Field(description="The question text")
+    options: list[str] = Field(description="Four answer options formatted as ['A) ...', 'B) ...', 'C) ...', 'D) ...']")
+
+
+class QuizOut(BaseModel):
+    """A multiple-choice quiz generated from study materials."""
+    id: str = Field(description="Unique quiz identifier")
+    name: str = Field(description="Quiz name (usually the source filename)")
+    course_id: str = Field(description="ID of the course this quiz belongs to")
+    question_count: int = Field(description="Total number of questions")
+    questions: list[QuizQuestionOut] = Field(description="Quiz questions (correct answers hidden until submission)")
+
+
+class UserProfileOut(BaseModel):
+    """User profile information collected during onboarding."""
+    email: str | None = Field(None, description="User's email address")
+    full_name: str | None = Field(None, description="User's full name")
+    school_name: str | None = Field(None, description="Name of the user's school or university")
+    school_type: str | None = Field(None, description="Type: 'university', 'community_college', 'high_school', etc.")
+    academic_year: str | None = Field(None, description="'Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', etc.")
+    major: str | None = Field(None, description="User's major or field of study")
+    profile_picture: str | None = Field(None, description="URL to the user's profile picture")
+    referral_code: str | None = Field(None, description="Unique referral code to share with friends")
+
+
+class SubscriptionOut(BaseModel):
+    """Current subscription tier and usage information."""
+    tier: str = Field(description="Subscription tier: 'free' or 'pro'")
+    is_pro: bool = Field(description="Whether the user has an active Pro subscription")
+    ai_generations_used: int = Field(description="Number of AI generations used this month (free tier)")
+    ai_generations_max: int | None = Field(None, description="Monthly AI generation limit; null = unlimited (Pro)")
+    courses_used: int = Field(description="Total number of courses the user has created")
+    courses_max: int | None = Field(None, description="Course limit; null = unlimited")
+    chat_messages_used: int = Field(description="Chat messages sent this week (Pro only)")
+    chat_messages_max: int | None = Field(None, description="Weekly chat message limit; null if not on Pro")
+
+
+class UserMeResponse(BaseModel):
+    """Full profile, subscription, and onboarding status for the authenticated user."""
+    user_id: str = Field(description="Supabase user ID (UUID)")
+    profile: UserProfileOut | None = Field(None, description="User profile; null if onboarding not yet completed")
+    subscription: dict = Field(description="Subscription tier info: {tier, is_pro}")
+    has_completed_onboarding: bool = Field(description="True once the user has finished the onboarding flow")
+
+
+class QuizSummaryOut(BaseModel):
+    """A brief quiz listing (without questions) for display in course overview."""
+    id: str = Field(description="Unique quiz identifier")
+    name: str = Field(description="Quiz name (usually the source filename)")
+    question_count: int = Field(description="Number of questions in the quiz")
+    created_at: str | None = Field(None, description="ISO 8601 timestamp when the quiz was created")
+
+
+class MessageResponse(BaseModel):
+    """Generic success response."""
+    message: str = Field(description="Human-readable confirmation message")
 
 
 def generate_flashcards_fallback(text: str):
@@ -1220,6 +1358,21 @@ def _get_current_user(
     credentials: HTTPAuthorizationCredentials | None,
     db,
 ) -> User:
+    # --- Crow MCP server service key path ---
+    # When the Crow MCP server calls this API, it presents X-Service-Key instead of a
+    # Supabase JWT. If the key matches, we trust the X-User-ID header for user identity.
+    service_key = request.headers.get("x-service-key", "")
+    if service_key and MCP_SERVICE_KEY and hmac.compare_digest(service_key, MCP_SERVICE_KEY):
+        user_id = request.headers.get("x-user-id", "")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="X-User-ID header required with service key auth")
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+        logger.debug(f"[Auth] Service key auth for user {user_id}")
+        return user
+    # --- End Crow MCP service key path ---
+
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -1726,9 +1879,13 @@ def auth_status():
     }
 
 
-@app.post("/courses")
+@app.post("/courses", tags=["courses"], summary="Create a new course", response_model=CourseOut)
 def create_course(payload: CreateCourseRequest, current_user: User = Depends(get_current_user)):
-    """Create a course manually."""
+    """Create a new course for the authenticated user.
+
+    Returns the created course object including its generated ID, which is
+    needed to add deadlines, upload syllabi, and generate study materials.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -1799,8 +1956,13 @@ def _resolve_profile(db, user_id: str, email: str | None = None) -> UserProfile 
     return profile
 
 
-@app.get("/me")
+@app.get("/me", tags=["user"], summary="Get current user profile and subscription", response_model=UserMeResponse)
 def get_me(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user's profile, subscription tier, and onboarding status.
+
+    Use this to check if the user is on a Pro or Free plan, get their name/school/major,
+    and determine whether they have completed onboarding.
+    """
     db = SessionLocal()
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
@@ -1829,8 +1991,12 @@ def get_me(current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@app.post("/me/profile")
+@app.post("/me/profile", tags=["user"], summary="Create or update user profile")
 def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get_current_user)):
+    """Create or update the authenticated user's profile (name, school, major, academic year).
+
+    Safe to call multiple times — performs an upsert. Returns the saved profile fields.
+    """
     db = SessionLocal()
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
@@ -1984,7 +2150,7 @@ def record_referral(current_user: User = Depends(get_current_user), referral_cod
 # ── Subscription / Stripe endpoints ──
 
 class CheckoutRequest(BaseModel):
-    plan: str  # "monthly" or "yearly"
+    plan: str = Field(description="Billing interval: 'monthly' or 'yearly'")
 
     @validator("plan")
     def plan_must_be_valid(cls, v):
@@ -1993,9 +2159,14 @@ class CheckoutRequest(BaseModel):
         return v
 
 
-@app.get("/me/subscription")
+@app.get("/me/subscription", tags=["user"], summary="Get subscription status and usage limits", response_model=SubscriptionOut)
 def get_subscription(current_user: User = Depends(get_current_user)):
-    """Get current subscription status and usage."""
+    """Return detailed subscription and usage info for the authenticated user.
+
+    Includes the subscription tier ('free'/'pro'), AI generation usage for the current
+    month, and weekly chat message usage. Free users get 5 AI generations/month and no
+    chat access. Pro users get unlimited AI generations and 50 chat messages/week.
+    """
     db = SessionLocal()
     try:
         profile = db.query(UserProfile).filter(
@@ -2215,9 +2386,13 @@ async def stripe_webhook(request: Request):
         db.close()
 
 
-@app.get("/courses")
+@app.get("/courses", tags=["courses"], summary="List all courses for the current user", response_model=list[CourseOut])
 def list_courses(current_user: User = Depends(get_current_user)):
-    """List all courses."""
+    """Return all courses belonging to the authenticated user, sorted newest first.
+
+    Each course includes counts of deadlines and flashcard sets. Use a course's `id`
+    to fetch full details (deadlines, summaries, quizzes) via GET /courses/{course_id}.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2241,9 +2416,19 @@ def list_courses(current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@app.get("/courses/{course_id}")
+@app.get("/courses/{course_id}", tags=["courses"], summary="Get a course with all its content")
 def get_course(course_id: str, current_user: User = Depends(get_current_user)):
-    """Get a course with its deadlines and flashcard sets."""
+    """Return full details for a single course including all associated content.
+
+    Response includes the course metadata plus four nested lists:
+    - `deadlines`: all assignments and exams, sorted by due date
+    - `flashcard_sets`: AI-generated flashcard sets with card counts
+    - `summaries`: AI-generated study summaries
+    - `quizzes`: AI-generated multiple-choice quizzes
+
+    Each deadline also includes a `saved_to_calendar` flag.
+    Returns 404 if the course does not exist or belongs to a different user.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2315,9 +2500,13 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@app.get("/courses/{course_id}/deadlines")
+@app.get("/courses/{course_id}/deadlines", tags=["deadlines"], summary="List all deadlines for a specific course", response_model=list[DeadlineOut])
 def list_course_deadlines(course_id: str, current_user: User = Depends(get_current_user)):
-    """List deadlines for a specific course."""
+    """Return all deadlines (assignments, exams, quizzes, etc.) for a given course, sorted by date.
+
+    Includes both manually-created deadlines and those imported from Canvas/iCal.
+    Use GET /deadlines for a cross-course view with optional date filtering.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2342,14 +2531,24 @@ def list_course_deadlines(course_id: str, current_user: User = Depends(get_curre
         db.close()
 
 
-@app.get("/deadlines")
+@app.get("/deadlines", tags=["deadlines"], summary="List all deadlines across all courses", response_model=list[DeadlineOut])
 def list_all_deadlines(
-    from_date: str | None = Query(default=None, alias="from"),
-    to_date: str | None = Query(default=None, alias="to"),
-    course_id: str | None = None,
+    from_date: str | None = Query(default=None, alias="from", description="Filter: only return deadlines on or after this date (YYYY-MM-DD)"),
+    to_date: str | None = Query(default=None, alias="to", description="Filter: only return deadlines on or before this date (YYYY-MM-DD)"),
+    course_id: str | None = Query(default=None, description="Filter: only return deadlines for this course ID"),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all deadlines from all courses (for calendar view)."""
+    """Return all deadlines across all of the user's courses, sorted by date.
+
+    Supports optional query filters:
+    - `from` (alias for from_date): start of date range in YYYY-MM-DD format
+    - `to` (alias for to_date): end of date range in YYYY-MM-DD format
+    - `course_id`: restrict to a single course
+
+    Each deadline includes `course_name` and `course_code` for display, a `completed`
+    flag, and a `source` field ('manual' or 'lms'). Use this endpoint to power a
+    calendar view or to answer questions like "what assignments are due this week?"
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2386,9 +2585,13 @@ def list_all_deadlines(
         db.close()
 
 
-@app.post("/deadlines")
+@app.post("/deadlines", tags=["deadlines"], summary="Create a deadline for a course", response_model=DeadlineOut)
 def create_deadline(payload: CreateDeadlineRequest, current_user: User = Depends(get_current_user)):
-    """Create a custom deadline (user-generated, not from syllabus)."""
+    """Create a manually-entered deadline (assignment, exam, quiz, etc.) for a course.
+
+    Requires `course_id` in the payload. Returns the created deadline with course name/code.
+    For AI-extracted deadlines from a syllabus, use POST /courses/{course_id}/syllabus instead.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2429,9 +2632,9 @@ def create_deadline(payload: CreateDeadlineRequest, current_user: User = Depends
         db.close()
 
 
-@app.delete("/deadlines/{deadline_id}")
+@app.delete("/deadlines/{deadline_id}", tags=["deadlines"], summary="Delete a deadline", response_model=MessageResponse)
 def delete_deadline(deadline_id: str, current_user: User = Depends(get_current_user)):
-    """Delete a deadline."""
+    """Permanently delete a deadline (and remove it from the calendar if saved). Returns 404 if not found."""
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2454,9 +2657,12 @@ def delete_deadline(deadline_id: str, current_user: User = Depends(get_current_u
         db.close()
 
 
-@app.patch("/deadlines/{deadline_id}/complete")
+@app.patch("/deadlines/{deadline_id}/complete", tags=["deadlines"], summary="Toggle deadline completion status")
 def toggle_deadline_complete(deadline_id: str, current_user: User = Depends(get_current_user)):
-    """Toggle a deadline's completed status."""
+    """Toggle the `completed` flag on a deadline (mark done / mark undone).
+
+    Returns the updated deadline with its new `completed` value.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2589,7 +2795,7 @@ def list_calendar_entries(current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@app.delete("/courses/{course_id}")
+@app.delete("/courses/{course_id}", tags=["courses"], summary="Delete a course and all its data", response_model=MessageResponse)
 def delete_course(course_id: str, current_user: User = Depends(get_current_user)):
     """Delete a course and all its deadlines."""
     db = SessionLocal()
@@ -2613,7 +2819,7 @@ def delete_course(course_id: str, current_user: User = Depends(get_current_user)
         db.close()
 
 
-@app.patch("/courses/{course_id}")
+@app.patch("/courses/{course_id}", tags=["courses"], summary="Update course metadata")
 def update_course(course_id: str, payload: UpdateCourseRequest, current_user: User = Depends(get_current_user)):
     """Update course fields."""
     db = SessionLocal()
@@ -2750,10 +2956,16 @@ def delete_course_syllabus(course_id: str, current_user: User = Depends(get_curr
         db.close()
 
 
-@app.post("/courses/{course_id}/summaries")
+@app.post("/courses/{course_id}/summaries", tags=["study-materials"], summary="Upload notes and generate an AI study summary")
 @limiter.limit("10/minute")
 async def generate_summary(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    """Upload notes and generate a study summary attached to a course."""
+    """Upload a file and generate an AI-powered study summary for a course.
+
+    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). The AI produces a summary with a
+    short overview and bullet-point key concepts, then saves it to the course.
+    Returns the saved summary including its `id` and full `content`.
+    Rate-limited to 10 requests/minute. Requires Pro plan or remaining free-tier generations.
+    """
     logger.info(f"[DEBUG] /courses/{course_id}/summaries request received")
     db = SessionLocal()
     try:
@@ -2808,7 +3020,7 @@ async def generate_summary(request: Request, course_id: str, file: UploadFile = 
         db.close()
 
 
-@app.delete("/summaries/{summary_id}")
+@app.delete("/summaries/{summary_id}", tags=["study-materials"], summary="Delete a study summary")
 def delete_summary(summary_id: str, current_user: User = Depends(get_current_user)):
     """Delete a summary."""
     db = SessionLocal()
@@ -2824,9 +3036,12 @@ def delete_summary(summary_id: str, current_user: User = Depends(get_current_use
         db.close()
 
 
-@app.get("/summaries/{summary_id}")
+@app.get("/summaries/{summary_id}", tags=["study-materials"], summary="Get a study summary", response_model=SummaryOut)
 def get_summary(summary_id: str, current_user: User = Depends(get_current_user)):
-    """Get a summary with course info."""
+    """Return a single AI-generated study summary including its full content and the parent course info.
+
+    Summary content is formatted as markdown with a short overview and bullet-point key concepts.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -2848,10 +3063,15 @@ def get_summary(summary_id: str, current_user: User = Depends(get_current_user))
 
 
 # Flashcard endpoints
-@app.post("/courses/{course_id}/flashcards")
+@app.post("/courses/{course_id}/flashcards", tags=["study-materials"], summary="Upload study material and generate AI flashcards")
 @limiter.limit("10/minute")
 async def generate_flashcards(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    """Upload study material and generate flashcards using AI."""
+    """Upload a file and generate AI-powered flashcards (question/answer pairs) for a course.
+
+    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). Generates 10-20 flashcards covering
+    key concepts, definitions, formulas, and facts. Returns the flashcard set ID and all cards.
+    Rate-limited to 10 requests/minute. Requires Pro plan or remaining free-tier generations.
+    """
     logger.info(f"[DEBUG] /courses/{course_id}/flashcards request received")
     db = SessionLocal()
     try:
@@ -3031,9 +3251,13 @@ Focus on key concepts, definitions, important facts, and formulas. Make question
         db.close()
 
 
-@app.get("/flashcard-sets/{set_id}")
+@app.get("/flashcard-sets/{set_id}", tags=["study-materials"], summary="Get a flashcard set with all cards", response_model=FlashcardSetOut)
 def get_flashcard_set(set_id: str, current_user: User = Depends(get_current_user)):
-    """Get a flashcard set with all its cards."""
+    """Return a flashcard set and all of its individual cards (front/back pairs).
+
+    Cards are AI-generated from uploaded study material. Each card has an `id`, a `front`
+    (question or term), and a `back` (answer or definition).
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -3054,7 +3278,7 @@ def get_flashcard_set(set_id: str, current_user: User = Depends(get_current_user
         db.close()
 
 
-@app.delete("/flashcard-sets/{set_id}")
+@app.delete("/flashcard-sets/{set_id}", tags=["study-materials"], summary="Delete a flashcard set")
 def delete_flashcard_set(set_id: str, current_user: User = Depends(get_current_user)):
     """Delete a flashcard set."""
     db = SessionLocal()
@@ -3179,10 +3403,16 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
 
 # ============= Quiz Endpoints =============
 
-@app.post("/courses/{course_id}/generate-quiz")
+@app.post("/courses/{course_id}/generate-quiz", tags=["study-materials"], summary="Upload study material and generate an AI quiz")
 @limiter.limit("10/minute")
 async def generate_quiz(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    """Generate a multiple-choice quiz from study materials."""
+    """Upload a file and generate an AI-powered multiple-choice quiz for a course.
+
+    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). Generates 7 questions, each with
+    4 options (A/B/C/D), a correct answer, and an explanation. Returns the quiz ID and
+    question count. Fetch the full quiz via GET /quizzes/{quiz_id}.
+    Rate-limited to 10 requests/minute. Requires Pro plan or remaining free-tier generations.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -3382,9 +3612,14 @@ Each question must have exactly 4 options (A, B, C, D). Test understanding, not 
         db.close()
 
 
-@app.get("/quizzes/{quiz_id}")
+@app.get("/quizzes/{quiz_id}", tags=["study-materials"], summary="Get a quiz with all questions", response_model=QuizOut)
 def get_quiz(quiz_id: str, current_user: User = Depends(get_current_user)):
-    """Get a quiz with all its questions."""
+    """Return a quiz and all its multiple-choice questions.
+
+    Correct answers are intentionally omitted from this response — submit answers via
+    POST /quizzes/{quiz_id}/submit to get scoring and explanations.
+    Each question has an `id`, `question` text, and `options` list (A/B/C/D).
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -3418,9 +3653,13 @@ def get_quiz(quiz_id: str, current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@app.post("/quizzes/{quiz_id}/submit")
+@app.post("/quizzes/{quiz_id}/submit", tags=["study-materials"], summary="Submit quiz answers and get scored results")
 def submit_quiz(quiz_id: str, submission: QuizSubmission, current_user: User = Depends(get_current_user)):
-    """Submit quiz answers and get results."""
+    """Submit answers for a quiz and receive scored results with explanations.
+
+    The `answers` payload maps each `question_id` to a letter ('A', 'B', 'C', or 'D').
+    Returns score, percentage, and per-question feedback including the correct answer and explanation.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -3469,9 +3708,13 @@ def submit_quiz(quiz_id: str, submission: QuizSubmission, current_user: User = D
         db.close()
 
 
-@app.get("/courses/{course_id}/quizzes")
+@app.get("/courses/{course_id}/quizzes", tags=["study-materials"], summary="List all quizzes for a course", response_model=list[QuizSummaryOut])
 def get_course_quizzes(course_id: str, current_user: User = Depends(get_current_user)):
-    """Get all quizzes for a course."""
+    """Return a list of all AI-generated quizzes for a given course (without questions).
+
+    Each item includes the quiz `id`, `name`, and `question_count`.
+    Use GET /quizzes/{quiz_id} to fetch a quiz with its full question list.
+    """
     db = SessionLocal()
     try:
         user_id = current_user.id
@@ -4400,3 +4643,41 @@ def delete_chat_conversation(
         return {"success": True}
     finally:
         db.close()
+
+
+# ============================================================
+# Crow Identity Verification
+# ============================================================
+
+@app.post("/crow/identity-token", tags=["crow"], summary="Mint a Crow Identity Verification JWT")
+def get_crow_identity_token(current_user: User = Depends(get_current_user)):
+    """Mint a short-lived Crow Identity Verification JWT for the authenticated student.
+
+    The frontend should call this endpoint after login and pass the returned token
+    to the Crow widget so it can identify the student on each chat interaction.
+
+    The JWT is signed with CROW_VERIFICATION_SECRET (from your Crow dashboard →
+    Product Settings → Identity Verification) and contains the student's user_id.
+    Crow's backend verifies this JWT and injects the user_id as X-User-ID on every
+    MCP tool call.
+
+    Setup:
+      1. Add CROW_VERIFICATION_SECRET to your .env (get from Crow dashboard).
+      2. In your frontend, call this endpoint after Supabase login:
+             const { token } = await fetch('/crow/identity-token', {
+               headers: { Authorization: `Bearer ${supabaseSession.access_token}` }
+             }).then(r => r.json())
+             crow.setIdentityToken(token)
+    """
+    if not CROW_VERIFICATION_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="CROW_VERIFICATION_SECRET is not configured. Add it to your .env file.",
+        )
+
+    payload = {
+        "user_id": current_user.id,  # Supabase user UUID — required by Crow
+        "exp": int(time.time()) + 3600,  # expires in 1 hour
+    }
+    token = jwt.encode(payload, CROW_VERIFICATION_SECRET, algorithm="HS256")
+    return {"token": token}
