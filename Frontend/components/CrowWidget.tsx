@@ -3,7 +3,6 @@
 import { useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { CrowWidget as CrowSDKWidget } from '@usecrow/ui'
-import '@usecrow/ui/styles.css'
 import { useAuth } from '../lib/useAuth'
 import { API_BASE_URL } from '../lib/config'
 
