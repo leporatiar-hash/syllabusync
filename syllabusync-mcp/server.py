@@ -470,21 +470,18 @@ async def create_deadline(
 @mcp.tool
 async def update_deadline(
     deadline_id: str,
-    title: Optional[str] = None,
     date: Optional[str] = None,
     course_id: Optional[str] = None,
     client: httpx.AsyncClient = Depends(get_api_client),
 ) -> dict:
-    """Update an existing deadline. All fields except deadline_id are optional.
+    """Update an existing deadline's due date or move it to a different course. All fields except deadline_id are optional.
 
     deadline_id: The UUID of the deadline to update (get from list_deadlines).
-    title: New name for the deadline.
-    date: New due date in YYYY-MM-DD format.
-    course_id: Move deadline to a different course (use course UUID).
+    date: New due date in YYYY-MM-DD format (e.g., '2025-04-01').
+    course_id: Move deadline to a different course (use course UUID from list_courses).
+    Note: To change a deadline's title or type, delete and recreate it.
     """
     payload: dict = {}
-    if title is not None:
-        payload["title"] = title
     if date is not None:
         payload["date"] = date
     if course_id is not None:
@@ -980,6 +977,88 @@ async def delete_conversation(
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             return {"error": "Conversation not found."}
+        return {"error": f"API error: {e.response.status_code}"}
+
+
+# ============================================================
+# CALENDAR TOOLS
+# ============================================================
+
+@mcp.tool
+async def save_deadline_to_calendar(
+    deadline_id: str,
+    client: httpx.AsyncClient = Depends(get_api_client),
+) -> dict:
+    """Save a deadline to the student's calendar for easy tracking.
+
+    deadline_id: The UUID of the deadline to save (get from list_deadlines).
+    Returns whether the deadline was newly saved or was already in the calendar.
+    """
+    try:
+        resp = await client.post(f"/deadlines/{deadline_id}/save-to-calendar")
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("already_saved"):
+            return {"success": True, "already_saved": True, "message": "Deadline was already saved to your calendar."}
+        return {"success": True, "already_saved": False, "message": "Deadline saved to calendar."}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            return {"error": "Deadline not found."}
+        return {"error": f"API error: {e.response.status_code}"}
+
+
+@mcp.tool(annotations={"destructiveHint": True})
+async def remove_deadline_from_calendar(
+    deadline_id: str,
+    client: httpx.AsyncClient = Depends(get_api_client),
+) -> dict:
+    """Remove a deadline from the student's calendar.
+
+    deadline_id: The UUID of the deadline to remove (get from list_deadlines or list_calendar_entries).
+    """
+    try:
+        resp = await client.delete(f"/deadlines/{deadline_id}/save-to-calendar")
+        resp.raise_for_status()
+        return {"success": True, "message": "Deadline removed from calendar."}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            return {"error": "Calendar entry not found. This deadline may not be saved to your calendar."}
+        return {"error": f"API error: {e.response.status_code}"}
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def list_calendar_entries(
+    client: httpx.AsyncClient = Depends(get_api_client),
+) -> dict:
+    """List all deadlines the student has saved to their calendar.
+
+    Returns saved deadlines with their title, date, type, course, and completion status.
+    Use save_deadline_to_calendar to add entries and remove_deadline_from_calendar to remove them.
+    """
+    try:
+        resp = await client.get("/calendar-entries")
+        resp.raise_for_status()
+        data = resp.json()
+        entries = data if isinstance(data, list) else data.get("entries", [])
+        return {
+            "total": len(entries),
+            "entries": [
+                {
+                    "id": e.get("id"),
+                    "deadline_id": e.get("deadline_id"),
+                    "title": e.get("title"),
+                    "date": e.get("date"),
+                    "time": e.get("time"),
+                    "type": e.get("type"),
+                    "course_name": e.get("course_name"),
+                    "course_id": e.get("course_id"),
+                    "completed": e.get("completed", False),
+                    "description": e.get("description"),
+                }
+                for e in entries
+            ],
+        }
+    except httpx.HTTPStatusError as e:
         return {"error": f"API error: {e.response.status_code}"}
 
 

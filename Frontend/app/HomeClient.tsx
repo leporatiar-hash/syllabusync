@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar, Share2, Copy, Check } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar, Share2, Copy, Check, X, ExternalLink } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
 import { useSubscription } from '../hooks/useSubscription'
@@ -70,6 +70,30 @@ const features = [
   },
 ]
 
+const gettingStartedItems = [
+  {
+    key: 'connect_oaks',
+    label: 'Connect OAKS',
+    description: 'Sync your CofC calendar and deadlines automatically',
+    href: '/settings',
+    cta: 'Go to Settings',
+  },
+  {
+    key: 'add_courses',
+    label: 'Add your courses',
+    description: 'Create your course list for the semester',
+    href: '/courses',
+    cta: 'My Courses',
+  },
+  {
+    key: 'upload_syllabus',
+    label: 'Upload a syllabus',
+    description: 'Let AI extract all deadlines from your syllabus PDF',
+    href: '/courses',
+    cta: 'Upload Now',
+  },
+]
+
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00')
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -89,24 +113,30 @@ export default function HomeClient() {
   const [referralCode, setReferralCode] = useState('')
   const [referralCount, setReferralCount] = useState(0)
   const [copied, setCopied] = useState(false)
-  // Check if user needs onboarding
+  const [showVerifyBanner, setShowVerifyBanner] = useState(false)
+  const [showGettingStarted, setShowGettingStarted] = useState(false)
+
+  // Show email verification banner for unverified email users
   useEffect(() => {
     if (!user) return
-    const checkOnboarding = async () => {
-      try {
-        const res = await fetchWithAuth(`${API_URL}/me`)
-        if (res.ok) {
-          const data = await res.json()
-          if (!data.has_completed_onboarding) {
-            router.replace('/onboarding')
-          }
-        }
-      } catch {
-        // non-fatal — let them through
-      }
+    const isEmailUser = user.app_metadata?.provider === 'email'
+    const isVerified = !!user.email_confirmed_at
+    if (isEmailUser && !isVerified) {
+      setShowVerifyBanner(true)
     }
-    checkOnboarding()
-  }, [user, fetchWithAuth, router])
+  }, [user])
+
+  // Show Getting Started checklist unless dismissed
+  useEffect(() => {
+    if (!user) return
+    const dismissed = localStorage.getItem(`getting_started_dismissed_${user.id}`)
+    if (!dismissed) setShowGettingStarted(true)
+  }, [user])
+
+  const dismissGettingStarted = () => {
+    if (user) localStorage.setItem(`getting_started_dismissed_${user.id}`, '1')
+    setShowGettingStarted(false)
+  }
 
   const loadLmsConnections = useCallback(async () => {
     try {
@@ -187,7 +217,6 @@ export default function HomeClient() {
     }
   }
 
-  // Show loading while checking auth
   if (authLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB]">
@@ -196,7 +225,6 @@ export default function HomeClient() {
     )
   }
 
-  // If not logged in, show landing page while redirecting
   if (!user) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB]">
@@ -226,14 +254,33 @@ export default function HomeClient() {
     )
   }
 
-  // Logged in - show dashboard
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
+
+      {/* Email verification banner */}
+      {showVerifyBanner && (
+        <div className="bg-amber-50 border-b border-amber-200">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2.5">
+            <p className="text-sm text-amber-800">
+              Please verify your email address. Check your inbox for a link from ClassMate.
+            </p>
+            <button
+              onClick={() => setShowVerifyBanner(false)}
+              className="shrink-0 rounded-full p-1 text-amber-600 hover:bg-amber-100"
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {!isPro && (
         <div className="mx-auto max-w-6xl px-4 pt-8">
           <UpgradePrompt variant="promo" />
         </div>
       )}
+
       <section className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-16 md:flex-row md:items-start md:justify-between">
         <div className="flex-1 space-y-4">
           <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
@@ -316,6 +363,48 @@ export default function HomeClient() {
           </div>
         </div>
       </section>
+
+      {/* Getting Started Checklist */}
+      {showGettingStarted && (
+        <section className="mx-auto max-w-6xl px-4 pb-6">
+          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Getting Started</h3>
+                <p className="mt-0.5 text-sm text-slate-500">Set up ClassMate in a few quick steps.</p>
+              </div>
+              <button
+                onClick={dismissGettingStarted}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Dismiss"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <ul className="mt-4 divide-y divide-slate-100">
+              {gettingStartedItems.map((item) => (
+                <li key={item.key} className="flex items-center justify-between gap-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 border-slate-300" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{item.label}</p>
+                      <p className="text-xs text-slate-500">{item.description}</p>
+                    </div>
+                  </div>
+                  <Link
+                    href={item.href}
+                    className="shrink-0 flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                  >
+                    {item.cta}
+                    <ExternalLink size={11} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
 
       {/* LMS Connect Banner — only shown when no connections yet */}
       {lmsLoaded && lmsConnections.length === 0 && (

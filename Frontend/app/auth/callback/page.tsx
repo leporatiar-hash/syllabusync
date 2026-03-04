@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../../lib/supabaseClient'
-import { authFetch, API_URL } from '../../../hooks/useAuthFetch'
+import { API_URL } from '../../../hooks/useAuthFetch'
 
 function AuthCallbackContent() {
   const router = useRouter()
@@ -19,24 +19,21 @@ function AuthCallbackContent() {
     }
 
     supabase.auth.exchangeCodeForSession(code)
-      .then(async ({ error: exchangeError }) => {
+      .then(async ({ data, error: exchangeError }) => {
         if (exchangeError) {
           setError(exchangeError.message)
           return
         }
-        // Check if user has completed onboarding
-        try {
-          const res = await authFetch(`${API_URL}/me`)
-          if (res.ok) {
-            const data = await res.json()
-            if (!data.has_completed_onboarding) {
-              router.replace('/onboarding')
-              return
-            }
-          }
-        } catch {
-          // Fall through to home on error
+
+        // Mark onboarding complete in the background — don't block navigation
+        const token = data.session?.access_token
+        if (token) {
+          fetch(`${API_URL}/me/complete-onboarding`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {})
         }
+
         router.replace('/home')
       })
       .catch(() => {
