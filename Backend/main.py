@@ -3065,10 +3065,10 @@ def get_summary(summary_id: str, current_user: User = Depends(get_current_user))
 # Flashcard endpoints
 @app.post("/courses/{course_id}/flashcards", tags=["study-materials"], summary="Upload study material and generate AI flashcards")
 @limiter.limit("10/minute")
-async def generate_flashcards(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+async def generate_flashcards(request: Request, course_id: str, file: UploadFile = File(...), num_cards: int = Query(default=15, ge=5, le=30), current_user: User = Depends(get_current_user)):
     """Upload a file and generate AI-powered flashcards (question/answer pairs) for a course.
 
-    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). Generates 10-20 flashcards covering
+    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). Generates flashcards covering
     key concepts, definitions, formulas, and facts. Returns the flashcard set ID and all cards.
     Rate-limited to 10 requests/minute. Requires Pro plan or remaining free-tier generations.
     """
@@ -3113,11 +3113,11 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
             chunk_limit = 40000  # ~10k tokens — fits well within gpt-4o-mini context
             if len(text) <= chunk_limit:
                 # Single-pass for short/medium documents
-                system_prompt = """You are a study assistant. Generate flashcards from the provided study material.
+                system_prompt = f"""You are a study assistant. Generate flashcards from the provided study material.
 
-Return ONLY a valid JSON array with 10-20 flashcards:
+Return ONLY a valid JSON array with exactly {num_cards} flashcards:
 [
-    {"front": "Question or term", "back": "Answer or definition"},
+    {{"front": "Question or term", "back": "Answer or definition"}},
     ...
 ]
 
@@ -3155,7 +3155,7 @@ Make questions clear and answers concise but complete."""
                 chunks = split_text_into_chunks(text, chunk_size=12000)
                 print(f"[DEBUG] Large document detected ({len(text)} chars). Split into {len(chunks)} chunks for flashcard generation.")
 
-                cards_per_chunk = max(5, 20 // len(chunks))
+                cards_per_chunk = max(3, num_cards // len(chunks))
 
                 async def generate_chunk_flashcards(i: int, chunk: str) -> list:
                     """Generate flashcards for a single chunk."""
@@ -3405,10 +3405,10 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
 
 @app.post("/courses/{course_id}/generate-quiz", tags=["study-materials"], summary="Upload study material and generate an AI quiz")
 @limiter.limit("10/minute")
-async def generate_quiz(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+async def generate_quiz(request: Request, course_id: str, file: UploadFile = File(...), num_questions: int = Query(default=7, ge=3, le=30), current_user: User = Depends(get_current_user)):
     """Upload a file and generate an AI-powered multiple-choice quiz for a course.
 
-    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). Generates 7 questions, each with
+    Accepts PDF, DOCX, TXT, PNG, JPG (max 25 MB). Generates multiple-choice questions, each with
     4 options (A/B/C/D), a correct answer, and an explanation. Returns the quiz ID and
     question count. Fetch the full quiz via GET /quizzes/{quiz_id}.
     Rate-limited to 10 requests/minute. Requires Pro plan or remaining free-tier generations.
@@ -3454,22 +3454,22 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
 
         if len(text) <= chunk_limit:
             # Single-pass for short/medium documents
-            system_prompt = """You are a study assistant. Generate a multiple-choice quiz from the provided study material.
+            system_prompt = f"""You are a study assistant. Generate a multiple-choice quiz from the provided study material.
 
 Return ONLY a valid JSON object with this structure:
-{
+{{
     "questions": [
-        {
+        {{
             "question": "Clear question text",
             "options": ["A) First option", "B) Second option", "C) Third option", "D) Fourth option"],
             "correct_answer": "B",
             "explanation": "Brief explanation of why this is correct"
-        }
+        }}
     ]
-}
+}}
 
 Guidelines:
-- Generate 7 questions
+- Generate exactly {num_questions} questions
 - Each question should have exactly 4 options (A, B, C, D)
 - Questions should test understanding, not just memorization
 - Include a mix of difficulty levels
@@ -3510,7 +3510,7 @@ Guidelines:
             chunks = split_text_into_chunks(text, chunk_size=12000)
             print(f"[DEBUG] Large document detected ({len(text)} chars). Split into {len(chunks)} chunks for quiz generation.")
 
-            qs_per_chunk = max(2, 10 // len(chunks))
+            qs_per_chunk = max(2, num_questions // len(chunks))
 
             async def generate_chunk_questions(i: int, chunk: str) -> list:
                 """Generate quiz questions for a single chunk."""

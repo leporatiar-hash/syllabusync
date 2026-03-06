@@ -90,6 +90,8 @@ function FlashcardsContent() {
   const [generateFlashcards, setGenerateFlashcards] = useState(true)
   const [generateQuiz, setGenerateQuiz] = useState(true)
   const [generateSummary, setGenerateSummary] = useState(true)
+  const [flashcardCount, setFlashcardCount] = useState(15)
+  const [quizCount, setQuizCount] = useState(7)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const reviewSectionRef = useRef<HTMLElement>(null)
 
@@ -298,7 +300,7 @@ function FlashcardsContent() {
         if (!flashcardExts.includes(ext)) {
           errors.push('Flashcards support PDF or TXT files.')
         } else {
-          actions.push(upload(`${API_URL}/courses/${selectedCourseId}/flashcards`))
+          actions.push(upload(`${API_URL}/courses/${selectedCourseId}/flashcards?num_cards=${flashcardCount}`))
         }
       }
 
@@ -306,7 +308,7 @@ function FlashcardsContent() {
         if (!flashcardExts.includes(ext)) {
           errors.push('Quiz generation supports PDF or TXT files.')
         } else {
-          actions.push(upload(`${API_URL}/courses/${selectedCourseId}/generate-quiz`))
+          actions.push(upload(`${API_URL}/courses/${selectedCourseId}/generate-quiz?num_questions=${quizCount}`))
         }
       }
 
@@ -656,34 +658,74 @@ function FlashcardsContent() {
           <div className="mt-6">
             <h3 className="text-sm font-semibold text-slate-700 mb-3">What would you like to generate?</h3>
             <div className="space-y-3">
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-4 cursor-pointer transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30">
-                <input
-                  type="checkbox"
-                  checked={generateFlashcards}
-                  onChange={(e) => setGenerateFlashcards(e.target.checked)}
-                  className="h-5 w-5 rounded border-slate-300 text-[#5B8DEF]"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
+              <div className={`rounded-xl border p-4 transition-all duration-300 ${generateFlashcards ? 'border-[#5B8DEF] bg-[#EEF2FF]/30' : 'border-slate-200 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30'}`}>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={generateFlashcards}
+                    onChange={(e) => setGenerateFlashcards(e.target.checked)}
+                    className="h-5 w-5 rounded border-slate-300 text-[#5B8DEF]"
+                  />
+                  <div className="flex-1">
                     <span className="font-medium text-slate-900">Flashcards</span>
+                    <p className="mt-0.5 text-xs text-slate-500">Question/answer cards</p>
                   </div>
-                  <p className="mt-0.5 text-xs text-slate-500">Generate 10-20 question/answer cards</p>
-                </div>
-              </label>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-4 cursor-pointer transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30">
-                <input
-                  type="checkbox"
-                  checked={generateQuiz}
-                  onChange={(e) => setGenerateQuiz(e.target.checked)}
-                  className="h-5 w-5 rounded border-slate-300 text-[#5B8DEF]"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
+                  {generateFlashcards && (
+                    <span className="text-sm font-semibold text-[#5B8DEF] min-w-[3ch] text-right">{flashcardCount}</span>
+                  )}
+                </label>
+                {generateFlashcards && (
+                  <div className="mt-3 px-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-slate-400">5</span>
+                      <span className="text-xs text-slate-400">cards</span>
+                      <span className="text-xs text-slate-400">30</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={5}
+                      max={30}
+                      value={flashcardCount}
+                      onChange={(e) => setFlashcardCount(Number(e.target.value))}
+                      className="w-full accent-[#5B8DEF]"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className={`rounded-xl border p-4 transition-all duration-300 ${generateQuiz ? 'border-[#5B8DEF] bg-[#EEF2FF]/30' : 'border-slate-200 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30'}`}>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={generateQuiz}
+                    onChange={(e) => setGenerateQuiz(e.target.checked)}
+                    className="h-5 w-5 rounded border-slate-300 text-[#5B8DEF]"
+                  />
+                  <div className="flex-1">
                     <span className="font-medium text-slate-900">Mini Quiz</span>
+                    <p className="mt-0.5 text-xs text-slate-500">Multiple choice questions</p>
                   </div>
-                  <p className="mt-0.5 text-xs text-slate-500">Generate 5-10 multiple choice questions</p>
-                </div>
-              </label>
+                  {generateQuiz && (
+                    <span className="text-sm font-semibold text-[#5B8DEF] min-w-[3ch] text-right">{quizCount}</span>
+                  )}
+                </label>
+                {generateQuiz && (
+                  <div className="mt-3 px-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-slate-400">3</span>
+                      <span className="text-xs text-slate-400">questions</span>
+                      <span className="text-xs text-slate-400">30</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={3}
+                      max={30}
+                      value={quizCount}
+                      onChange={(e) => setQuizCount(Number(e.target.value))}
+                      className="w-full accent-[#5B8DEF]"
+                    />
+                  </div>
+                )}
+              </div>
               <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-4 cursor-pointer transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30">
                 <input
                   type="checkbox"
