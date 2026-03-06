@@ -4,12 +4,22 @@ import { useEffect, useRef, useState } from 'react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
 import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
+
+interface CreatedStudySet {
+  type: 'flashcards' | 'quiz'
+  id: string
+  name: string
+  count: number
+  course_name: string
+}
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   created_at: string
+  created_study_set?: CreatedStudySet
 }
 
 interface Conversation {
@@ -33,6 +43,7 @@ export default function ChatTab() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [limitReached, setLimitReached] = useState(false)
   const [limitMessage, setLimitMessage] = useState('')
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -144,14 +155,16 @@ export default function ChatTab() {
     setInput('')
     setAttachedFile(null)
 
+    const tempId = 'temp-' + Date.now()
+    const streamId = 'streaming-' + Date.now()
+
     // Optimistic user message
-    const tempUserMsg: Message = {
-      id: 'temp-' + Date.now(),
+    setMessages(prev => [...prev, {
+      id: tempId,
       role: 'user',
       content: sentInput + (sentFile ? `\n\n[Attached: ${sentFile.name}]` : ''),
       created_at: new Date().toISOString(),
-    }
-    setMessages(prev => [...prev, tempUserMsg])
+    }])
 
     try {
       const res = await fetchWithAuth(
@@ -159,36 +172,77 @@ export default function ChatTab() {
         { method: 'POST', body: formData }
       )
 
-      if (res.ok) {
-        const data = await res.json()
-        // Replace temp message with real one + add assistant response
-        setMessages(prev => [
-          ...prev.filter(m => m.id !== tempUserMsg.id),
-          data.user_message,
-          data.assistant_message,
-        ])
-        // Update conversation title in sidebar
-        if (conversations.find(c => c.id === activeConversation)?.title === 'New Chat') {
-          setConversations(prev =>
-            prev.map(c =>
-              c.id === activeConversation
-                ? { ...c, title: (sentInput || sentFile?.name || 'New Chat').slice(0, 50) }
-                : c
-            )
-          )
-        }
-      } else {
+      if (!res.ok) {
         const err = await res.json()
         if (err.detail?.error === 'limit_reached') {
           setLimitReached(true)
           setLimitMessage(err.detail.message)
         }
-        // Remove optimistic message on error
-        setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id))
+        setMessages(prev => prev.filter(m => m.id !== tempId))
+        return
+      }
+
+      // Add empty streaming bubble immediately
+      setStreamingMsgId(streamId)
+      setMessages(prev => [...prev, {
+        id: streamId,
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString(),
+      }])
+
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const event = JSON.parse(line.slice(6))
+
+            if (event.type === 'user_message') {
+              setMessages(prev => prev.map(m => m.id === tempId ? event.message : m))
+              if (conversations.find(c => c.id === activeConversation)?.title === 'New Chat') {
+                setConversations(prev => prev.map(c =>
+                  c.id === activeConversation
+                    ? { ...c, title: (sentInput || sentFile?.name || 'New Chat').slice(0, 50) }
+                    : c
+                ))
+              }
+            } else if (event.type === 'chunk') {
+              setMessages(prev => prev.map(m =>
+                m.id === streamId ? { ...m, content: m.content + event.content } : m
+              ))
+            } else if (event.type === 'done') {
+              setMessages(prev => prev.map(m =>
+                m.id === streamId
+                  ? { ...m, id: event.message_id, created_at: event.created_at, created_study_set: event.created_study_set || undefined }
+                  : m
+              ))
+              setStreamingMsgId(null)
+            } else if (event.type === 'error') {
+              setMessages(prev => prev.map(m =>
+                m.id === streamId ? { ...m, content: event.content } : m
+              ))
+              setStreamingMsgId(null)
+            }
+          } catch {
+            // skip malformed SSE line
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to send message:', err)
-      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id))
+      setMessages(prev => prev.filter(m => m.id !== tempId && m.id !== streamId))
+      setStreamingMsgId(null)
     } finally {
       setSending(false)
     }
@@ -340,7 +394,7 @@ export default function ChatTab() {
               </div>
               <h3 className="text-lg font-semibold text-slate-800">ClassMate AI Chat</h3>
               <p className="mt-1 max-w-sm text-sm text-slate-500">
-                Ask questions about your courses, get help studying, or upload files for analysis.
+                Ask questions about your courses, get help studying, or upload a file and say "create flashcards" or "make a quiz" to generate study tools.
               </p>
               <button
                 onClick={createConversation}
@@ -367,7 +421,7 @@ export default function ChatTab() {
                 messages.map(msg => (
                   <div
                     key={msg.id}
-                    className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    className={`mb-4 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                   >
                     <div
                       className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -376,17 +430,74 @@ export default function ChatTab() {
                           : 'bg-slate-100 text-slate-700'
                       }`}
                     >
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                      {msg.role === 'user' ? (
+                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                      ) : msg.id === streamingMsgId && msg.content === '' ? (
+                        <div className="flex gap-1 py-1">
+                          <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '0ms' }} />
+                          <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '150ms' }} />
+                          <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '300ms' }} />
+                        </div>
+                      ) : (
+                        <ReactMarkdown
+                          components={{
+                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                            strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
+                            h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-bold text-slate-900 first:mt-0">{children}</h1>,
+                            h2: ({ children }) => <h2 className="mb-2 mt-3 text-base font-bold text-slate-900 first:mt-0">{children}</h2>,
+                            h3: ({ children }) => <h3 className="mb-1 mt-3 text-sm font-bold text-slate-800 first:mt-0">{children}</h3>,
+                            ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
+                            ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
+                            li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                            code: ({ children }) => <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-xs text-slate-800">{children}</code>,
+                            hr: () => <hr className="my-2 border-slate-300" />,
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      )}
                       <p className={`mt-1 text-xs ${msg.role === 'user' ? 'text-white/60' : 'text-slate-400'}`}>
                         {formatTime(msg.created_at)}
                       </p>
                     </div>
+                    {msg.created_study_set && (
+                      <Link
+                        href={
+                          msg.created_study_set.type === 'flashcards'
+                            ? `/flashcards?set=${msg.created_study_set.id}`
+                            : `/quizzes/${msg.created_study_set.id}`
+                        }
+                        className="mt-2 flex max-w-[80%] items-center gap-3 rounded-xl border border-[#5B8DEF]/20 bg-[#5B8DEF]/5 px-4 py-3 text-sm transition-colors hover:border-[#5B8DEF]/40 hover:bg-[#5B8DEF]/10"
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5B8DEF]/15">
+                          {msg.created_study_set.type === 'flashcards' ? (
+                            <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+                            </svg>
+                          ) : (
+                            <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+                            </svg>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-slate-800">{msg.created_study_set.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {msg.created_study_set.type === 'flashcards' ? `${msg.created_study_set.count} flashcards` : `${msg.created_study_set.count} questions`}
+                            {' · '}{msg.created_study_set.course_name}
+                          </p>
+                        </div>
+                        <svg className="h-4 w-4 shrink-0 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                        </svg>
+                      </Link>
+                    )}
                   </div>
                 ))
               )}
 
-              {/* Typing indicator */}
-              {sending && (
+              {/* Typing indicator — shown only while waiting for the stream to start */}
+              {sending && !streamingMsgId && (
                 <div className="mb-4 flex justify-start">
                   <div className="rounded-2xl bg-slate-100 px-4 py-3">
                     <div className="flex gap-1">
@@ -454,7 +565,7 @@ export default function ChatTab() {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Ask about your courses..."
+                    placeholder="Ask a question or attach a file to create flashcards/quiz..."
                     rows={1}
                     className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition-colors focus:border-[#5B8DEF] focus:bg-white"
                   />

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, validator
 from typing import Any, Optional
@@ -4357,21 +4357,23 @@ Teaching Guidelines:
 5. **Reference sources**: Mention which course or document the info came from (e.g., "According to your Biology notes...").
 6. **Check understanding**: After explaining something complex, offer to break it down further or answer follow-up questions.
 
+IMPORTANT — Flashcards & Quizzes:
+NEVER generate flashcards or quiz questions as chat text. If the student asks to create flashcards or a quiz, the system handles generation automatically and will notify you via a [System note] when it's done. Simply confirm it's ready and point them to the Library tab. Do NOT write out questions, answers, or cards in your response.
+
 Suggest Study Tools:
-- When you finish explaining a topic, suggest: "Want to lock this in? You can create flashcards or a quiz on this topic in the Create tab!"
-- If they're reviewing for an exam, suggest: "This would make a great quiz — head to the Create tab to generate practice questions from your notes."
-- If they're learning vocabulary or definitions, suggest flashcards specifically.
-- If they're preparing for a test, suggest quizzes.
+- When you finish explaining a topic, suggest uploading material: "Want to lock this in? Hit the 📎 button below to upload your notes and I'll create flashcards or a quiz for you right here."
+- If they're learning vocabulary or definitions, suggest: "Upload your notes and I'll turn them into flashcards instantly."
+- If they're preparing for a test, suggest: "Drop your study material in the chat and I'll generate a practice quiz for you."
 - Keep suggestions brief and natural — don't be pushy.
 
 If the student asks about something NOT covered in their materials below:
 - Say clearly: "I don't see this in your uploaded materials, but here's what I know..."
 - Then provide helpful general information on the topic.
-- Suggest: "Upload your notes on this topic and I can give you more targeted help!"
+- Suggest: "Upload your notes on this topic using the 📎 button and I can give you more targeted help — and even create flashcards or a quiz from them!"
 
 IMPORTANT — Empty State Handling:
-If the context below shows no courses, no materials, and no deadlines, the student has not set up their account yet.
-Warmly guide them: "Looks like you haven't added any courses or materials yet! Head to the Courses tab, upload a syllabus or some notes, and I'll be ready to help you study, create flashcards, quiz yourself, and more."
+If the context below shows no courses, no materials, and no deadlines, warmly invite them to upload material directly in this chat:
+"Hit the 📎 attachment button below to upload a PDF, Word doc, or text file — and tell me what you need. I can create flashcards, a quiz, answer your questions, and more!"
 
 {context}"""
 
@@ -4560,69 +4562,217 @@ async def send_chat_message(
         for msg in history:
             openai_messages.append({"role": msg.role, "content": msg.content})
 
-        # Call OpenAI
-        try:
-            # Log context size for debugging
-            total_chars = sum(len(m["content"]) for m in openai_messages)
-            logger.info(f"[Chat] Sending {len(openai_messages)} messages to OpenAI ({total_chars} total chars)")
-            completion = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=openai_messages,
-                max_tokens=2000,
-                temperature=0.7,
+        # Detect study tool creation intent and generate from file (current or previous in history)
+        created_study_set = None
+        intent_lower = (message_content or "").lower()
+        wants_flashcards = any(k in intent_lower for k in [
+            "flashcard", "flash card", "flash-card", "create cards", "make cards", "study cards", "note cards"
+        ])
+        wants_quiz = any(k in intent_lower for k in [
+            "quiz", "test me", "practice test", "multiple choice", "practice questions", "create a test", "make a test", "create quiz", "make quiz", "generate quiz"
+        ])
+
+        if wants_flashcards or wants_quiz:
+            # Use current message file first; fall back to most recent uploaded file in conversation history
+            source_text = file_text
+            source_name = file_name
+
+            if not source_text:
+                for hist_msg in reversed(history):
+                    if hist_msg.role == "user" and "[Uploaded file:" in hist_msg.content:
+                        match = re.search(r'\[Uploaded file: ([^\]]+)\]\n([\s\S]+)', hist_msg.content)
+                        if match:
+                            source_name = match.group(1).strip()
+                            source_text = match.group(2)[:40000]
+                            break
+
+            if source_text:
+                user_course = db.query(Course).filter(Course.user_id == current_user.id).first()
+                if user_course:
+                    set_name = source_name.rsplit('.', 1)[0] if source_name else "Chat Study Set"
+                    text_for_gen = source_text[:40000]
+                    try:
+                        if wants_flashcards:
+                            num_cards = 15
+                            m = re.search(r'(\d+)\s*(?:flash\s*card|card)', intent_lower)
+                            if m:
+                                num_cards = max(5, min(30, int(m.group(1))))
+
+                            fc_prompt = f"""You are a study assistant. Generate flashcards from the provided study material.
+Return ONLY a valid JSON array with exactly {num_cards} flashcards:
+[{{"front": "Question or term", "back": "Answer or definition"}}]
+Focus on key concepts, definitions, important facts, and formulas. Make questions clear and answers concise."""
+
+                            fc_response = await client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[
+                                    {"role": "system", "content": fc_prompt},
+                                    {"role": "user", "content": f"Generate flashcards from this material:\n\n{text_for_gen}"}
+                                ],
+                                temperature=0.3,
+                                max_tokens=4000
+                            )
+                            flashcards_data = parse_json_response(fc_response.choices[0].message.content)
+
+                            if isinstance(flashcards_data, list) and len(flashcards_data) > 0:
+                                flashcard_set = FlashcardSet(user_id=current_user.id, course_id=user_course.id, name=set_name)
+                                db.add(flashcard_set)
+                                db.flush()
+                                for fc in flashcards_data:
+                                    db.add(Flashcard(user_id=current_user.id, flashcard_set_id=flashcard_set.id, front=fc.get("front", ""), back=fc.get("back", "")))
+                                db.commit()
+                                increment_ai_generation(db, current_user.id)
+                                created_study_set = {"type": "flashcards", "id": flashcard_set.id, "name": flashcard_set.name, "count": len(flashcards_data), "course_name": user_course.name}
+
+                        elif wants_quiz:
+                            num_questions = 10
+                            m = re.search(r'(\d+)\s*(?:question|quiz)', intent_lower)
+                            if m:
+                                num_questions = max(3, min(30, int(m.group(1))))
+
+                            q_prompt = f"""You are a study assistant. Generate a multiple-choice quiz from the provided study material.
+Return ONLY a valid JSON object:
+{{"questions": [{{"question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": "B", "explanation": "..."}}]}}
+Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Test understanding, not memorization."""
+
+                            q_response = await client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[
+                                    {"role": "system", "content": q_prompt},
+                                    {"role": "user", "content": f"Generate a quiz from this material:\n\n{text_for_gen}"}
+                                ],
+                                temperature=0.4,
+                                max_tokens=4000
+                            )
+                            quiz_raw = parse_json_response(q_response.choices[0].message.content)
+                            if isinstance(quiz_raw, dict) and "questions" in quiz_raw:
+                                questions = quiz_raw["questions"]
+                            elif isinstance(quiz_raw, list):
+                                questions = quiz_raw
+                            else:
+                                questions = []
+
+                            if len(questions) > 0:
+                                quiz = Quiz(user_id=current_user.id, course_id=user_course.id, name=set_name)
+                                db.add(quiz)
+                                db.flush()
+                                for i, q in enumerate(questions):
+                                    opts = q.get("options", [])
+                                    db.add(QuizQuestion(user_id=current_user.id, quiz_id=quiz.id, question=q.get("question", ""), options=json.dumps(opts if isinstance(opts, list) else []), correct_answer=q.get("correct_answer", "A"), explanation=q.get("explanation", ""), order_num=str(i)))
+                                db.commit()
+                                increment_ai_generation(db, current_user.id)
+                                created_study_set = {"type": "quiz", "id": quiz.id, "name": quiz.name, "count": len(questions), "course_name": user_course.name}
+
+                    except Exception as e:
+                        logger.error(f"[Chat] Study tool generation error: {e}")
+
+        # If a study set was created, tell the AI so it can respond naturally
+        if created_study_set:
+            tool_label = "flashcard set" if created_study_set["type"] == "flashcards" else "quiz"
+            count_label = "cards" if created_study_set["type"] == "flashcards" else "questions"
+            openai_messages[-1]["content"] += (
+                f"\n\n[System note: A {tool_label} called '{created_study_set['name']}' "
+                f"({created_study_set['count']} {count_label}) has been created and saved to "
+                f"the course '{created_study_set['course_name']}'. "
+                f"Tell the user it's ready and they can find it in the Study Studio Library tab.]"
             )
-            assistant_content = completion.choices[0].message.content
-        except OAIRateLimitError as e:
-            logger.error(f"[Chat] OpenAI rate limit: {e}")
-            assistant_content = "I'm a little busy right now — please wait a moment and try again!"
-        except OAIAuthError as e:
-            logger.error(f"[Chat] OpenAI auth error: {e}")
-            assistant_content = "I ran into a configuration issue. Please contact support."
-        except OAIAPIStatusError as e:
-            logger.error(f"[Chat] OpenAI API error (status {e.status_code}): {e}")
-            assistant_content = "I ran into a hiccup — please try sending your message again! If it keeps happening, try refreshing the page."
-        except Exception as e:
-            logger.error(f"[Chat] Unexpected OpenAI error ({type(e).__name__}): {e}")
-            assistant_content = "I ran into a hiccup — please try sending your message again! If it keeps happening, try refreshing the page."
 
-        # Save assistant message
-        assistant_msg = ChatMessage(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=assistant_content,
-        )
-        db.add(assistant_msg)
-
-        # Auto-title conversation on first message
+        # Capture data needed by the stream generator before closing the DB session
+        user_msg_data = {
+            "id": user_msg.id,
+            "role": "user",
+            "content": user_msg.content,
+            "created_at": user_msg.created_at.isoformat(),
+        }
         msg_count = db.query(ChatMessage).filter(
             ChatMessage.conversation_id == conversation_id
         ).count()
-        if msg_count <= 2:  # First exchange (user + assistant)
-            # Use first ~50 chars of user message as title
-            title = (message_content or file_name or "New Chat")[:50]
-            if len(message_content or "") > 50:
-                title += "..."
-            conv.title = title
+        is_first_message = msg_count <= 1  # Only user msg saved so far
+        auto_title = (message_content or file_name or "New Chat")[:50]
+        if len(message_content or "") > 50:
+            auto_title += "..."
 
-        db.commit()
-        db.refresh(assistant_msg)
+        total_chars = sum(len(m["content"]) for m in openai_messages)
+        logger.info(f"[Chat] Streaming {len(openai_messages)} messages to OpenAI ({total_chars} total chars)")
 
-        return {
-            "user_message": {
-                "id": user_msg.id,
-                "role": "user",
-                "content": user_msg.content,
-                "created_at": user_msg.created_at.isoformat(),
-            },
-            "assistant_message": {
-                "id": assistant_msg.id,
-                "role": "assistant",
-                "content": assistant_content,
-                "created_at": assistant_msg.created_at.isoformat(),
-            },
-        }
-    finally:
+        # Snapshot everything the generator needs, then close the setup DB session
+        _conversation_id = conversation_id
+        _user_id = current_user.id
+        _openai_messages = openai_messages
+        _created_study_set = created_study_set
+        _is_first_message = is_first_message
+        _auto_title = auto_title
+
         db.close()
+
+        async def event_stream():
+            stream_db = SessionLocal()
+            full_content = ""
+            try:
+                # Send user message immediately so frontend can display it
+                yield f"data: {json.dumps({'type': 'user_message', 'message': user_msg_data})}\n\n"
+
+                try:
+                    stream = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=_openai_messages,
+                        max_tokens=2000,
+                        temperature=0.7,
+                        stream=True,
+                    )
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta.content or ""
+                        if delta:
+                            full_content += delta
+                            yield f"data: {json.dumps({'type': 'chunk', 'content': delta})}\n\n"
+                except OAIRateLimitError:
+                    full_content = "I'm a little busy right now — please wait a moment and try again!"
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': full_content})}\n\n"
+                except OAIAuthError:
+                    full_content = "I ran into a configuration issue. Please contact support."
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': full_content})}\n\n"
+                except Exception as e:
+                    logger.error(f"[Chat] OpenAI streaming error ({type(e).__name__}): {e}")
+                    full_content = "I ran into a hiccup — please try sending your message again!"
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': full_content})}\n\n"
+
+                # Save assistant message to DB
+                assistant_msg = ChatMessage(
+                    conversation_id=_conversation_id,
+                    role="assistant",
+                    content=full_content,
+                )
+                stream_db.add(assistant_msg)
+
+                # Auto-title on first exchange
+                if _is_first_message:
+                    stream_conv = stream_db.query(ChatConversation).filter(
+                        ChatConversation.id == _conversation_id,
+                        ChatConversation.user_id == _user_id,
+                    ).first()
+                    if stream_conv:
+                        stream_conv.title = _auto_title
+
+                stream_db.commit()
+                stream_db.refresh(assistant_msg)
+
+                yield f"data: {json.dumps({'type': 'done', 'message_id': assistant_msg.id, 'created_at': assistant_msg.created_at.isoformat(), 'created_study_set': _created_study_set})}\n\n"
+
+            except Exception as e:
+                logger.error(f"[Chat] Stream generator error: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
+            finally:
+                stream_db.close()
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    except Exception:
+        db.close()
+        raise
 
 
 @app.delete("/chat/conversations/{conversation_id}")
