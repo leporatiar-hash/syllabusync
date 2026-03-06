@@ -1124,6 +1124,7 @@ GRANDFATHER_CUTOFF = "2025-01-01T00:00:00"  # Moved to past date - no more grand
 # Emails that always get Pro access regardless of subscription status
 ALWAYS_PRO_EMAILS: set[str] = {
     "leporatiar@g.cofc.edu",
+    "mccammono1@g.cofc.edu",
 }
 
 
