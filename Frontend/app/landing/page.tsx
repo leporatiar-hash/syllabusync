@@ -560,7 +560,7 @@ export default function LandingPage() {
                 ))}
               </ul>
               <button
-                onClick={() => router.push('/signup')}
+                onClick={() => router.push('/upgrade')}
                 className="w-full py-3 rounded-xl border-2 border-slate-200 text-sm font-semibold text-slate-700 hover:border-[#5B4EE8] hover:text-[#5B4EE8] transition-colors"
               >
                 Get semester plan

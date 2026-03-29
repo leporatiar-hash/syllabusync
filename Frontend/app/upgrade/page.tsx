@@ -27,7 +27,7 @@ export default function UpgradePage() {
     return null
   }
 
-  const handleCheckout = async (plan: 'monthly' | 'yearly') => {
+  const handleCheckout = async (plan: 'monthly' | 'yearly' | 'semester') => {
     setCheckoutLoading(plan)
     try {
       const res = await fetchWithAuth(`${API_URL}/create-checkout-session`, {
@@ -95,7 +95,7 @@ export default function UpgradePage() {
 
         {/* Pricing cards */}
         {!isPro && (
-          <div className="grid gap-4 md:grid-cols-2 mb-10">
+          <div className="grid gap-4 md:grid-cols-3 mb-10">
             {/* Monthly */}
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Monthly</h3>
@@ -134,6 +134,25 @@ export default function UpgradePage() {
                 {checkoutLoading === 'yearly' ? 'Loading...' : 'Start 10-Day Free Trial'}
               </button>
               <p className="mt-2 text-center text-xs text-slate-400">No charge for 10 days. Cancel anytime.</p>
+            </div>
+
+            {/* Semester */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Semester</h3>
+              <p className="mt-1 text-sm text-slate-500">One payment, one semester</p>
+              <div className="mt-4">
+                <span className="text-3xl font-bold text-slate-900">$20</span>
+                <span className="text-slate-400 text-sm">/6 months</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">~$3.33/month · Save 37% vs monthly</p>
+              <button
+                onClick={() => handleCheckout('semester')}
+                disabled={!!checkoutLoading}
+                className="mt-6 w-full rounded-full border-2 border-[#5B8DEF] px-5 py-2.5 text-sm font-semibold text-[#5B8DEF] transition-all hover:bg-[#5B8DEF] hover:text-white disabled:opacity-50"
+              >
+                {checkoutLoading === 'semester' ? 'Loading...' : 'Get Semester Plan'}
+              </button>
+              <p className="mt-2 text-center text-xs text-slate-400">Full Pro access for the semester.</p>
             </div>
           </div>
         )}

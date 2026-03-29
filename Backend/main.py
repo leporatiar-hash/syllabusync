@@ -1125,6 +1125,7 @@ GRANDFATHER_CUTOFF = "2025-01-01T00:00:00"  # Moved to past date - no more grand
 ALWAYS_PRO_EMAILS: set[str] = {
     "leporatiar@g.cofc.edu",
     "mccammono1@g.cofc.edu",
+    "bodnari@g.cofc.edu",
 }
 
 
@@ -2155,8 +2156,8 @@ class CheckoutRequest(BaseModel):
 
     @validator("plan")
     def plan_must_be_valid(cls, v):
-        if v not in ("monthly", "yearly"):
-            raise ValueError("plan must be 'monthly' or 'yearly'")
+        if v not in ("monthly", "yearly", "semester"):
+            raise ValueError("plan must be 'monthly', 'yearly', or 'semester'")
         return v
 
 
@@ -2246,11 +2247,12 @@ def create_checkout_session(
                 if not profile:
                     raise HTTPException(status_code=500, detail="Unable to create user profile")
 
-        lookup_key = (
-            "classmate_pro_monthly"
-            if payload.plan == "monthly"
-            else "classmate_pro_yearly"
-        )
+        if payload.plan == "monthly":
+            lookup_key = "classmate_pro_monthly"
+        elif payload.plan == "semester":
+            lookup_key = "SemesterlookupKey"
+        else:
+            lookup_key = "classmate_pro_yearly"
         try:
             prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
         except Exception as e:
@@ -4358,12 +4360,31 @@ Teaching Guidelines:
 6. **Check understanding**: After explaining something complex, offer to break it down further or answer follow-up questions.
 
 IMPORTANT — Flashcards & Quizzes:
-NEVER generate flashcards or quiz questions as chat text. If the student asks to create flashcards or a quiz, the system handles generation automatically and will notify you via a [System note] when it's done. Simply confirm it's ready and point them to the Library tab. Do NOT write out questions, answers, or cards in your response.
+You CAN create flashcards and quizzes directly in this chat — it's one of your best features!
+
+How it works (explain this clearly when asked):
+1. The student uploads their notes or study material using the 📎 attachment button below
+2. They tell you what to create (e.g. "make flashcards", "create a quiz", or "save summary")
+3. You automatically generate it and it gets saved to their library
+4. A card appears in the chat they can click to open it, or they can find it in the Library tab
+
+You can create three types of study tools from uploaded material:
+- **Flashcards** — say "make flashcards" or "create flashcards"
+- **Quiz** — say "make a quiz" or "create a quiz"
+- **Summary Notes** — say "save summary", "save to library", or "summarize this" (also saves any previous AI response directly if no file is present)
+
+When a student asks if you can make study tools (without a file attached):
+- Enthusiastically say YES, you can!
+- Explain the simple steps: hit the 📎 button to attach their notes, then tell you what to create
+- Keep it brief and encouraging — e.g. "Absolutely! Just hit the 📎 button below to upload your notes, then tell me 'create flashcards', 'make a quiz', or 'save summary' and I'll save it to your library instantly."
+
+When you receive a [System note] that a study set was created:
+- Confirm it's ready with a brief, enthusiastic message (1-2 sentences)
+- Tell them they can click the card that appeared, or find it in the Library tab
+- NEVER write out the actual flashcard questions/answers or quiz questions as chat text — the system handles displaying them
 
 Suggest Study Tools:
-- When you finish explaining a topic, suggest uploading material: "Want to lock this in? Hit the 📎 button below to upload your notes and I'll create flashcards or a quiz for you right here."
-- If they're learning vocabulary or definitions, suggest: "Upload your notes and I'll turn them into flashcards instantly."
-- If they're preparing for a test, suggest: "Drop your study material in the chat and I'll generate a practice quiz for you."
+- When you finish explaining a topic, suggest: "Want to lock this in? Hit the 📎 button to upload your notes and I'll create flashcards or a quiz for you right here."
 - Keep suggestions brief and natural — don't be pushy.
 
 If the student asks about something NOT covered in their materials below:
@@ -4571,6 +4592,11 @@ async def send_chat_message(
         wants_quiz = any(k in intent_lower for k in [
             "quiz", "test me", "practice test", "multiple choice", "practice questions", "create a test", "make a test", "create quiz", "make quiz", "generate quiz"
         ])
+        wants_summary = any(k in intent_lower for k in [
+            "save to library", "add to library", "save this", "save that", "save it", "add this to library",
+            "save summary", "save the summary", "add summary", "store this", "keep this",
+            "summarize", "make a summary", "create a summary", "generate a summary", "summary notes", "study summary"
+        ])
 
         if wants_flashcards or wants_quiz:
             # Use current message file first; fall back to most recent uploaded file in conversation history
@@ -4666,13 +4692,71 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                     except Exception as e:
                         logger.error(f"[Chat] Study tool generation error: {e}")
 
+        # Handle summary save intent (separate from flashcards/quiz so both can't trigger simultaneously)
+        if wants_summary and not created_study_set:
+            user_course = db.query(Course).filter(Course.user_id == current_user.id).first()
+            if user_course:
+                try:
+                    # Prefer a file for generating a fresh summary; fall back to last AI response
+                    source_text = file_text
+                    source_name = file_name
+
+                    if not source_text:
+                        for hist_msg in reversed(history):
+                            if hist_msg.role == "user" and "[Uploaded file:" in hist_msg.content:
+                                match = re.search(r'\[Uploaded file: ([^\]]+)\]\n([\s\S]+)', hist_msg.content)
+                                if match:
+                                    source_name = match.group(1).strip()
+                                    source_text = match.group(2)[:40000]
+                                    break
+
+                    if source_text:
+                        # Generate a proper summary from source text
+                        summary_content = await generate_summary_from_text(source_text[:40000])
+                        summary_title = (source_name.rsplit('.', 1)[0] if source_name else "Chat Summary")
+                    else:
+                        # Save the last assistant message directly as a summary
+                        last_assistant = next(
+                            (m for m in reversed(history) if m.role == "assistant"),
+                            None
+                        )
+                        if last_assistant and last_assistant.content.strip():
+                            summary_content = last_assistant.content.strip()
+                            summary_title = "Chat Summary"
+                        else:
+                            summary_content = None
+                            summary_title = None
+
+                    if summary_content and summary_title:
+                        new_summary = Summary(
+                            user_id=current_user.id,
+                            course_id=user_course.id,
+                            title=summary_title,
+                            content=summary_content,
+                        )
+                        db.add(new_summary)
+                        db.commit()
+                        db.refresh(new_summary)
+                        increment_ai_generation(db, current_user.id)
+                        created_study_set = {"type": "summary", "id": new_summary.id, "name": new_summary.title, "count": 0, "course_name": user_course.name}
+                except Exception as e:
+                    logger.error(f"[Chat] Summary save error: {e}")
+
         # If a study set was created, tell the AI so it can respond naturally
         if created_study_set:
-            tool_label = "flashcard set" if created_study_set["type"] == "flashcards" else "quiz"
-            count_label = "cards" if created_study_set["type"] == "flashcards" else "questions"
+            t = created_study_set["type"]
+            if t == "flashcards":
+                tool_label = "flashcard set"
+                detail = f"{created_study_set['count']} cards"
+            elif t == "quiz":
+                tool_label = "quiz"
+                detail = f"{created_study_set['count']} questions"
+            else:
+                tool_label = "summary"
+                detail = "saved to library"
             openai_messages[-1]["content"] += (
                 f"\n\n[System note: A {tool_label} called '{created_study_set['name']}' "
-                f"({created_study_set['count']} {count_label}) has been created and saved to "
+                f"({detail}) has been created and saved to "
                 f"the course '{created_study_set['course_name']}'. "
                 f"Tell the user it's ready and they can find it in the Study Studio Library tab.]"
             )
