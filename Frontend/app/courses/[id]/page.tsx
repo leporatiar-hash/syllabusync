@@ -102,6 +102,14 @@ const typeStyles: Record<string, { badge: string; date: string; icon: ReactNode 
   Class: { badge: 'bg-[#E0EAFF] text-[#5B8DEF]', date: 'bg-[#EEF2FF] text-[#5B8DEF]', icon: <Clock size={10} className="text-white" /> },
 }
 
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\n+/g, ' ')
+    .trim()
+}
+
 export default function CourseDetailPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
@@ -1364,8 +1372,8 @@ export default function CourseDetailPage() {
                               </svg>
                             </button>
                           </div>
-                          <div className="mt-3 text-xs text-slate-600 whitespace-pre-wrap line-clamp-4">
-                            {summary.content}
+                          <div className="mt-3 text-xs text-slate-600 line-clamp-4">
+                            {stripMarkdown(summary.content)}
                           </div>
                         </div>
                       ))}
@@ -1907,8 +1915,8 @@ export default function CourseDetailPage() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {(course?.course_info?.grade_breakdown || []).length > 0 ? (
-                        (course?.course_info?.grade_breakdown || []).map((item, index) => (
+                      {(course?.course_info?.grade_breakdown || []).filter((item) => item.component && item.weight).length > 0 ? (
+                        (course?.course_info?.grade_breakdown || []).filter((item) => item.component && item.weight).map((item, index) => (
                           <div key={index} className="flex items-center justify-between">
                             <span className="text-sm text-slate-700">{item.component}</span>
                             <span className="text-sm font-semibold text-slate-900">{item.weight}</span>

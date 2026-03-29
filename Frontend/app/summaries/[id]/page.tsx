@@ -117,10 +117,10 @@ export default function SummaryPage() {
     <main className="min-h-screen px-4 pb-20 pt-10">
       <div className="mx-auto w-full max-w-[900px]">
         <Link
-          href="/flashcards"
+          href="/study-studio"
           className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:text-[#4C7FE6]"
         >
-          ← Back to Flashcards
+          ← Back to Study Studio
         </Link>
 
         {loading ? (

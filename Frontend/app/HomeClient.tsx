@@ -108,6 +108,7 @@ export default function HomeClient() {
   const [loading, setLoading] = useState(true)
   const [lmsConnections, setLmsConnections] = useState<any[]>([])
   const [lmsLoaded, setLmsLoaded] = useState(false)
+  const [courses, setCourses] = useState<any[]>([])
   const [showCanvasModal, setShowCanvasModal] = useState(false)
   const [showICalModal, setShowICalModal] = useState(false)
   const [referralCode, setReferralCode] = useState('')
@@ -183,6 +184,17 @@ export default function HomeClient() {
   useEffect(() => {
     if (user) loadLmsConnections()
   }, [user, loadLmsConnections])
+
+  useEffect(() => {
+    if (!user) return
+    const loadCourses = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/courses`)
+        if (res.ok) setCourses(await res.json())
+      } catch { /* non-fatal */ }
+    }
+    loadCourses()
+  }, [user, fetchWithAuth])
 
   useEffect(() => {
     if (!user) return
@@ -284,7 +296,7 @@ export default function HomeClient() {
       <section className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-16 md:flex-row md:items-start md:justify-between">
         <div className="flex-1 space-y-4">
           <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
-            Welcome back!
+            Welcome back{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name.split(' ')[0]}` : ''}!
           </h1>
           <p className="mt-4 text-lg text-slate-600">
             A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.
@@ -382,26 +394,55 @@ export default function HomeClient() {
               </button>
             </div>
 
-            <ul className="mt-4 divide-y divide-slate-100">
-              {gettingStartedItems.map((item) => (
-                <li key={item.key} className="flex items-center justify-between gap-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 border-slate-300" />
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">{item.label}</p>
-                      <p className="text-xs text-slate-500">{item.description}</p>
-                    </div>
-                  </div>
-                  <Link
-                    href={item.href}
-                    className="shrink-0 flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
-                  >
-                    {item.cta}
-                    <ExternalLink size={11} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            {(() => {
+              const hasConnectedLms = lmsConnections.length > 0
+              const hasAddedCourse = courses.length > 0
+              const hasSyllabus = courses.some((c) => c.course_info !== null && c.course_info !== undefined)
+              const stepDone: Record<string, boolean> = {
+                connect_oaks: hasConnectedLms,
+                add_courses: hasAddedCourse,
+                upload_syllabus: hasSyllabus,
+              }
+              if (hasConnectedLms && hasAddedCourse && hasSyllabus) {
+                dismissGettingStarted()
+                return null
+              }
+              return (
+                <ul className="mt-4 divide-y divide-slate-100">
+                  {gettingStartedItems.map((item) => {
+                    const done = stepDone[item.key]
+                    return (
+                      <li key={item.key} className="flex items-center justify-between gap-4 py-3">
+                        <div className="flex items-start gap-3">
+                          {done ? (
+                            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500">
+                              <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </div>
+                          ) : (
+                            <div className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 border-slate-300" />
+                          )}
+                          <div>
+                            <p className={`text-sm font-medium ${done ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{item.label}</p>
+                            <p className="text-xs text-slate-500">{item.description}</p>
+                          </div>
+                        </div>
+                        {!done && (
+                          <Link
+                            href={item.href}
+                            className="shrink-0 flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                          >
+                            {item.cta}
+                            <ExternalLink size={11} />
+                          </Link>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )
+            })()}
           </div>
         </section>
       )}

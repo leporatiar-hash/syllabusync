@@ -92,6 +92,9 @@ function FlashcardsContent() {
   const [generateSummary, setGenerateSummary] = useState(true)
   const [flashcardCount, setFlashcardCount] = useState(15)
   const [quizCount, setQuizCount] = useState(7)
+  const [knownIds, setKnownIds] = useState<string[]>([])
+  const [unknownIds, setUnknownIds] = useState<string[]>([])
+  const [showDeckSummary, setShowDeckSummary] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const reviewSectionRef = useRef<HTMLElement>(null)
 
@@ -224,6 +227,9 @@ function FlashcardsContent() {
     setCards(shuffled)
     setCurrentIndex(0)
     setFlipped(false)
+    setKnownIds([])
+    setUnknownIds([])
+    setShowDeckSummary(false)
   }
 
   // Keyboard navigation
@@ -434,7 +440,7 @@ function FlashcardsContent() {
                       Shuffle
                     </button>
                     <button
-                      onClick={() => { setCurrentIndex(0); setFlipped(false) }}
+                      onClick={() => { setCurrentIndex(0); setFlipped(false); setKnownIds([]); setUnknownIds([]); setShowDeckSummary(false) }}
                       className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -461,6 +467,54 @@ function FlashcardsContent() {
               ) : cards.length === 0 ? (
                 <div className="flex h-72 w-full max-w-xl flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 bg-gradient-to-br from-slate-50 to-white">
                   <p className="text-sm font-medium text-slate-600">No cards in this deck yet</p>
+                </div>
+              ) : showDeckSummary ? (
+                <div className="flex w-full max-w-xl flex-col items-center gap-6 rounded-3xl border border-slate-100 bg-white p-10 shadow-xl text-center">
+                  <div className="text-4xl">🎉</div>
+                  <div>
+                    <p className="text-xl font-bold text-slate-900">Deck complete!</p>
+                    <p className="mt-1 text-sm text-slate-500">Here's how you did:</p>
+                  </div>
+                  <div className="flex gap-8">
+                    <div className="flex flex-col items-center">
+                      <span className="text-3xl font-bold text-emerald-500">{knownIds.length}</span>
+                      <span className="mt-1 text-xs text-slate-500">Mastered</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-3xl font-bold text-amber-500">{unknownIds.length}</span>
+                      <span className="mt-1 text-xs text-slate-500">Still learning</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 w-full">
+                    {unknownIds.length > 0 && (
+                      <button
+                        onClick={() => {
+                          const missed = cards.filter((c) => unknownIds.includes(c.id))
+                          setCards(missed)
+                          setCurrentIndex(0)
+                          setFlipped(false)
+                          setKnownIds([])
+                          setUnknownIds([])
+                          setShowDeckSummary(false)
+                        }}
+                        className="w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                      >
+                        Review {unknownIds.length} missed card{unknownIds.length !== 1 ? 's' : ''}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setCurrentIndex(0)
+                        setFlipped(false)
+                        setKnownIds([])
+                        setUnknownIds([])
+                        setShowDeckSummary(false)
+                      }}
+                      className="w-full rounded-full border border-slate-200 px-6 py-2.5 text-sm font-semibold text-slate-600 transition-all duration-300 hover:bg-slate-50"
+                    >
+                      Restart deck
+                    </button>
+                  </div>
                 </div>
               ) : current ? (
                 <>
@@ -519,6 +573,52 @@ function FlashcardsContent() {
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                     </button>
                   </div>
+
+                  {flipped && (
+                    <div className="mt-4 flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          const id = current.id
+                          const newKnown = knownIds.includes(id) ? knownIds : [...knownIds, id]
+                          const newUnknown = unknownIds.filter((x) => x !== id)
+                          const isLast = currentIndex === cards.length - 1
+                          setKnownIds(newKnown)
+                          setUnknownIds(newUnknown)
+                          if (isLast) {
+                            setShowDeckSummary(true)
+                          } else {
+                            setCurrentIndex(currentIndex + 1)
+                            setFlipped(false)
+                          }
+                        }}
+                        className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-semibold text-emerald-700 transition-all duration-200 hover:bg-emerald-100"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        Got it
+                      </button>
+                      <button
+                        onClick={() => {
+                          const id = current.id
+                          const newUnknown = unknownIds.includes(id) ? unknownIds : [...unknownIds, id]
+                          const newKnown = knownIds.filter((x) => x !== id)
+                          const isLast = currentIndex === cards.length - 1
+                          setUnknownIds(newUnknown)
+                          setKnownIds(newKnown)
+                          if (isLast) {
+                            setShowDeckSummary(true)
+                          } else {
+                            setCurrentIndex(currentIndex + 1)
+                            setFlipped(false)
+                          }
+                        }}
+                        className="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-5 py-2 text-sm font-semibold text-amber-700 transition-all duration-200 hover:bg-amber-100"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01" /></svg>
+                        Still learning
+                      </button>
+                    </div>
+                  )}
+
                   <p className="mt-4 text-xs text-slate-400">
                     Tip: Use <kbd className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> to flip, <kbd className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px]">&larr;</kbd> <kbd className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px]">&rarr;</kbd> to navigate
                   </p>
@@ -954,6 +1054,9 @@ function FlashcardsContent() {
                       onClick={() => {
                         setCurrentIndex(0)
                         setFlipped(false)
+                        setKnownIds([])
+                        setUnknownIds([])
+                        setShowDeckSummary(false)
                       }}
                       className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50"
                     >

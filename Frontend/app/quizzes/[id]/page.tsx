@@ -51,6 +51,7 @@ export default function QuizPage() {
   const [error, setError] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
+  const [showSubmitError, setShowSubmitError] = useState(false)
   const [results, setResults] = useState<QuizResults | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -139,10 +140,10 @@ export default function QuizPage() {
 
       <div className="mx-auto w-full max-w-[900px]">
         <Link
-          href="/flashcards"
+          href="/study-studio"
           className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B8DEF] transition-all duration-300 hover:text-[#4C7FE6]"
         >
-          ← Back to Flashcards
+          ← Back to Study Studio
         </Link>
 
         {loading ? (
@@ -232,10 +233,20 @@ export default function QuizPage() {
             </div>
 
             {!results && (
-              <div className="flex justify-end">
+              <div className="flex flex-col items-end gap-2">
+                {showSubmitError && (
+                  <p className="text-sm text-red-600">Please answer all questions before submitting.</p>
+                )}
                 <button
-                  onClick={handleSubmit}
-                  disabled={!canSubmit || submitting}
+                  onClick={() => {
+                    if (!canSubmit) {
+                      setShowSubmitError(true)
+                    } else {
+                      setShowSubmitError(false)
+                      handleSubmit()
+                    }
+                  }}
+                  disabled={submitting}
                   className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
                 >
                   {submitting ? 'Submitting...' : 'Submit Quiz'}

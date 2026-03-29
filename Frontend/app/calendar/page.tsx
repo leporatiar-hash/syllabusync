@@ -267,7 +267,7 @@ export default function CalendarPage() {
     end.setDate(today.getDate() + 7)
     return filteredDeadlines
       .filter((d) => {
-        const dDate = new Date(d.date)
+        const dDate = new Date(d.date + 'T00:00:00')
         return dDate >= today && dDate <= end
       })
       .sort((a, b) => a.date.localeCompare(b.date))
