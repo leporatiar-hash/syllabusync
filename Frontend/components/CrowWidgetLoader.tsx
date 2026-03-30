@@ -6,5 +6,9 @@ import dynamic from 'next/dynamic'
 const CrowWidget = dynamic(() => import('./CrowWidget'), { ssr: false })
 
 export default function CrowWidgetLoader() {
-  return <CrowWidget />
+  return (
+    <div className="hidden md:block">
+      <CrowWidget />
+    </div>
+  )
 }
