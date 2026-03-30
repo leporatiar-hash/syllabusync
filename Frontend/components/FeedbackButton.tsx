@@ -16,7 +16,7 @@ export default function FeedbackButton() {
       {/* Floating Feedback Button - Bottom Left */}
       <button
         onClick={() => setShowFeedback(true)}
-        className="fixed bottom-6 left-6 z-50 flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-3 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+        className="hidden md:flex fixed bottom-6 left-6 z-50 items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-3 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
         aria-label="Send Feedback"
       >
         <svg
