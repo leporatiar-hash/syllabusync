@@ -50,7 +50,7 @@ const handleEmailSubmit = async (e: React.FormEvent) => {
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4">
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-semibold text-slate-900">Welcome back</h1>
-        <p className="mt-1 text-sm text-slate-500">College of Charleston · ClassMate</p>
+        <p className="mt-1 text-sm text-slate-500">Get back to studying</p>
 
         <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
           <div>

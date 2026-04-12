@@ -103,7 +103,7 @@ export default function ICalConnectModal({ onClose, onSuccess }: Props) {
                   className="w-full"
                 />
                 <p className="px-3 py-2 text-[11px] text-slate-500">
-                  How to find your iCal feed URL in OAKS / Canvas
+                  How to find your iCal feed URL in your LMS
                 </p>
               </div>
             )}

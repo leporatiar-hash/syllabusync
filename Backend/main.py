@@ -1118,7 +1118,7 @@ def ensure_referral_columns():
 
 
 # ── Subscription tier constants ──
-FREE_AI_GENERATION_LIMIT = 5
+FREE_AI_GENERATION_LIMIT = 50
 GRANDFATHER_CUTOFF = "2025-01-01T00:00:00"  # Moved to past date - no more grandfathering
 
 # Emails that always get Pro access regardless of subscription status

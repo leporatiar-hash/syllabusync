@@ -72,9 +72,9 @@ const features = [
 
 const gettingStartedItems = [
   {
-    key: 'connect_oaks',
-    label: 'Connect OAKS',
-    description: 'Sync your CofC calendar and deadlines automatically',
+    key: 'connect_lms',
+    label: 'Connect your LMS',
+    description: 'Sync your calendar and deadlines automatically',
     href: '/settings',
     cta: 'Go to Settings',
   },
