@@ -7,7 +7,7 @@ import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 
 interface CreatedStudySet {
-  type: 'flashcards' | 'quiz'
+  type: 'flashcards' | 'quiz' | 'summary'
   id: string
   name: string
   count: number
@@ -28,7 +28,12 @@ interface Conversation {
   created_at: string
 }
 
-export default function ChatTab() {
+interface ChatTabProps {
+  onViewLibrary?: () => void
+  triggerProactive?: boolean
+}
+
+export default function ChatTab({ onViewLibrary, triggerProactive = false }: ChatTabProps) {
   const { fetchWithAuth } = useAuthFetch()
   const { isPro, chatMessagesUsed, chatMessagesMax, chatMessagesResetAt, loading: subLoading } = useSubscription()
 
@@ -44,6 +49,7 @@ export default function ChatTab() {
   const [limitReached, setLimitReached] = useState(false)
   const [limitMessage, setLimitMessage] = useState('')
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
+  const [proactiveLoading, setProactiveLoading] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -59,6 +65,33 @@ export default function ChatTab() {
       setLimitMessage(`You've used all ${chatMessagesMax} chat messages this week. Your limit resets on ${displayDate}.`)
     }
   }, [subLoading, isPro, chatMessagesUsed, chatMessagesMax, chatMessagesResetAt])
+
+  // Proactive opening message — fires once per browser session on the /chat page
+  useEffect(() => {
+    if (!triggerProactive || !isPro || subLoading) return
+    if (typeof sessionStorage === 'undefined') return
+    if (sessionStorage.getItem('chat_proactive_shown')) return
+
+    const fetchProactive = async () => {
+      setProactiveLoading(true)
+      try {
+        const res = await fetchWithAuth(`${API_URL}/chat/proactive-message`, { method: 'POST' })
+        if (!res.ok) return
+        const data = await res.json()
+        const newConv = { id: data.conversation_id, title: data.conversation_title, created_at: new Date().toISOString() }
+        setConversations(prev => [newConv, ...prev])
+        setActiveConversation(data.conversation_id)
+        setMessages([data.message])
+        setShowSidebar(false)
+        sessionStorage.setItem('chat_proactive_shown', '1')
+      } catch {
+        // non-fatal — fall through to normal empty state
+      } finally {
+        setProactiveLoading(false)
+      }
+    }
+    fetchProactive()
+  }, [triggerProactive, isPro, subLoading])
 
   // Load conversations on mount
   useEffect(() => {
@@ -294,7 +327,7 @@ export default function ChatTab() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
           </svg>
         </Link>
-        <p className="mt-2 text-xs text-slate-400">Included with Pro — 50 messages/month</p>
+        <p className="mt-2 text-xs text-slate-400">Included with Pro — 50 messages/week</p>
       </div>
     )
   }
@@ -362,7 +395,7 @@ export default function ChatTab() {
         {chatMessagesMax !== null && (
           <div className="border-t border-slate-200 px-3 py-2">
             <p className="text-xs text-slate-400 text-center">
-              {chatMessagesUsed}/{chatMessagesMax} messages used this month
+              {chatMessagesUsed}/{chatMessagesMax} messages used this week
             </p>
           </div>
         )}
@@ -461,36 +494,59 @@ export default function ChatTab() {
                       </p>
                     </div>
                     {msg.created_study_set && (
-                      <Link
-                        href={
-                          msg.created_study_set.type === 'flashcards'
-                            ? `/flashcards?set=${msg.created_study_set.id}`
-                            : `/quizzes/${msg.created_study_set.id}`
-                        }
-                        className="mt-2 flex max-w-[80%] items-center gap-3 rounded-xl border border-[#5B8DEF]/20 bg-[#5B8DEF]/5 px-4 py-3 text-sm transition-colors hover:border-[#5B8DEF]/40 hover:bg-[#5B8DEF]/10"
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5B8DEF]/15">
-                          {msg.created_study_set.type === 'flashcards' ? (
-                            <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+                      <div className="mt-2 flex max-w-[80%] flex-col gap-1.5">
+                        <Link
+                          href={
+                            msg.created_study_set.type === 'flashcards'
+                              ? `/flashcards?set=${msg.created_study_set.id}`
+                              : msg.created_study_set.type === 'quiz'
+                              ? `/quizzes/${msg.created_study_set.id}`
+                              : `/summaries/${msg.created_study_set.id}`
+                          }
+                          className="flex items-center gap-3 rounded-xl border border-[#5B8DEF]/20 bg-[#5B8DEF]/5 px-4 py-3 text-sm transition-colors hover:border-[#5B8DEF]/40 hover:bg-[#5B8DEF]/10"
+                        >
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5B8DEF]/15">
+                            {msg.created_study_set.type === 'flashcards' ? (
+                              <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+                              </svg>
+                            ) : msg.created_study_set.type === 'quiz' ? (
+                              <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+                              </svg>
+                            ) : (
+                              <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-semibold text-slate-800">{msg.created_study_set.name}</p>
+                            <p className="text-xs text-slate-500">
+                              {msg.created_study_set.type === 'flashcards'
+                                ? `${msg.created_study_set.count} flashcards`
+                                : msg.created_study_set.type === 'quiz'
+                                ? `${msg.created_study_set.count} questions`
+                                : 'Summary notes'}
+                              {' · '}{msg.created_study_set.course_name}
+                            </p>
+                          </div>
+                          <svg className="h-4 w-4 shrink-0 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                          </svg>
+                        </Link>
+                        {onViewLibrary && (
+                          <button
+                            onClick={onViewLibrary}
+                            className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v8.25m19.5 0v.75A2.25 2.25 0 0 1 19.5 17.25h-15A2.25 2.25 0 0 1 2.25 15v-.75" />
                             </svg>
-                          ) : (
-                            <svg className="h-5 w-5 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
-                            </svg>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-slate-800">{msg.created_study_set.name}</p>
-                          <p className="text-xs text-slate-500">
-                            {msg.created_study_set.type === 'flashcards' ? `${msg.created_study_set.count} flashcards` : `${msg.created_study_set.count} questions`}
-                            {' · '}{msg.created_study_set.course_name}
-                          </p>
-                        </div>
-                        <svg className="h-4 w-4 shrink-0 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-                        </svg>
-                      </Link>
+                            View all in Library
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))

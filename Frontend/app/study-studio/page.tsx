@@ -163,7 +163,7 @@ export default function StudyStudioPage() {
         ) : activeTab === 'library' ? (
           <LibraryTab courses={courses} studyTools={studyTools} loading={loading} onDelete={loadData} />
         ) : (
-          <ChatTab />
+          <ChatTab onViewLibrary={() => setActiveTab('library')} />
         )}
       </div>
     </main>

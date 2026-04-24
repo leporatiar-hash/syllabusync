@@ -630,9 +630,23 @@ class ChatMessage(Base):
     conversation_id = Column(String, ForeignKey("chat_conversations.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    created_study_set = Column(Text, nullable=True)  # JSON string: {type, id, name, count, course_name}
     created_at = Column(DateTime, default=datetime.utcnow)
 
     conversation = relationship("ChatConversation", back_populates="messages")
+
+
+class NudgeFlag(Base):
+    """Queued nudge for the proactive opening message."""
+    __tablename__ = "nudge_flags"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False, index=True)
+    reason = Column(String, nullable=False)  # "due_tomorrow", "no_materials"
+    course_id = Column(String, nullable=True)
+    deadline_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    delivered = Column(Boolean, default=False)
 
 
 class ProfilePictureRequest(BaseModel):
@@ -1180,7 +1194,7 @@ def ensure_subscription_columns():
 
 
 def ensure_chat_columns():
-    """Add chat-related columns to user_profiles."""
+    """Add chat-related columns to user_profiles and chat_messages."""
     chat_cols = [
         ("chat_messages_used", "INTEGER DEFAULT 0"),
         ("chat_messages_reset_at", "TIMESTAMP"),
@@ -1194,6 +1208,11 @@ def ensure_chat_columns():
                 logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
             except Exception:
                 pass  # Column already exists
+        try:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN created_study_set TEXT"))
+            logger.info("[Migration] Added 'created_study_set' column to chat_messages")
+        except Exception:
+            pass  # Column already exists
 
 
 PRO_CHAT_MESSAGE_LIMIT = 50  # Per week
@@ -1335,6 +1354,7 @@ def ensure_indexes():
         # chat tables
         "CREATE INDEX IF NOT EXISTS idx_chat_conversations_user_id ON chat_conversations(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id ON chat_messages(conversation_id)",
+        "CREATE INDEX IF NOT EXISTS idx_nudge_flags_user_id ON nudge_flags(user_id)",
     ]
     with engine.begin() as conn:
         for stmt in index_statements:
@@ -1345,6 +1365,80 @@ def ensure_indexes():
 
 
 ensure_indexes()
+
+
+async def _run_nudge_check():
+    """Scan all pro users for nudge conditions and queue NudgeFlag rows."""
+    db = SessionLocal()
+    try:
+        today = date.today()
+        seven_days = today + timedelta(days=7)
+        tomorrow = today + timedelta(days=1)
+
+        users = db.query(User).all()
+        flags_created = 0
+
+        for user in users:
+            profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
+            if not profile or _effective_tier(profile) != "pro":
+                continue
+
+            deadlines = (
+                db.query(Deadline)
+                .filter(
+                    Deadline.user_id == user.id,
+                    Deadline.completed == False,
+                    Deadline.date >= today.isoformat(),
+                    Deadline.date <= seven_days.isoformat(),
+                )
+                .all()
+            )
+
+            for deadline in deadlines:
+                dl_date = date.fromisoformat(deadline.date)
+
+                if dl_date == tomorrow:
+                    exists = db.query(NudgeFlag).filter(
+                        NudgeFlag.user_id == user.id,
+                        NudgeFlag.deadline_id == deadline.id,
+                        NudgeFlag.reason == "due_tomorrow",
+                        NudgeFlag.delivered == False,
+                    ).first()
+                    if not exists:
+                        db.add(NudgeFlag(user_id=user.id, reason="due_tomorrow", course_id=deadline.course_id, deadline_id=deadline.id))
+                        flags_created += 1
+
+                if deadline.course_id:
+                    has_materials = (
+                        db.query(FlashcardSet).filter(FlashcardSet.user_id == user.id, FlashcardSet.course_id == deadline.course_id).first()
+                        or db.query(Quiz).filter(Quiz.user_id == user.id, Quiz.course_id == deadline.course_id).first()
+                        or db.query(Summary).filter(Summary.user_id == user.id, Summary.course_id == deadline.course_id).first()
+                    )
+                    if not has_materials:
+                        exists = db.query(NudgeFlag).filter(
+                            NudgeFlag.user_id == user.id,
+                            NudgeFlag.course_id == deadline.course_id,
+                            NudgeFlag.reason == "no_materials",
+                            NudgeFlag.delivered == False,
+                        ).first()
+                        if not exists:
+                            db.add(NudgeFlag(user_id=user.id, reason="no_materials", course_id=deadline.course_id, deadline_id=deadline.id))
+                            flags_created += 1
+
+        db.commit()
+        logger.info(f"[Nudge] Daily check complete — {flags_created} new flags queued")
+    except Exception as e:
+        logger.error(f"[Nudge] Check error: {e}")
+    finally:
+        db.close()
+
+
+async def _nudge_background_loop():
+    """Runs the nudge check once immediately then every 24 hours."""
+    await asyncio.sleep(60)  # Brief startup delay
+    while True:
+        await _run_nudge_check()
+        await asyncio.sleep(86400)
 
 
 def get_db():
@@ -1822,6 +1916,10 @@ async def startup_event():
         logger.warning("[Startup] JWKS pre-fetch failed - auth may not work until keys can be fetched")
         logger.warning(f"[Startup] SUPABASE_URL = {SUPABASE_URL or 'NOT SET'}")
         logger.warning(f"[Startup] SUPABASE_JWKS_URL = {SUPABASE_JWKS_URL or 'NOT SET'}")
+
+    # Launch background nudge checker (runs daily, queues NudgeFlag rows)
+    asyncio.create_task(_nudge_background_loop())
+    logger.info("[Startup] Nudge background loop started")
 
     logger.info("=" * 50)
     logger.info("[Startup] ClassMate Backend API ready!")
@@ -4281,6 +4379,27 @@ MAX_CHAT_MESSAGE_LENGTH = 4000  # Max chars per user message
 MAX_FILE_CONTEXT_LENGTH = 20000  # Max chars of extracted file text to include
 
 
+def _match_course_from_message(db, user_id: str, message: str) -> "Course | None":
+    """Return the most likely course based on mentions in the message.
+
+    Tries course code first (more specific), then course name.
+    Falls back to the first course if nothing matches.
+    """
+    courses = db.query(Course).filter(Course.user_id == user_id).all()
+    if not courses:
+        return None
+    if len(courses) == 1:
+        return courses[0]
+    msg = message.lower()
+    for course in courses:
+        if course.code and course.code.lower() in msg:
+            return course
+    for course in courses:
+        if course.name and course.name.lower() in msg:
+            return course
+    return courses[0]
+
+
 def _build_chat_context(db, user_id: str) -> str:
     """Build system context from user's courses, deadlines, and course materials."""
     parts: list[str] = []
@@ -4480,6 +4599,7 @@ def get_chat_messages(
                 "role": m.role,
                 "content": m.content,
                 "created_at": m.created_at.isoformat(),
+                "created_study_set": json.loads(m.created_study_set) if m.created_study_set else None,
             }
             for m in messages
         ]
@@ -4613,7 +4733,7 @@ async def send_chat_message(
                             break
 
             if source_text:
-                user_course = db.query(Course).filter(Course.user_id == current_user.id).first()
+                user_course = _match_course_from_message(db, current_user.id, message_content or "")
                 if user_course:
                     set_name = source_name.rsplit('.', 1)[0] if source_name else "Chat Study Set"
                     text_for_gen = source_text[:40000]
@@ -4694,7 +4814,7 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
 
         # Handle summary save intent (separate from flashcards/quiz so both can't trigger simultaneously)
         if wants_summary and not created_study_set:
-            user_course = db.query(Course).filter(Course.user_id == current_user.id).first()
+            user_course = _match_course_from_message(db, current_user.id, message_content or "")
             if user_course:
                 try:
                     # Prefer a file for generating a fresh summary; fall back to last AI response
@@ -4825,6 +4945,7 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                     conversation_id=_conversation_id,
                     role="assistant",
                     content=full_content,
+                    created_study_set=json.dumps(_created_study_set) if _created_study_set else None,
                 )
                 stream_db.add(assistant_msg)
 
@@ -4876,6 +4997,159 @@ def delete_chat_conversation(
         db.delete(conv)
         db.commit()
         return {"success": True}
+    finally:
+        db.close()
+
+
+# ============================================================
+# Proactive Opening Message
+# ============================================================
+
+@app.post("/chat/proactive-message")
+@limiter.limit("10/minute")
+async def generate_proactive_message(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a context-aware opening message for the user's session.
+
+    Creates a new conversation, saves the AI message as the first entry, and
+    returns the conversation + message so the frontend can open it directly.
+    Does NOT count against the weekly chat usage limit.
+    """
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if not profile or _effective_tier(profile) != "pro":
+            raise HTTPException(status_code=403, detail={"error": "pro_required"})
+
+        today = date.today()
+        seven_days = today + timedelta(days=7)
+
+        # Upcoming deadlines in the next 7 days
+        deadlines = (
+            db.query(Deadline)
+            .filter(
+                Deadline.user_id == current_user.id,
+                Deadline.completed == False,
+                Deadline.date >= today.isoformat(),
+                Deadline.date <= seven_days.isoformat(),
+            )
+            .order_by(Deadline.date)
+            .all()
+        )
+
+        # Courses with zero study materials
+        courses = db.query(Course).filter(Course.user_id == current_user.id).all()
+        courses_no_materials = []
+        for course in courses:
+            has_any = (
+                db.query(FlashcardSet).filter(FlashcardSet.user_id == current_user.id, FlashcardSet.course_id == course.id).first()
+                or db.query(Quiz).filter(Quiz.user_id == current_user.id, Quiz.course_id == course.id).first()
+                or db.query(Summary).filter(Summary.user_id == current_user.id, Summary.course_id == course.id).first()
+            )
+            if not has_any:
+                courses_no_materials.append(course)
+
+        # Undelivered nudge flags
+        nudge_flags = (
+            db.query(NudgeFlag)
+            .filter(NudgeFlag.user_id == current_user.id, NudgeFlag.delivered == False)
+            .all()
+        )
+
+        # Build context string for the prompt
+        ctx_lines = []
+        if deadlines:
+            ctx_lines.append("Upcoming deadlines (next 7 days):")
+            for d in deadlines:
+                course = db.query(Course).filter(Course.id == d.course_id).first() if d.course_id else None
+                course_name = course.name if course else "General"
+                days_until = (date.fromisoformat(d.date) - today).days
+                when = "today" if days_until == 0 else "tomorrow" if days_until == 1 else f"in {days_until} days"
+                ctx_lines.append(f"- {d.title} ({course_name}) — due {when}, type: {d.type or 'deadline'}")
+        else:
+            ctx_lines.append("No deadlines in the next 7 days.")
+
+        if courses_no_materials:
+            names = ", ".join(c.name for c in courses_no_materials)
+            ctx_lines.append(f"\nCourses with no study materials yet: {names}")
+
+        if nudge_flags:
+            ctx_lines.append("\nPriority flags:")
+            for f in nudge_flags:
+                course = db.query(Course).filter(Course.id == f.course_id).first() if f.course_id else None
+                course_name = course.name if course else ""
+                if f.reason == "due_tomorrow" and course_name:
+                    ctx_lines.append(f"- {course_name} has something due tomorrow with no study materials")
+                elif f.reason == "no_materials" and course_name:
+                    ctx_lines.append(f"- {course_name} has upcoming deadlines but zero study materials ever created")
+
+        context_str = "\n".join(ctx_lines)
+
+        prompt = f"""You are ClassMate AI. Write a brief, specific opening message for a student starting their study session.
+
+Student situation:
+{context_str}
+
+Rules:
+- 2-3 sentences max
+- Use actual course names and deadline titles from the data above — never be generic
+- If there are no deadlines, offer to help them study or create materials for their courses
+- End with one specific actionable offer (e.g. "Want me to generate a quiz?")
+- Do NOT start with "Hi", "Hello", or any greeting word
+- Output only the message text, no quotes or formatting
+
+Good example: "You've got a Final Exam for FINC 315 in 3 days and a Lab Report for BIO 201 due tomorrow. You haven't made any study materials for FINC 315 yet — want me to generate a quiz?"
+Bad example: "Hello! I see you have some upcoming deadlines. Let me know how I can help you study today!" """
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.7,
+        )
+        message_text = response.choices[0].message.content.strip().strip('"')
+
+        # Create conversation and save proactive message (not billed to usage)
+        conv = ChatConversation(
+            user_id=current_user.id,
+            title=f"Daily Briefing — {today.strftime('%b %d')}",
+        )
+        db.add(conv)
+        db.flush()
+
+        assistant_msg = ChatMessage(
+            conversation_id=conv.id,
+            role="assistant",
+            content=message_text,
+        )
+        db.add(assistant_msg)
+
+        # Mark nudge flags as delivered
+        for flag in nudge_flags:
+            flag.delivered = True
+
+        db.commit()
+        db.refresh(conv)
+        db.refresh(assistant_msg)
+
+        return {
+            "conversation_id": conv.id,
+            "conversation_title": conv.title,
+            "message": {
+                "id": assistant_msg.id,
+                "role": "assistant",
+                "content": message_text,
+                "created_at": assistant_msg.created_at.isoformat(),
+                "created_study_set": None,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Proactive] Error generating proactive message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate opening message")
     finally:
         db.close()
 
