@@ -1215,32 +1215,27 @@ def ensure_chat_columns():
             pass  # Column already exists
 
 
-PRO_CHAT_MESSAGE_LIMIT = 50  # Per week
+FREE_CHAT_MESSAGE_LIMIT = 10  # Per week, free tier
+PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
 
 def check_chat_limit(db, user_id: str):
     """Check if user can send a chat message.
 
-    Free users cannot use chat at all (raises 403 pro_required).
+    Free users get FREE_CHAT_MESSAGE_LIMIT messages per week.
     Pro users get PRO_CHAT_MESSAGE_LIMIT messages per week.
     Raises HTTPException(403) with structured JSON if limit reached.
     """
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="User profile not found")
+
     tier = _effective_tier(profile)
+    limit = PRO_CHAT_MESSAGE_LIMIT if tier == "pro" else FREE_CHAT_MESSAGE_LIMIT
 
-    if tier != "pro":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "pro_required",
-                "message": "AI Chat is a Pro feature. Upgrade to Pro to start chatting.",
-            },
-        )
-
-    # Weekly reset for pro users
+    # Weekly reset
     now = datetime.utcnow()
     if profile.chat_messages_reset_at:
-        # Check if more than 7 days have passed
         days_since_reset = (now - profile.chat_messages_reset_at).days
         if days_since_reset >= 7:
             profile.chat_messages_used = 0
@@ -1250,8 +1245,7 @@ def check_chat_limit(db, user_id: str):
         profile.chat_messages_reset_at = now
         db.commit()
 
-    if (profile.chat_messages_used or 0) >= PRO_CHAT_MESSAGE_LIMIT:
-        # Calculate next reset date (7 days from last reset)
+    if (profile.chat_messages_used or 0) >= limit:
         resets_at = profile.chat_messages_reset_at + timedelta(days=7)
         raise HTTPException(
             status_code=403,
@@ -1259,9 +1253,9 @@ def check_chat_limit(db, user_id: str):
                 "error": "limit_reached",
                 "limit_type": "chat_messages",
                 "used": profile.chat_messages_used,
-                "max": PRO_CHAT_MESSAGE_LIMIT,
+                "max": limit,
                 "resets_at": resets_at.isoformat(),
-                "message": f"You've used all {PRO_CHAT_MESSAGE_LIMIT} chat messages this week. Your limit resets on {resets_at.strftime('%B %d, %Y')}.",
+                "message": f"You've used all {limit} chat messages this week. Your limit resets on {resets_at.strftime('%B %d, %Y')}.",
             },
         )
 
@@ -2304,7 +2298,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
             "courses_used": course_count,
             "courses_max": None,  # Courses are unlimited on all tiers
             "chat_messages_used": profile.chat_messages_used if profile else 0,
-            "chat_messages_max": PRO_CHAT_MESSAGE_LIMIT if tier == "pro" else None,
+            "chat_messages_max": PRO_CHAT_MESSAGE_LIMIT if tier == "pro" else FREE_CHAT_MESSAGE_LIMIT,
             "chat_messages_reset_at": (
                 profile.chat_messages_reset_at.isoformat()
                 if profile and profile.chat_messages_reset_at

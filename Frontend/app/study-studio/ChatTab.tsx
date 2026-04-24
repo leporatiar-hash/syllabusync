@@ -57,14 +57,13 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
   // Check if limit is already reached from subscription data
   useEffect(() => {
-    if (!subLoading && isPro && chatMessagesMax !== null && chatMessagesUsed >= chatMessagesMax) {
+    if (!subLoading && chatMessagesMax !== null && chatMessagesUsed >= chatMessagesMax) {
       setLimitReached(true)
-      // Calculate reset date (7 days from reset_at)
       const resetDate = chatMessagesResetAt ? new Date(new Date(chatMessagesResetAt).getTime() + 7 * 24 * 60 * 60 * 1000) : null
       const displayDate = resetDate ? resetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : 'soon'
       setLimitMessage(`You've used all ${chatMessagesMax} chat messages this week. Your limit resets on ${displayDate}.`)
     }
-  }, [subLoading, isPro, chatMessagesUsed, chatMessagesMax, chatMessagesResetAt])
+  }, [subLoading, chatMessagesUsed, chatMessagesMax, chatMessagesResetAt])
 
   // Proactive opening message — fires once per browser session on the /chat page
   useEffect(() => {
@@ -95,10 +94,10 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
   // Load conversations on mount
   useEffect(() => {
-    if (isPro) {
+    if (!subLoading) {
       loadConversations()
     }
-  }, [isPro])
+  }, [subLoading])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -302,34 +301,6 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-
-  // Pro paywall
-  if (!subLoading && !isPro) {
-    return (
-      <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 p-8 text-center shadow-md">
-        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
-          <svg className="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
-          </svg>
-        </div>
-        <h3 className="text-xl font-bold text-slate-900">AI Course Chat</h3>
-        <p className="mt-2 text-sm text-slate-600">
-          Chat with an AI assistant that knows your courses, deadlines, and study materials.
-          Upload files and get personalized help studying.
-        </p>
-        <Link
-          href="/upgrade"
-          className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-base font-bold text-white shadow-lg transition-all hover:-translate-y-1 hover:shadow-xl"
-        >
-          Upgrade to Pro
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-          </svg>
-        </Link>
-        <p className="mt-2 text-xs text-slate-400">Included with Pro — 50 messages/week</p>
-      </div>
-    )
   }
 
   if (subLoading) {
@@ -552,6 +523,30 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                 ))
               )}
 
+              {/* Inline upgrade card — appears in thread when weekly limit is hit */}
+              {limitReached && (
+                <div className="mb-4 flex justify-start">
+                  <div className="max-w-[80%] rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                    <p className="text-sm font-semibold text-amber-900">
+                      {isPro
+                        ? limitMessage
+                        : `You've used your ${chatMessagesMax} free messages this week. Upgrade to Pro for 50 messages/week, proactive deadline nudges, and unlimited study material generation.`}
+                    </p>
+                    {!isPro && (
+                      <Link
+                        href="/upgrade"
+                        className="mt-3 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                      >
+                        Upgrade to Pro
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                        </svg>
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Typing indicator — shown only while waiting for the stream to start */}
               {sending && !streamingMsgId && (
                 <div className="mb-4 flex justify-start">
@@ -567,13 +562,6 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
               <div ref={messagesEndRef} />
             </div>
-
-            {/* Limit reached message */}
-            {limitReached && (
-              <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-center">
-                <p className="text-sm font-medium text-amber-800">{limitMessage}</p>
-              </div>
-            )}
 
             {/* Input area */}
             {!limitReached && (

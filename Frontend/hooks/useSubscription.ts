@@ -60,8 +60,7 @@ export function useSubscription() {
     (sub.aiGenerationsMax !== null && sub.aiGenerationsUsed < sub.aiGenerationsMax)
 
   const canChat =
-    sub.isPro &&
-    (sub.chatMessagesMax === null || sub.chatMessagesUsed < sub.chatMessagesMax)
+    sub.chatMessagesMax === null || sub.chatMessagesUsed < sub.chatMessagesMax
 
   return { ...sub, loading, refresh, canGenerate, canChat }
 }
