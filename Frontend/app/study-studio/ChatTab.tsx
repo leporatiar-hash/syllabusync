@@ -68,7 +68,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
   // Proactive opening message — fires once per browser session on the /chat page
   useEffect(() => {
-    if (!triggerProactive || !isPro || subLoading) return
+    if (!triggerProactive) return
     if (typeof sessionStorage === 'undefined') return
     if (sessionStorage.getItem('chat_proactive_shown')) return
 
@@ -91,7 +91,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
       }
     }
     fetchProactive()
-  }, [triggerProactive, isPro, subLoading])
+  }, [triggerProactive])
 
   // Load conversations on mount
   useEffect(() => {

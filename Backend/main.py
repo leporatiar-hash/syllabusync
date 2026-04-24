@@ -5019,10 +5019,6 @@ async def generate_proactive_message(
     """
     db = SessionLocal()
     try:
-        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-        if not profile or _effective_tier(profile) != "pro":
-            raise HTTPException(status_code=403, detail={"error": "pro_required"})
-
         today = date.today()
         seven_days = today + timedelta(days=7)
 
