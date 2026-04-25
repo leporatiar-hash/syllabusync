@@ -1194,25 +1194,30 @@ def ensure_subscription_columns():
 
 
 def ensure_chat_columns():
-    """Add chat-related columns to user_profiles and chat_messages."""
-    chat_cols = [
+    """Add chat-related columns to user_profiles and chat_messages.
+
+    Each ALTER TABLE runs in its own transaction so a "column already exists"
+    failure on one statement does not poison subsequent ones (PostgreSQL aborts
+    the entire transaction on any error; mixing multiple ALTER TABLEs in a
+    single engine.begin() block silently skips later statements).
+    """
+    for col_name, col_def in [
         ("chat_messages_used", "INTEGER DEFAULT 0"),
         ("chat_messages_reset_at", "TIMESTAMP"),
-    ]
-    with engine.begin() as conn:
-        for col_name, col_def in chat_cols:
-            try:
-                conn.execute(text(
-                    f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"
-                ))
-                logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
-            except Exception:
-                pass  # Column already exists
+    ]:
         try:
-            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN created_study_set TEXT"))
-            logger.info("[Migration] Added 'created_study_set' column to chat_messages")
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"))
+                logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
         except Exception:
             pass  # Column already exists
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN created_study_set TEXT"))
+            logger.info("[Migration] Added 'created_study_set' column to chat_messages")
+    except Exception:
+        pass  # Column already exists
 
 
 FREE_CHAT_MESSAGE_LIMIT = 10  # Per week, free tier
