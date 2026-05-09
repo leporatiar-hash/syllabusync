@@ -1180,42 +1180,44 @@ async def extract_text_from_image(content: bytes, filename: str) -> str:
 
 def ensure_deadline_columns():
     """Add source and external_id columns to deadlines table if missing.
-    Also make course_id nullable for LMS-synced deadlines."""
-    with engine.begin() as conn:
+    Each statement runs in its own transaction to avoid Postgres aborting
+    the block when a column already exists."""
+    for stmt, label in [
+        ("ALTER TABLE deadlines ADD COLUMN source VARCHAR DEFAULT 'manual'", "source"),
+        ("ALTER TABLE deadlines ADD COLUMN external_id VARCHAR", "external_id"),
+    ]:
         try:
-            conn.execute(text("ALTER TABLE deadlines ADD COLUMN source VARCHAR DEFAULT 'manual'"))
-            logger.info("[Migration] Added 'source' column to deadlines")
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+            logger.info(f"[Migration] Added '{label}' column to deadlines")
         except Exception:
             pass  # Column already exists
+
+    if engine.dialect.name == "postgresql":
         try:
-            conn.execute(text("ALTER TABLE deadlines ADD COLUMN external_id VARCHAR"))
-            logger.info("[Migration] Added 'external_id' column to deadlines")
-        except Exception:
-            pass  # Column already exists
-        # Make course_id nullable (PostgreSQL syntax)
-        if engine.dialect.name == "postgresql":
-            try:
+            with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE deadlines ALTER COLUMN course_id DROP NOT NULL"))
-                logger.info("[Migration] Made deadlines.course_id nullable")
-            except Exception:
-                pass
+            logger.info("[Migration] Made deadlines.course_id nullable")
+        except Exception:
+            pass
 
 
 def ensure_referral_columns():
-    """Add referral_code and referred_by columns to user_profiles if missing."""
-    with engine.begin() as conn:
+    """Add referral_code and referred_by columns to user_profiles if missing.
+    Each statement runs in its own transaction."""
+    for stmt, label in [
+        ("ALTER TABLE user_profiles ADD COLUMN referral_code VARCHAR", "referral_code"),
+        ("ALTER TABLE user_profiles ADD COLUMN referred_by VARCHAR", "referred_by"),
+    ]:
         try:
-            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN referral_code VARCHAR"))
-            logger.info("[Migration] Added 'referral_code' column to user_profiles")
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+            logger.info(f"[Migration] Added '{label}' column to user_profiles")
         except Exception:
             pass  # Column already exists
-        try:
-            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN referred_by VARCHAR"))
-            logger.info("[Migration] Added 'referred_by' column to user_profiles")
-        except Exception:
-            pass  # Column already exists
-        # Backfill referral codes for existing users
-        try:
+
+    try:
+        with engine.begin() as conn:
             if engine.dialect.name == "postgresql":
                 conn.execute(text(
                     "UPDATE user_profiles SET referral_code = LEFT(REPLACE(gen_random_uuid()::text, '-', ''), 8) "
@@ -1226,9 +1228,9 @@ def ensure_referral_columns():
                     "UPDATE user_profiles SET referral_code = LOWER(HEX(RANDOMBLOB(4))) "
                     "WHERE referral_code IS NULL"
                 ))
-            logger.info("[Migration] Backfilled referral codes")
-        except Exception:
-            pass
+        logger.info("[Migration] Backfilled referral codes")
+    except Exception:
+        pass
 
 
 # ── Subscription tier constants ──
@@ -1251,7 +1253,8 @@ def _effective_tier(profile) -> str:
 
 
 def ensure_subscription_columns():
-    """Add subscription-related columns to user_profiles."""
+    """Add subscription-related columns to user_profiles.
+    Each ALTER runs in its own transaction to avoid Postgres aborting the block."""
     subscription_cols = [
         ("subscription_tier", "VARCHAR DEFAULT 'free'"),
         ("stripe_customer_id", "VARCHAR"),
@@ -1262,35 +1265,33 @@ def ensure_subscription_columns():
         ("ai_generations_reset_at", "TIMESTAMP"),
         ("has_completed_onboarding", "BOOLEAN DEFAULT FALSE"),
     ]
-    with engine.begin() as conn:
-        for col_name, col_def in subscription_cols:
-            try:
-                conn.execute(text(
-                    f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"
-                ))
-                logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
-            except Exception:
-                pass  # Column already exists
-
-        # Reset all grandfathered users back to free (grandfathering removed)
+    for col_name, col_def in subscription_cols:
         try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"))
+            logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+
+    try:
+        with engine.begin() as conn:
             conn.execute(text(
                 "UPDATE user_profiles SET subscription_tier = 'free' "
                 "WHERE subscription_tier = 'grandfathered'"
             ))
-            logger.info("[Migration] Reset grandfathered users to free tier")
-        except Exception:
-            pass
+        logger.info("[Migration] Reset grandfathered users to free tier")
+    except Exception:
+        pass
 
-        # Mark all existing users as having completed onboarding
-        try:
+    try:
+        with engine.begin() as conn:
             conn.execute(text(
                 "UPDATE user_profiles SET has_completed_onboarding = TRUE "
                 "WHERE has_completed_onboarding = FALSE OR has_completed_onboarding IS NULL"
             ))
-            logger.info("[Migration] Marked existing users as onboarded")
-        except Exception:
-            pass
+        logger.info("[Migration] Marked existing users as onboarded")
+    except Exception:
+        pass
 
 
 def ensure_chat_columns():
