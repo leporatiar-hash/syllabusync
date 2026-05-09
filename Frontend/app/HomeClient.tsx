@@ -114,18 +114,8 @@ export default function HomeClient() {
   const [referralCode, setReferralCode] = useState('')
   const [referralCount, setReferralCount] = useState(0)
   const [copied, setCopied] = useState(false)
-  const [showVerifyBanner, setShowVerifyBanner] = useState(false)
   const [showGettingStarted, setShowGettingStarted] = useState(false)
 
-  // Show email verification banner for unverified email users
-  useEffect(() => {
-    if (!user) return
-    const isEmailUser = user.app_metadata?.provider === 'email'
-    const isVerified = !!user.email_confirmed_at
-    if (isEmailUser && !isVerified) {
-      setShowVerifyBanner(true)
-    }
-  }, [user])
 
   // Show Getting Started checklist unless dismissed
   useEffect(() => {
@@ -269,24 +259,6 @@ export default function HomeClient() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
 
-      {/* Email verification banner */}
-      {showVerifyBanner && (
-        <div className="bg-amber-50 border-b border-amber-200">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2.5">
-            <p className="text-sm text-amber-800">
-              Please verify your email address. Check your inbox for a link from ClassMate.
-            </p>
-            <button
-              onClick={() => setShowVerifyBanner(false)}
-              className="shrink-0 rounded-full p-1 text-amber-600 hover:bg-amber-100"
-              aria-label="Dismiss"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-
       {!isPro && (
         <div className="mx-auto max-w-6xl px-4 pt-8">
           <UpgradePrompt variant="promo" />
@@ -296,7 +268,7 @@ export default function HomeClient() {
       <section className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-16 md:flex-row md:items-start md:justify-between">
         <div className="flex-1 space-y-4">
           <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
-            Welcome back{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name.split(' ')[0]}` : ''}!
+            Welcome back!
           </h1>
           <p className="mt-4 text-lg text-slate-600">
             A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.

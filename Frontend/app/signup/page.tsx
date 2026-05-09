@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import posthog from 'posthog-js'
-import { supabase } from '../../lib/supabaseClient'
+import { authClient } from '../../lib/authClient'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL } from '../../hooks/useAuthFetch'
 
@@ -27,7 +27,7 @@ function SignupContent() {
     }
   }, [loading, user, router])
 
-const handleEmailSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
@@ -50,41 +50,25 @@ const handleEmailSubmit = async (e: React.FormEvent) => {
       return
     }
 
-    try {
-      const { data, error } = await supabase.auth.signUp({ email, password })
+    const { accessToken, error: regError } = await authClient.register(email, password, refCode || undefined)
 
-      if (error) {
-        setError(error.message)
-        setSubmitting(false)
-      } else {
-        posthog.capture('user_signed_up')
-
-        // Fire-and-forget background tasks — don't block navigation
-        const token = data.session?.access_token
-        if (token) {
-          // Mark onboarding complete so the app doesn't gate on it
-          fetch(`${API_URL}/me/complete-onboarding`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
-          }).catch(() => {})
-
-          // Record referral if provided
-          if (refCode) {
-            fetch(`${API_URL}/me/referral?referral_code=${encodeURIComponent(refCode)}`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}` },
-            }).catch(() => {})
-          }
-        }
-
-        // Go straight to the dashboard — verification email sent in background by Supabase
-        router.push('/home')
-      }
-    } catch (err) {
-      setError('An unexpected error occurred. Please try again.')
+    if (regError) {
+      setError(regError)
       setSubmitting(false)
-      console.error('Signup error:', err)
+      return
     }
+
+    posthog.capture('user_signed_up')
+
+    // Fire-and-forget background tasks
+    if (accessToken) {
+      fetch(`${API_URL}/me/complete-onboarding`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {})
+    }
+
+    router.push('/home')
   }
 
   return (
@@ -93,7 +77,7 @@ const handleEmailSubmit = async (e: React.FormEvent) => {
         <h1 className="text-2xl font-semibold text-slate-900">Create account</h1>
         <p className="mt-1 text-sm text-slate-500">Join thousands of students organizing their studies</p>
 
-        <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
               Email

@@ -21,8 +21,7 @@ export default function Nav() {
   const homeHref = !loading && user ? '/home' : '/'
   const navItems = [{ href: homeHref, label: 'Home' }, ...baseNavItems]
 
-  const fullName = user?.user_metadata?.full_name as string | undefined
-  const initials = (fullName?.[0] || user?.email?.[0] || 'U').toUpperCase()
+  const initials = (user?.email?.[0] || 'U').toUpperCase()
 
   // Fetch avatar from backend once — keeps it out of the JWT entirely
   useEffect(() => {

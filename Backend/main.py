@@ -18,6 +18,7 @@ from urllib.error import URLError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from passlib.context import CryptContext
 import PyPDF2
 from docx import Document
 import json
@@ -80,6 +81,17 @@ MCP_SERVICE_KEY = os.getenv("MCP_SERVICE_KEY", "")
 # CROW_VERIFICATION_SECRET: used to sign Identity Verification JWTs for the Crow widget.
 # Get this from your Crow dashboard → Product Settings → Identity Verification.
 CROW_VERIFICATION_SECRET = os.getenv("CROW_VERIFICATION_SECRET", "")
+
+# Native JWT auth (replaces Supabase auth)
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+NATIVE_JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+RESET_TOKEN_EXPIRE_MINUTES = 60
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+print(f"[Auth] JWT_SECRET={'SET' if JWT_SECRET else 'NOT SET (native auth disabled)'}")
 
 # Log Supabase auth configuration at startup
 print(f"[Auth] SUPABASE_URL={'SET (' + SUPABASE_URL[:40] + '...)' if SUPABASE_URL else 'NOT SET'}")
@@ -316,6 +328,48 @@ def _verify_supabase_token(token: str) -> dict:
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+# Native JWT helpers
+def _issue_tokens(user_id: str, email: str) -> dict:
+    """Mint a short-lived access token and a long-lived refresh token."""
+    if not JWT_SECRET:
+        raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
+    now = datetime.utcnow()
+    access_payload = {
+        "sub": user_id,
+        "email": email,
+        "type": "access",
+        "iat": now,
+        "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    }
+    refresh_payload = {
+        "sub": user_id,
+        "type": "refresh",
+        "iat": now,
+        "exp": now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    }
+    access_token = jwt.encode(access_payload, JWT_SECRET, algorithm=NATIVE_JWT_ALGORITHM)
+    refresh_token = jwt.encode(refresh_payload, JWT_SECRET, algorithm=NATIVE_JWT_ALGORITHM)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user_id": user_id,
+        "email": email,
+    }
+
+
+def _verify_native_token(token: str, token_type: str = "access") -> dict:
+    if not JWT_SECRET:
+        raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
+    try:
+        claims = jwt.decode(token, JWT_SECRET, algorithms=[NATIVE_JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if claims.get("type") != token_type:
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    return claims
+
+
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./railway.db")
 # Handle Railway's postgres:// vs postgresql://
@@ -427,6 +481,21 @@ def ensure_user_columns():
         ))
 
 
+def ensure_user_auth_columns():
+    """Add native auth columns to users table if they don't exist (safe for both SQLite and Postgres)."""
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+            if cols:
+                if "password_hash" not in cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+                if "password_changed_at" not in cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN password_changed_at DATETIME"))
+        else:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP"))
+
+
 # Database Models
 class Course(Base):
     __tablename__ = "courses"
@@ -513,6 +582,8 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=True)          # null for legacy Supabase-only accounts
+    password_changed_at = Column(DateTime, nullable=True)  # used to invalidate old tokens
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -647,6 +718,35 @@ class NudgeFlag(Base):
     deadline_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     delivered = Column(Boolean, default=False)
+
+
+class AuthRegisterRequest(BaseModel):
+    email: str = Field(description="User email address")
+    password: str = Field(description="Password (min 6 characters)")
+    referral_code: str | None = Field(None, description="Optional referral code")
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class AuthForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class AuthResetPasswordRequest(BaseModel):
+    token: str = Field(description="Reset token received by email")
+    new_password: str = Field(description="New password (min 6 characters)")
+
+
+class AuthChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class ProfilePictureRequest(BaseModel):
@@ -1472,7 +1572,22 @@ def _get_current_user(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     token = credentials.credentials
-    claims = _verify_supabase_token(token)
+
+    # Try native HS256 token first; fall back to Supabase RS256 for existing users
+    claims = None
+    try:
+        header = jwt.get_unverified_header(token)
+        if header.get("alg") == NATIVE_JWT_ALGORITHM and JWT_SECRET:
+            claims = _verify_native_token(token, token_type="access")
+    except (JWTError, HTTPException):
+        claims = None
+
+    if claims is None:
+        if SUPABASE_ISSUER and SUPABASE_JWKS_URL:
+            claims = _verify_supabase_token(token)
+        else:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     user_id = claims.get("sub")
     email = claims.get("email")
     if not user_id:
@@ -1888,21 +2003,28 @@ async def startup_event():
     logger.info("=" * 50)
 
     # Validate required environment variables
-    required_vars = ["OPENAI_API_KEY", "SUPABASE_URL"]
+    required_vars = ["OPENAI_API_KEY"]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
         logger.error(f"[Startup] FATAL: Missing required env vars: {missing}")
         raise RuntimeError(f"Missing required environment variables: {missing}")
 
+    if not JWT_SECRET:
+        logger.warning("[Startup] JWT_SECRET not set — native auth endpoints are disabled")
+    if not SUPABASE_URL:
+        logger.info("[Startup] SUPABASE_URL not set — Supabase JWT fallback disabled")
+
     # Log CORS configuration
     logger.info(f"[Startup] CORS enabled for origins: {ALLOWED_ORIGINS}")
 
-    # Test database connection
+    # Test database connection and run migrations
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         logger.info("[Startup] Database connection successful")
         logger.info(f"[Startup] Database URL: {_safe_db_url(DATABASE_URL)}")
+        ensure_user_auth_columns()
+        logger.info("[Startup] Auth column migration complete")
     except Exception as e:
         logger.error(f"[Startup] ERROR: Database connection failed: {e}")
 
@@ -1923,6 +2045,158 @@ async def startup_event():
     logger.info("=" * 50)
     logger.info("[Startup] ClassMate Backend API ready!")
     logger.info("=" * 50)
+
+
+@app.post("/auth/register", tags=["auth"], summary="Register a new account")
+def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Native auth not configured")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    existing = db.query(User).filter(User.email == payload.email.lower()).first()
+    if existing:
+        if existing.password_hash:
+            raise HTTPException(status_code=409, detail="Email already registered")
+        # Legacy Supabase account — set password and return tokens
+        existing.password_hash = pwd_context.hash(payload.password)
+        existing.password_changed_at = datetime.utcnow()
+        db.commit()
+        return _issue_tokens(existing.id, existing.email)
+
+    user_id = generate_uuid()
+    user = User(
+        id=user_id,
+        email=payload.email.lower(),
+        password_hash=pwd_context.hash(payload.password),
+    )
+    db.add(user)
+    db.flush()
+    profile = UserProfile(
+        user_id=user_id,
+        email=payload.email.lower(),
+        referral_code=generate_referral_code(),
+    )
+    db.add(profile)
+    db.commit()
+
+    if payload.referral_code:
+        try:
+            referrer = db.query(UserProfile).filter(
+                UserProfile.referral_code == payload.referral_code
+            ).first()
+            if referrer:
+                profile.referred_by = payload.referral_code
+                db.commit()
+        except Exception:
+            pass
+
+    return _issue_tokens(user_id, payload.email.lower())
+
+
+@app.post("/auth/login", tags=["auth"], summary="Login with email and password")
+def auth_login(payload: AuthLoginRequest, db=Depends(get_db)):
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Native auth not configured")
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not pwd_context.verify(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return _issue_tokens(user.id, user.email)
+
+
+@app.post("/auth/refresh", tags=["auth"], summary="Refresh access token")
+def auth_refresh(payload: AuthRefreshRequest, db=Depends(get_db)):
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Native auth not configured")
+    claims = _verify_native_token(payload.refresh_token, token_type="refresh")
+    user_id = claims.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    # Reject tokens issued before a password change
+    if user.password_changed_at:
+        issued_at = datetime.utcfromtimestamp(claims.get("iat", 0))
+        if issued_at < user.password_changed_at:
+            raise HTTPException(status_code=401, detail="Token invalidated — please log in again")
+    return _issue_tokens(user.id, user.email)
+
+
+@app.post("/auth/forgot-password", tags=["auth"], summary="Send password reset email")
+def auth_forgot_password(payload: AuthForgotPasswordRequest, db=Depends(get_db)):
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Native auth not configured")
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    # Always return 200 to prevent email enumeration
+    if not user:
+        return {"message": "If that email exists, a reset link has been sent"}
+
+    now = datetime.utcnow()
+    reset_payload = {
+        "sub": user.id,
+        "email": user.email,
+        "type": "reset",
+        "iat": now,
+        "exp": now + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES),
+    }
+    reset_token = jwt.encode(reset_payload, JWT_SECRET, algorithm=NATIVE_JWT_ALGORITHM)
+    frontend_url = os.getenv("FRONTEND_URL", "https://www.tryclassmate.com")
+    reset_url = f"{frontend_url}/reset-password?token={reset_token}"
+
+    if RESEND_API_KEY:
+        try:
+            resend.api_key = RESEND_API_KEY
+            resend.Emails.send({
+                "from": "ClassMate <noreply@tryclassmate.com>",
+                "to": [user.email],
+                "subject": "Reset your ClassMate password",
+                "html": f"""
+                <p>Hi there,</p>
+                <p>Click the link below to reset your password. This link expires in 1 hour.</p>
+                <p><a href="{reset_url}">Reset password</a></p>
+                <p>If you didn't request this, you can safely ignore this email.</p>
+                """,
+            })
+        except Exception as e:
+            logger.error(f"[Auth] Failed to send reset email: {e}")
+
+    return {"message": "If that email exists, a reset link has been sent"}
+
+
+@app.post("/auth/reset-password", tags=["auth"], summary="Set new password using reset token")
+def auth_reset_password(payload: AuthResetPasswordRequest, db=Depends(get_db)):
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Native auth not configured")
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    claims = _verify_native_token(payload.token, token_type="reset")
+    user = db.query(User).filter(User.id == claims.get("sub")).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    now = datetime.utcnow()
+    user.password_hash = pwd_context.hash(payload.new_password)
+    user.password_changed_at = now
+    db.commit()
+    return _issue_tokens(user.id, user.email)
+
+
+@app.post("/auth/change-password", tags=["auth"], summary="Change password for authenticated user")
+def auth_change_password(
+    payload: AuthChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    if not current_user.password_hash:
+        raise HTTPException(status_code=400, detail="No password set — use forgot-password flow")
+    if not pwd_context.verify(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    user = db.query(User).filter(User.id == current_user.id).first()
+    user.password_hash = pwd_context.hash(payload.new_password)
+    user.password_changed_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Password updated"}
 
 
 @app.get("/")

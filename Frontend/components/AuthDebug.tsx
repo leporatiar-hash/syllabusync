@@ -7,7 +7,7 @@ export default function AuthDebug() {
   if (loading) return null
   return (
     <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">
-      Auth provider: Supabase | user: {user ? 'true' : 'false'}
+      Auth: native JWT | user: {user ? 'true' : 'false'}
     </span>
   )
 }

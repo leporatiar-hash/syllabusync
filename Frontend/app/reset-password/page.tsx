@@ -1,79 +1,36 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '../../lib/supabaseClient'
+import { authClient } from '../../lib/authClient'
 
 function ResetPasswordContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const token = searchParams.get('token') || ''
+
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [sessionReady, setSessionReady] = useState(false)
 
-  useEffect(() => {
-    const code = searchParams.get('code')
-    if (code) {
-      supabase.auth.exchangeCodeForSession(code)
-        .then(({ error: exchangeError }) => {
-          if (exchangeError) {
-            setError('This reset link is invalid or has expired. Please request a new one.')
-          } else {
-            setSessionReady(true)
-          }
-        })
-        .catch(() => {
-          setError('Unable to verify reset link. Please try again.')
-        })
-    } else {
-      // No code param — check if there's already an active recovery session
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) {
-          setSessionReady(true)
-        } else {
-          setError('No valid reset link found. Please request a new password reset.')
-        }
-      })
-    }
-  }, [searchParams])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitting(true)
-    setError(null)
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match')
-      setSubmitting(false)
-      return
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters')
-      setSubmitting(false)
-      return
-    }
-
-    try {
-      const { error } = await supabase.auth.updateUser({ password })
-
-      if (error) {
-        setError(error.message)
-      } else {
-        setSuccess(true)
-        setTimeout(() => {
-          router.replace('/login?message=Password updated successfully')
-        }, 2000)
-      }
-    } catch {
-      setError('An unexpected error occurred. Please try again.')
-    } finally {
-      setSubmitting(false)
-    }
+  if (!token) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm text-center">
+          <h1 className="text-xl font-semibold text-slate-900">Link expired</h1>
+          <p className="mt-2 text-sm text-slate-500">No valid reset token found.</p>
+          <Link
+            href="/forgot-password"
+            className="mt-6 inline-block rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+          >
+            Request new reset link
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   if (success) {
@@ -86,35 +43,34 @@ function ResetPasswordContent() {
             </svg>
           </div>
           <h1 className="text-2xl font-semibold text-slate-900">Password updated</h1>
-          <p className="mt-2 text-sm text-slate-500">Redirecting you to login...</p>
+          <p className="mt-2 text-sm text-slate-500">Redirecting you to your dashboard...</p>
         </div>
       </div>
     )
   }
 
-  if (error && !sessionReady) {
-    return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4">
-        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-          <h1 className="text-xl font-semibold text-slate-900">Link expired</h1>
-          <p className="mt-2 text-sm text-slate-500">{error}</p>
-          <Link
-            href="/forgot-password"
-            className="mt-6 inline-block rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90"
-          >
-            Request new reset link
-          </Link>
-        </div>
-      </div>
-    )
-  }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
 
-  if (!sessionReady) {
-    return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4">
-        <div className="text-sm text-slate-500">Verifying reset link...</div>
-      </div>
-    )
+    if (password !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters')
+      return
+    }
+
+    setSubmitting(true)
+    const { error: resetError } = await authClient.resetPassword(token, password)
+    if (resetError) {
+      setError(resetError)
+      setSubmitting(false)
+    } else {
+      setSuccess(true)
+      setTimeout(() => router.replace('/home'), 1500)
+    }
   }
 
   return (

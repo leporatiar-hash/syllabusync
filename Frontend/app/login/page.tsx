@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import posthog from 'posthog-js'
-import { supabase } from '../../lib/supabaseClient'
+import { authClient } from '../../lib/authClient'
 import { useAuth } from '../../lib/useAuth'
 
 
@@ -25,24 +25,18 @@ function LoginContent() {
     }
   }, [loading, user, router])
 
-const handleEmailSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setError(error.message)
-        setSubmitting(false)
-      } else {
-        posthog.capture('user_logged_in')
-        router.push('/home')
-      }
-    } catch (err) {
-      setError('An unexpected error occurred. Please try again.')
+    const { error: loginError } = await authClient.login(email, password)
+    if (loginError) {
+      setError(loginError)
       setSubmitting(false)
-      console.error('Login error:', err)
+    } else {
+      posthog.capture('user_logged_in')
+      router.push('/home')
     }
   }
 
@@ -52,7 +46,7 @@ const handleEmailSubmit = async (e: React.FormEvent) => {
         <h1 className="text-2xl font-semibold text-slate-900">Welcome back</h1>
         <p className="mt-1 text-sm text-slate-500">Get back to studying</p>
 
-        <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
               Email

@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import posthog from 'posthog-js'
-import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
@@ -62,55 +61,26 @@ export default function SettingsPage() {
     }
   }, [authLoading, user, router])
 
-  // Load text fields from Supabase user_metadata (small, no bloat)
-  useEffect(() => {
-    if (!user) return
-    const metadata = user.user_metadata || {}
-    setFullName((metadata.full_name as string) || '')
-    setSchoolName((metadata.school_name as string) || '')
-    setSchoolType((metadata.school_type as string) || '')
-    setAcademicYear((metadata.academic_year as string) || '')
-    setMajor((metadata.major as string) || '')
-  }, [user])
-
   // Load LMS connections
   useEffect(() => {
     if (user) loadLmsConnections()
   }, [user, loadLmsConnections])
 
-  // Load profile picture from backend (not JWT — avoids base64 bloat in every request).
-  // If the backend profile row doesn't exist yet, seed it from Supabase metadata so that
-  // profile-picture uploads will work immediately without a page reload.
+  // Load profile from backend
   useEffect(() => {
     if (!user) return
-    const loadPic = async () => {
-      try {
-        const res = await fetchWithAuth(`${API_URL}/me`)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.profile) {
-            setProfilePicture(data.profile.profile_picture || null)
-          } else {
-            // Backend profile row missing — create it now from Supabase metadata
-            const metadata = user.user_metadata || {}
-            await fetchWithAuth(`${API_URL}/me/profile`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                full_name: (metadata.full_name as string) || '',
-                school_name: (metadata.school_name as string) || '',
-                school_type: (metadata.school_type as string) || '',
-                academic_year: (metadata.academic_year as string) || '',
-                major: (metadata.major as string) || '',
-              }),
-            }).catch(() => {})  // best-effort; picture upload endpoint also auto-creates if needed
-          }
-        }
-      } catch {
-        // non-fatal — avatar just stays as initials
+    fetchWithAuth(`${API_URL}/me`).then(async (res) => {
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.profile) {
+        setFullName(data.profile.full_name || '')
+        setSchoolName(data.profile.school_name || '')
+        setSchoolType(data.profile.school_type || '')
+        setAcademicYear(data.profile.academic_year || '')
+        setMajor(data.profile.major || '')
+        setProfilePicture(data.profile.profile_picture || null)
       }
-    }
-    loadPic()
+    }).catch(() => {})
   }, [user])
 
   if (authLoading || !user) {
@@ -125,17 +95,20 @@ export default function SettingsPage() {
     setSaved(false)
     setSaveError(null)
     try {
-      const { error } = await supabase.auth.updateUser({
-        data: {
+      const res = await fetchWithAuth(`${API_URL}/me/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           full_name: fullName || undefined,
           school_name: schoolName || undefined,
           school_type: schoolType || undefined,
           academic_year: academicYear || undefined,
           major: major || undefined,
-        },
+        }),
       })
-      if (error) {
-        setSaveError(error.message || 'Failed to save. Please try again.')
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSaveError(data.detail || 'Failed to save. Please try again.')
       } else {
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
