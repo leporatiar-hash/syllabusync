@@ -16,6 +16,7 @@ function LoginContent() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false)
   const errorParam = searchParams.get('error')
   const message = searchParams.get('message')
 
@@ -31,7 +32,10 @@ function LoginContent() {
     setError(null)
 
     const { error: loginError } = await authClient.login(email, password)
-    if (loginError) {
+    if (loginError === 'PASSWORD_NOT_SET') {
+      setNeedsPasswordSetup(true)
+      setSubmitting(false)
+    } else if (loginError) {
       setError(loginError)
       setSubmitting(false)
     } else {
@@ -98,7 +102,17 @@ function LoginContent() {
           </div>
         </form>
 
-        {(error || errorParam) && (
+        {needsPasswordSetup && (
+          <div className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            This account was created before our recent update. Please use{' '}
+            <Link href={`/forgot-password`} className="font-semibold underline">
+              Forgot password?
+            </Link>{' '}
+            to set a new password and log in.
+          </div>
+        )}
+
+        {(error || errorParam) && !needsPasswordSetup && (
           <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
             {error || errorParam}
           </div>

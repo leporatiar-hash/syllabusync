@@ -18,7 +18,7 @@ from urllib.error import URLError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 import PyPDF2
 from docx import Document
 import json
@@ -89,7 +89,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 RESET_TOKEN_EXPIRE_MINUTES = 60
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def _hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+def _verify_password(password: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(password.encode(), hashed.encode())
 
 print(f"[Auth] JWT_SECRET={'SET' if JWT_SECRET else 'NOT SET (native auth disabled)'}")
 
@@ -2059,7 +2063,7 @@ def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
         if existing.password_hash:
             raise HTTPException(status_code=409, detail="Email already registered")
         # Legacy Supabase account — set password and return tokens
-        existing.password_hash = pwd_context.hash(payload.password)
+        existing.password_hash = _hash_password(payload.password)
         existing.password_changed_at = datetime.utcnow()
         db.commit()
         return _issue_tokens(existing.id, existing.email)
@@ -2068,7 +2072,7 @@ def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
     user = User(
         id=user_id,
         email=payload.email.lower(),
-        password_hash=pwd_context.hash(payload.password),
+        password_hash=_hash_password(payload.password),
     )
     db.add(user)
     db.flush()
@@ -2099,9 +2103,11 @@ def auth_login(payload: AuthLoginRequest, db=Depends(get_db)):
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Native auth not configured")
     user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if not user or not user.password_hash:
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if not pwd_context.verify(payload.password, user.password_hash):
+    if not user.password_hash:
+        raise HTTPException(status_code=409, detail="PASSWORD_NOT_SET")
+    if not _verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     return _issue_tokens(user.id, user.email)
 
@@ -2175,7 +2181,7 @@ def auth_reset_password(payload: AuthResetPasswordRequest, db=Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     now = datetime.utcnow()
-    user.password_hash = pwd_context.hash(payload.new_password)
+    user.password_hash = _hash_password(payload.new_password)
     user.password_changed_at = now
     db.commit()
     return _issue_tokens(user.id, user.email)
@@ -2189,12 +2195,12 @@ def auth_change_password(
 ):
     if not current_user.password_hash:
         raise HTTPException(status_code=400, detail="No password set — use forgot-password flow")
-    if not pwd_context.verify(payload.current_password, current_user.password_hash):
+    if not _verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
     if len(payload.new_password) < 6:
         raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
     user = db.query(User).filter(User.id == current_user.id).first()
-    user.password_hash = pwd_context.hash(payload.new_password)
+    user.password_hash = _hash_password(payload.new_password)
     user.password_changed_at = datetime.utcnow()
     db.commit()
     return {"message": "Password updated"}
