@@ -2154,7 +2154,7 @@ def auth_forgot_password(payload: AuthForgotPasswordRequest, db=Depends(get_db))
         try:
             resend.api_key = RESEND_API_KEY
             resend.Emails.send({
-                "from": "ClassMate <noreply@tryclassmate.com>",
+                "from": "onboarding@resend.dev",
                 "to": [user.email],
                 "subject": "Reset your ClassMate password",
                 "html": f"""
