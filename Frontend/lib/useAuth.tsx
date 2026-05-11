@@ -6,8 +6,6 @@ import { authClient, type AuthUser } from './authClient'
 
 interface AuthState {
   user: AuthUser | null
-  // Kept for compatibility with CrowWidget and useAuthFetch
-  session: { access_token: string } | null
   loading: boolean
   signOut: () => void
 }
@@ -47,16 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null)
   }, [])
 
-  const session = useMemo(
-    () => (authClient.getAccessToken() ? { access_token: authClient.getAccessToken()! } : null),
-    // Re-derive whenever user changes so CrowWidget always has a fresh token ref
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user],
-  )
-
   const value = useMemo(
-    () => ({ user, session, loading, signOut }),
-    [user, session, loading, signOut],
+    () => ({ user, loading, signOut }),
+    [user, loading, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

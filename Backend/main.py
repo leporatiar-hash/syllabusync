@@ -36,7 +36,6 @@ import httpx
 from icalendar import Calendar as ICalCalendar
 from cryptography.fernet import Fernet
 import sentry_sdk
-import hmac
 
 # Configure logging
 logging.basicConfig(
@@ -73,14 +72,6 @@ SUPABASE_ISSUER = os.getenv("SUPABASE_ISSUER") or (
 )
 SUPABASE_JWT_AUD = os.getenv("SUPABASE_JWT_AUD", "authenticated")
 SUPABASE_JWKS_CACHE_TTL = int(os.getenv("SUPABASE_JWKS_CACHE_TTL", "3600"))
-
-# Crow MCP server integration
-# MCP_SERVICE_KEY: shared secret that the Crow MCP server presents via X-Service-Key header.
-# When present and valid, the backend trusts X-User-ID instead of requiring a Supabase JWT.
-MCP_SERVICE_KEY = os.getenv("MCP_SERVICE_KEY", "")
-# CROW_VERIFICATION_SECRET: used to sign Identity Verification JWTs for the Crow widget.
-# Get this from your Crow dashboard → Product Settings → Identity Verification.
-CROW_VERIFICATION_SECRET = os.getenv("CROW_VERIFICATION_SECRET", "")
 
 # Native JWT auth (replaces Supabase auth)
 JWT_SECRET = os.getenv("JWT_SECRET", "")
@@ -1558,21 +1549,6 @@ def _get_current_user(
     credentials: HTTPAuthorizationCredentials | None,
     db,
 ) -> User:
-    # --- Crow MCP server service key path ---
-    # When the Crow MCP server calls this API, it presents X-Service-Key instead of a
-    # Supabase JWT. If the key matches, we trust the X-User-ID header for user identity.
-    service_key = request.headers.get("x-service-key", "")
-    if service_key and MCP_SERVICE_KEY and hmac.compare_digest(service_key, MCP_SERVICE_KEY):
-        user_id = request.headers.get("x-user-id", "")
-        if not user_id:
-            raise HTTPException(status_code=400, detail="X-User-ID header required with service key auth")
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-        logger.debug(f"[Auth] Service key auth for user {user_id}")
-        return user
-    # --- End Crow MCP service key path ---
-
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -5432,37 +5408,3 @@ Bad example: "Hello! I see you have some upcoming deadlines. Let me know how I c
     finally:
         db.close()
 
-
-# ============================================================
-# Crow Identity Verification
-# ============================================================
-
-@app.post("/crow/identity-token", tags=["crow"], summary="Mint a Crow Identity Verification JWT")
-def get_crow_identity_token(current_user: User = Depends(get_current_user)):
-    """Mint a short-lived Crow Identity Verification JWT for the authenticated student.
-
-    The frontend should call this endpoint after login and pass the returned token
-    to the Crow widget so it can identify the student on each chat interaction.
-
-    The JWT is signed with CROW_VERIFICATION_SECRET (from your Crow dashboard →
-    Product Settings → Identity Verification) and contains the student's user_id.
-    Crow's backend verifies this JWT and injects the user_id as X-User-ID on every
-    MCP tool call.
-
-    Setup:
-      1. Add CROW_VERIFICATION_SECRET to your .env (get from Crow dashboard).
-      2. In your frontend, call this endpoint after Supabase login:
-             const { token } = await fetch('/crow/identity-token', {
-               headers: { Authorization: `Bearer ${supabaseSession.access_token}` }
-             }).then(r => r.json())
-             crow.setIdentityToken(token)
-    """
-    if not CROW_VERIFICATION_SECRET:
-        return {"token": ""}
-
-    payload = {
-        "user_id": current_user.id,  # Supabase user UUID — required by Crow
-        "exp": int(time.time()) + 3600,  # expires in 1 hour
-    }
-    token = jwt.encode(payload, CROW_VERIFICATION_SECRET, algorithm="HS256")
-    return {"token": token}
