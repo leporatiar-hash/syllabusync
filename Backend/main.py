@@ -2180,7 +2180,10 @@ def auth_reset_password(payload: AuthResetPasswordRequest, db=Depends(get_db)):
     user = db.query(User).filter(User.id == claims.get("sub")).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    now = datetime.utcnow()
+    # Truncate to seconds so the issued_at comparison in /auth/refresh works correctly
+    # (JWT iat is integer seconds; storing microseconds would make every reset-issued
+    # refresh token appear "issued before" the password change).
+    now = datetime.utcnow().replace(microsecond=0)
     user.password_hash = _hash_password(payload.new_password)
     user.password_changed_at = now
     db.commit()
@@ -2201,7 +2204,7 @@ def auth_change_password(
         raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
     user = db.query(User).filter(User.id == current_user.id).first()
     user.password_hash = _hash_password(payload.new_password)
-    user.password_changed_at = datetime.utcnow()
+    user.password_changed_at = datetime.utcnow().replace(microsecond=0)
     db.commit()
     return {"message": "Password updated"}
 
@@ -5455,10 +5458,7 @@ def get_crow_identity_token(current_user: User = Depends(get_current_user)):
              crow.setIdentityToken(token)
     """
     if not CROW_VERIFICATION_SECRET:
-        raise HTTPException(
-            status_code=500,
-            detail="CROW_VERIFICATION_SECRET is not configured. Add it to your .env file.",
-        )
+        return {"token": ""}
 
     payload = {
         "user_id": current_user.id,  # Supabase user UUID — required by Crow
