@@ -8,6 +8,7 @@ interface AuthState {
   user: AuthUser | null
   loading: boolean
   signOut: () => void
+  refreshUser: () => void
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined)
@@ -16,10 +17,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(() => {
+  const refreshUser = useCallback(() => {
     const u = authClient.getUser()
     setUser(u)
-    return u
   }, [])
 
   useEffect(() => {
@@ -46,8 +46,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, signOut }),
-    [user, loading, signOut],
+    () => ({ user, loading, signOut, refreshUser }),
+    [user, loading, signOut, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

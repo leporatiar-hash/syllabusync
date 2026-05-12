@@ -11,7 +11,7 @@ import { useAuth } from '../../lib/useAuth'
 function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, loading } = useAuth()
+  const { user, loading, refreshUser } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -40,6 +40,7 @@ function LoginContent() {
       setSubmitting(false)
     } else {
       posthog.capture('user_logged_in')
+      refreshUser()
       router.push('/home')
     }
   }

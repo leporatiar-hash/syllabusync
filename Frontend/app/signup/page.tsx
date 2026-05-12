@@ -12,7 +12,7 @@ import { API_URL } from '../../hooks/useAuthFetch'
 function SignupContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, loading } = useAuth()
+  const { user, loading, refreshUser } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -59,6 +59,7 @@ function SignupContent() {
     }
 
     posthog.capture('user_signed_up')
+    refreshUser()
 
     // Fire-and-forget background tasks
     if (accessToken) {
