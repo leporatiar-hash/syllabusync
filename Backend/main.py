@@ -2040,7 +2040,7 @@ def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
             raise HTTPException(status_code=409, detail="Email already registered")
         # Legacy Supabase account — set password and return tokens
         existing.password_hash = _hash_password(payload.password)
-        existing.password_changed_at = datetime.utcnow()
+        existing.password_changed_at = datetime.utcnow().replace(microsecond=0)
         db.commit()
         return _issue_tokens(existing.id, existing.email)
 
