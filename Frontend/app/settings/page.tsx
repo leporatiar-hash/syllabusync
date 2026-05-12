@@ -41,6 +41,12 @@ export default function SettingsPage() {
   const [showCanvasModal, setShowCanvasModal] = useState(false)
   const [showICalModal, setShowICalModal] = useState(false)
 
+  // Delete account state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   const loadLmsConnections = useCallback(async () => {
     setLmsLoading(true)
     try {
@@ -193,6 +199,25 @@ export default function SettingsPage() {
   const handleLogout = async () => {
     await signOut()
     router.push('/login')
+  }
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetchWithAuth(`${API_URL}/auth/delete-account`, { method: 'DELETE' })
+      if (res.ok) {
+        await signOut()
+        router.push('/')
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setDeleteError(data.detail || 'Failed to delete account. Please try again.')
+        setDeleting(false)
+      }
+    } catch {
+      setDeleteError('An unexpected error occurred. Please try again.')
+      setDeleting(false)
+    }
   }
 
   return (
@@ -533,6 +558,57 @@ export default function SettingsPage() {
         >
           Sign Out
         </button>
+      </div>
+
+      {/* Delete Account */}
+      <div className="mt-6 rounded-2xl border border-red-200 bg-white p-6">
+        <h2 className="mb-1 text-sm font-semibold text-red-700">Delete Account</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Permanently delete your account and all associated data. This cannot be undone.
+        </p>
+
+        {!showDeleteConfirm ? (
+          <button
+            type="button"
+            onClick={() => setShowDeleteConfirm(true)}
+            className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+          >
+            Delete My Account
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-slate-700">
+              Type <span className="font-mono font-bold">DELETE</span> to confirm:
+            </p>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="DELETE"
+              className="w-full rounded-lg border border-red-300 px-3 py-2 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-200"
+            />
+            {deleteError && (
+              <p className="text-xs text-red-600">{deleteError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleDeleteAccount}
+                disabled={deleteConfirmText !== 'DELETE' || deleting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                {deleting ? 'Deleting...' : 'Permanently Delete'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); setDeleteError(null) }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   )

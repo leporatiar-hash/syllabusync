@@ -2185,6 +2185,43 @@ def auth_change_password(
     return {"message": "Password updated"}
 
 
+@app.delete("/auth/delete-account", tags=["auth"], summary="Permanently delete account and all data")
+def auth_delete_account(
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    uid = current_user.id
+
+    # Delete child rows before parents to avoid FK violations
+    conv_ids = [r[0] for r in db.query(ChatConversation.id).filter(ChatConversation.user_id == uid).all()]
+    if conv_ids:
+        db.query(ChatMessage).filter(ChatMessage.conversation_id.in_(conv_ids)).delete(synchronize_session=False)
+    db.query(ChatConversation).filter(ChatConversation.user_id == uid).delete(synchronize_session=False)
+
+    db.query(NudgeFlag).filter(NudgeFlag.user_id == uid).delete(synchronize_session=False)
+    db.query(CalendarEntry).filter(CalendarEntry.user_id == uid).delete(synchronize_session=False)
+    db.query(LMSConnection).filter(LMSConnection.user_id == uid).delete(synchronize_session=False)
+
+    flashcard_set_ids = [r[0] for r in db.query(FlashcardSet.id).filter(FlashcardSet.user_id == uid).all()]
+    if flashcard_set_ids:
+        db.query(Flashcard).filter(Flashcard.flashcard_set_id.in_(flashcard_set_ids)).delete(synchronize_session=False)
+    db.query(FlashcardSet).filter(FlashcardSet.user_id == uid).delete(synchronize_session=False)
+
+    quiz_ids = [r[0] for r in db.query(Quiz.id).filter(Quiz.user_id == uid).all()]
+    if quiz_ids:
+        db.query(QuizQuestion).filter(QuizQuestion.quiz_id.in_(quiz_ids)).delete(synchronize_session=False)
+    db.query(Quiz).filter(Quiz.user_id == uid).delete(synchronize_session=False)
+
+    db.query(Summary).filter(Summary.user_id == uid).delete(synchronize_session=False)
+    db.query(Deadline).filter(Deadline.user_id == uid).delete(synchronize_session=False)
+    db.query(Course).filter(Course.user_id == uid).delete(synchronize_session=False)
+    db.query(UserProfile).filter(UserProfile.user_id == uid).delete(synchronize_session=False)
+    db.query(User).filter(User.id == uid).delete(synchronize_session=False)
+
+    db.commit()
+    return {"message": "Account deleted"}
+
+
 @app.get("/")
 def root():
     """Root endpoint - service status."""
@@ -5333,8 +5370,15 @@ async def generate_proactive_message(
 
         # Build context string for the prompt
         ctx_lines = []
+
+        if courses:
+            names = ", ".join(c.name for c in courses)
+            ctx_lines.append(f"Student's courses: {names}")
+        else:
+            ctx_lines.append("Student's courses: (none added yet)")
+
         if deadlines:
-            ctx_lines.append("Upcoming deadlines (next 7 days):")
+            ctx_lines.append("\nUpcoming deadlines (next 7 days):")
             for d in deadlines:
                 course = db.query(Course).filter(Course.id == d.course_id).first() if d.course_id else None
                 course_name = course.name if course else "General"
@@ -5342,7 +5386,7 @@ async def generate_proactive_message(
                 when = "today" if days_until == 0 else "tomorrow" if days_until == 1 else f"in {days_until} days"
                 ctx_lines.append(f"- {d.title} ({course_name}) — due {when}, type: {d.type or 'deadline'}")
         else:
-            ctx_lines.append("No deadlines in the next 7 days.")
+            ctx_lines.append("\nNo deadlines in the next 7 days.")
 
         if courses_no_materials:
             names = ", ".join(c.name for c in courses_no_materials)
@@ -5367,14 +5411,12 @@ Student situation:
 
 Rules:
 - 2-3 sentences max
-- Use actual course names and deadline titles from the data above — never be generic
-- If there are no deadlines, offer to help them study or create materials for their courses
-- End with one specific actionable offer (e.g. "Want me to generate a quiz?")
+- ONLY use course names and deadline titles that appear verbatim in the data above — do NOT invent or assume any course names
+- If there are no deadlines, offer to help them study or create materials for their actual courses listed above
+- If the student has no courses yet, invite them to add their first course
+- End with one specific actionable offer
 - Do NOT start with "Hi", "Hello", or any greeting word
-- Output only the message text, no quotes or formatting
-
-Good example: "You've got a Final Exam for FINC 315 in 3 days and a Lab Report for BIO 201 due tomorrow. You haven't made any study materials for FINC 315 yet — want me to generate a quiz?"
-Bad example: "Hello! I see you have some upcoming deadlines. Let me know how I can help you study today!" """
+- Output only the message text, no quotes or formatting"""
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",

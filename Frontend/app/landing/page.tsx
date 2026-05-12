@@ -494,7 +494,7 @@ export default function LandingPage() {
                 <p className="text-4xl font-bold text-slate-900">$0 <span className="text-base font-normal text-slate-400">/forever</span></p>
               </div>
               <ul className="space-y-3 flex-1">
-                {['3 courses', 'Syllabus deadline extraction', 'Calendar view', 'AI chat (20 messages/mo)', 'AI flashcards (50/mo)'].map((f) => (
+                {['3 courses', 'Syllabus deadline extraction', 'Calendar view', 'AI chat (10 messages/week)', '50 AI generations/month'].map((f) => (
                   <li key={f} className="flex items-center gap-2.5 text-sm text-slate-700">
                     <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -521,7 +521,7 @@ export default function LandingPage() {
               <div className="rounded-2xl p-8 flex flex-col gap-6 bg-white" style={{ border: '2px solid #5B4EE8' }}>
                 <div>
                   <p className="text-sm font-semibold mb-1" style={{ color: '#5B4EE8' }}>Pro</p>
-                  <p className="text-4xl font-bold text-slate-900">$8 <span className="text-base font-normal text-slate-400">/month</span></p>
+                  <p className="text-4xl font-bold text-slate-900">$4.99 <span className="text-base font-normal text-slate-400">/month</span></p>
                 </div>
                 <ul className="space-y-3 flex-1">
                   {['Unlimited courses', 'Unlimited AI chat', 'Unlimited flashcards & quizzes', 'Canvas + iCal sync', 'AI study summaries', 'Priority support'].map((f) => (
@@ -534,12 +534,13 @@ export default function LandingPage() {
                   ))}
                 </ul>
                 <button
-                  onClick={() => router.push('/signup')}
+                  onClick={() => router.push('/upgrade')}
                   className="w-full py-3 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
                   style={{ background: '#5B4EE8' }}
                 >
-                  Start Pro — $8/mo
+                  Start 10-Day Free Trial
                 </button>
+                <p className="text-center text-xs text-slate-400 mt-2">No charge for 10 days · Cancel anytime</p>
               </div>
             </div>
 
@@ -568,7 +569,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <p className="text-center text-sm text-slate-400 mt-8">No credit card required to start · Cancel anytime</p>
+          <p className="text-center text-sm text-slate-400 mt-8">No credit card required · 10-day Pro trial included · Cancel anytime</p>
         </div>
       </section>
 
@@ -618,7 +619,7 @@ export default function LandingPage() {
                 </svg>
               </div>
               <h3 className="font-semibold text-slate-900 mb-2">You Own Your Content</h3>
-              <p className="text-sm text-slate-600">Export or delete your data anytime</p>
+              <p className="text-sm text-slate-600">Delete your account and data anytime</p>
             </div>
           </div>
         </div>
