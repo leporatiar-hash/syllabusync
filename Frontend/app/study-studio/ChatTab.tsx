@@ -77,6 +77,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
         const res = await fetchWithAuth(`${API_URL}/chat/proactive-message`, { method: 'POST' })
         if (!res.ok) return
         const data = await res.json()
+        if (data.skipped) return
         const newConv = { id: data.conversation_id, title: data.conversation_title, created_at: new Date().toISOString() }
         setConversations(prev => [newConv, ...prev])
         setActiveConversation(data.conversation_id)
@@ -364,10 +365,16 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
         {/* Usage counter */}
         {chatMessagesMax !== null && (
-          <div className="border-t border-slate-200 px-3 py-2">
-            <p className="text-xs text-slate-400 text-center">
+          <div className="border-t border-slate-200 px-3 py-2 space-y-1">
+            <p className={`text-xs text-center ${chatMessagesUsed >= chatMessagesMax * 0.8 && !limitReached ? 'text-amber-500 font-medium' : 'text-slate-400'}`}>
               {chatMessagesUsed}/{chatMessagesMax} messages used this week
             </p>
+            {chatMessagesUsed >= chatMessagesMax * 0.8 && !limitReached && (
+              <p className="text-xs text-amber-500 text-center">
+                {chatMessagesMax - chatMessagesUsed} message{chatMessagesMax - chatMessagesUsed === 1 ? '' : 's'} left
+                {!isPro && <> — <a href="/upgrade" className="underline hover:text-amber-600">Upgrade for more</a></>}
+              </p>
+            )}
           </div>
         )}
       </div>

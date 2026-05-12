@@ -5026,8 +5026,11 @@ Focus on key concepts, definitions, important facts, and formulas. Make question
                                 for fc in flashcards_data:
                                     db.add(Flashcard(user_id=current_user.id, flashcard_set_id=flashcard_set.id, front=fc.get("front", ""), back=fc.get("back", "")))
                                 db.commit()
-                                increment_ai_generation(db, current_user.id)
                                 created_study_set = {"type": "flashcards", "id": flashcard_set.id, "name": flashcard_set.name, "count": len(flashcards_data), "course_name": user_course.name}
+                                try:
+                                    increment_ai_generation(db, current_user.id)
+                                except Exception:
+                                    pass
 
                         elif wants_quiz:
                             num_questions = 10
@@ -5065,8 +5068,11 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                                     opts = q.get("options", [])
                                     db.add(QuizQuestion(user_id=current_user.id, quiz_id=quiz.id, question=q.get("question", ""), options=json.dumps(opts if isinstance(opts, list) else []), correct_answer=q.get("correct_answer", "A"), explanation=q.get("explanation", ""), order_num=str(i)))
                                 db.commit()
-                                increment_ai_generation(db, current_user.id)
                                 created_study_set = {"type": "quiz", "id": quiz.id, "name": quiz.name, "count": len(questions), "course_name": user_course.name}
+                                try:
+                                    increment_ai_generation(db, current_user.id)
+                                except Exception:
+                                    pass
 
                     except Exception as e:
                         logger.error(f"[Chat] Study tool generation error: {e}")
@@ -5116,8 +5122,11 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                         db.add(new_summary)
                         db.commit()
                         db.refresh(new_summary)
-                        increment_ai_generation(db, current_user.id)
                         created_study_set = {"type": "summary", "id": new_summary.id, "name": new_summary.title, "count": 0, "course_name": user_course.name}
+                        try:
+                            increment_ai_generation(db, current_user.id)
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.error(f"[Chat] Summary save error: {e}")
 
@@ -5278,6 +5287,15 @@ async def generate_proactive_message(
     """
     db = SessionLocal()
     try:
+        # Skip if user has already exhausted their weekly chat limit — no point
+        # nudging them into a chat they can't use until the week resets.
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if profile:
+            limit = PRO_CHAT_MESSAGE_LIMIT if _effective_tier(profile) == "pro" else FREE_CHAT_MESSAGE_LIMIT
+            used = profile.chat_messages_used or 0
+            if used >= limit:
+                return {"skipped": True}
+
         today = date.today()
         seven_days = today + timedelta(days=7)
 
