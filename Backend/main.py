@@ -3336,13 +3336,19 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
             course.course_info = course_info
         course.syllabus_text = text[:50000]
 
+        # Pre-load existing deadline keys to prevent duplicates on re-upload
+        existing_keys: set[str] = {
+            f"{(d.title or '').lower()[:40]}_{d.date or ''}"
+            for d in db.query(Deadline.title, Deadline.date).filter(Deadline.course_id == course_id).all()
+        }
+
         seen_db: set[str] = set()
         saved_count = 0
         for d in deadlines_data:
             d_title = (d.get("title") or "").strip()
             d_date = (d.get("date") or "").strip()
             db_key = f"{d_title.lower()[:40]}_{d_date}"
-            if db_key in seen_db:
+            if db_key in seen_db or db_key in existing_keys:
                 continue
             seen_db.add(db_key)
             deadline = Deadline(
@@ -3796,27 +3802,52 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
                 course_code = parts[0].strip()
                 course_name = parts[1].strip() if len(parts) > 1 else course_name
 
-            # Create course
-            course = Course(
-                user_id=user_id,
-                name=course_name,
-                code=course_code,
-                semester=metadata.get("semester"),
-                start_date=datetime.strptime(metadata["start_date"], "%Y-%m-%d").date() if metadata.get("start_date") else None,
-                end_date=datetime.strptime(metadata["end_date"], "%Y-%m-%d").date() if metadata.get("end_date") else None,
-                course_info=metadata.get("course_info"),
-                syllabus_text=text[:50000],
-            )
-            db.add(course)
-            db.flush()  # Get the course ID
+            # Idempotent course lookup — reuse existing course if same code+semester already exists
+            course_semester = metadata.get("semester")
+            course = None
+            if course_code and course_semester:
+                course = db.query(Course).filter(
+                    Course.user_id == user_id,
+                    Course.code == course_code,
+                    Course.semester == course_semester,
+                ).first()
 
-            # Create deadlines — skip any (title, date) pair already in DB for this course
+            if course:
+                # Update existing course in place
+                course.name = course_name
+                course.course_info = metadata.get("course_info")
+                course.syllabus_text = text[:50000]
+                if metadata.get("start_date"):
+                    course.start_date = datetime.strptime(metadata["start_date"], "%Y-%m-%d").date()
+                if metadata.get("end_date"):
+                    course.end_date = datetime.strptime(metadata["end_date"], "%Y-%m-%d").date()
+            else:
+                course = Course(
+                    user_id=user_id,
+                    name=course_name,
+                    code=course_code,
+                    semester=course_semester,
+                    start_date=datetime.strptime(metadata["start_date"], "%Y-%m-%d").date() if metadata.get("start_date") else None,
+                    end_date=datetime.strptime(metadata["end_date"], "%Y-%m-%d").date() if metadata.get("end_date") else None,
+                    course_info=metadata.get("course_info"),
+                    syllabus_text=text[:50000],
+                )
+                db.add(course)
+            db.flush()  # Ensure course.id is available
+
+            # Load existing deadline keys for this course to avoid duplicates on re-upload
+            existing_keys: set[str] = {
+                f"{(d.title or '').lower()[:40]}_{d.date or ''}"
+                for d in db.query(Deadline.title, Deadline.date).filter(Deadline.course_id == course.id).all()
+            }
+
+            # Create deadlines — skip any (title, date) pair already in DB or seen this call
             seen_db: set[str] = set()
             for d in deadlines_data:
                 d_title = (d.get("title") or "").strip()
                 d_date = (d.get("date") or "").strip()
                 db_key = f"{d_title.lower()[:40]}_{d_date}"
-                if db_key in seen_db:
+                if db_key in seen_db or db_key in existing_keys:
                     continue
                 seen_db.add(db_key)
                 deadline = Deadline(
@@ -4948,6 +4979,15 @@ When you receive a [System note] that a study set was created:
 Suggest Study Tools:
 - When you finish explaining a topic, naturally offer: "Want to save this as flashcards or a quiz? Just say 'make me flashcards on [topic]' and I'll build and save a set right now."
 - Keep suggestions brief and natural — don't be pushy.
+
+IMPORTANT — Deadlines & Calendar:
+You have the student's actual deadline and assignment data in the context below. Answer calendar questions directly — never say you can't see their schedule.
+
+**Rules:**
+- "What's due this week?" / "Do I have any upcoming deadlines?" → List them from the Deadlines section in the context. Be specific: title, course, date.
+- "When is my [assignment] due?" → Look it up in the deadlines data and give the exact date.
+- If no deadlines appear in the context, say: "It looks like you don't have any upcoming deadlines recorded — make sure your syllabus is uploaded in the Courses tab."
+- NEVER say you don't have access to their calendar or can't see their deadlines. You can. Answer from the data.
 
 If the student asks about something NOT covered in their materials below:
 - Say clearly: "I don't see this in your uploaded materials, but here's what I know..."

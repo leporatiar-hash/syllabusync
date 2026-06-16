@@ -80,6 +80,7 @@ export default function CoursesClient() {
   }
 
   const submitSyllabus = async (file: File) => {
+    if (uploading) return
     const ext = file.name.split('.').pop()?.toLowerCase()
     if (ext !== 'pdf' && ext !== 'docx') {
       setUploadError('Only PDF or Word (.docx) files are supported.')
@@ -129,6 +130,7 @@ export default function CoursesClient() {
     preventDefault(e)
     uploadDragCount.current = 0
     setUploadDragOver(false)
+    if (uploading) return
     const file = e.dataTransfer.files?.[0]
     if (file) submitSyllabus(file)
   }
