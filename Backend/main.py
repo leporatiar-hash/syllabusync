@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
 from jose import JWTError, jwt, jwk
 from jose.utils import base64url_decode
-from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text
+from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -503,6 +503,7 @@ class Course(Base):
     start_date = Column(Date)
     end_date = Column(Date)
     course_info = Column(JSON, nullable=True)  # Stores extracted syllabus details (instructor, policies, etc.)
+    syllabus_text = Column(Text, nullable=True)  # Raw extracted syllabus text for granular policy/content queries
     created_at = Column(DateTime, default=datetime.utcnow)
 
     deadlines = relationship("Deadline", back_populates="course", cascade="all, delete-orphan")
@@ -1317,6 +1318,16 @@ def ensure_chat_columns():
         pass  # Column already exists
 
 
+def ensure_course_syllabus_column():
+    """Add syllabus_text column to courses table for raw text storage."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE courses ADD COLUMN syllabus_text TEXT"))
+            logger.info("[Migration] Added 'syllabus_text' column to courses")
+    except Exception:
+        pass  # Column already exists
+
+
 FREE_CHAT_MESSAGE_LIMIT = 10  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
@@ -1422,6 +1433,7 @@ ensure_deadline_columns()
 ensure_referral_columns()
 ensure_subscription_columns()
 ensure_chat_columns()
+ensure_course_syllabus_column()
 Base.metadata.create_all(bind=engine)
 
 
@@ -3318,10 +3330,11 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Update course_info from parsed metadata
+        # Update course_info and raw syllabus text from parsed metadata
         course_info = metadata.get("course_info")
         if course_info:
             course.course_info = course_info
+        course.syllabus_text = text[:50000]
 
         seen_db: set[str] = set()
         saved_count = 0
@@ -3386,8 +3399,9 @@ def delete_course_syllabus(course_id: str, current_user: User = Depends(get_curr
         # Delete all deadlines
         db.query(Deadline).filter(Deadline.course_id == course_id).delete()
 
-        # Clear extracted course_info so the sidebar shows the syllabus upload zone again
+        # Clear extracted data so the sidebar shows the syllabus upload zone again
         course.course_info = None
+        course.syllabus_text = None
         db.commit()
 
         return {"message": "Syllabus and extracted deadlines removed", "course_id": course_id}
@@ -3790,7 +3804,8 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
                 semester=metadata.get("semester"),
                 start_date=datetime.strptime(metadata["start_date"], "%Y-%m-%d").date() if metadata.get("start_date") else None,
                 end_date=datetime.strptime(metadata["end_date"], "%Y-%m-%d").date() if metadata.get("end_date") else None,
-                course_info=metadata.get("course_info")
+                course_info=metadata.get("course_info"),
+                syllabus_text=text[:50000],
             )
             db.add(course)
             db.flush()  # Get the course ID
@@ -4745,12 +4760,16 @@ def _match_course_from_message(db, user_id: str, message: str) -> "Course | None
     return courses[0]
 
 
+MAX_SYLLABUS_CONTEXT_TOTAL = 8000  # Max chars of raw syllabus text across all courses
+
+
 def _build_chat_context(db, user_id: str) -> str:
-    """Build system context from user's courses, deadlines, and course materials."""
+    """Build system context from user's courses, deadlines, course materials, and study library."""
     parts: list[str] = []
 
-    # Courses
+    # Courses (build shared lookup once)
     courses = db.query(Course).filter(Course.user_id == user_id).all()
+    course_map = {c.id: c for c in courses}
     if courses:
         parts.append("## Student's Courses")
         for c in courses:
@@ -4760,7 +4779,6 @@ def _build_chat_context(db, user_id: str) -> str:
             if c.semester:
                 info += f" — {c.semester}"
             parts.append(info)
-            # Include course_info if available (extracted syllabus details)
             if c.course_info and isinstance(c.course_info, dict):
                 for key, val in c.course_info.items():
                     if val:
@@ -4783,9 +4801,6 @@ def _build_chat_context(db, user_id: str) -> str:
         .all()
     )
     if deadlines:
-        # Build course lookup from already-loaded courses list
-        course_map = {c.id: c for c in courses}
-        # Group by course label
         by_course: dict[str, list] = {}
         for d in deadlines:
             c = course_map.get(d.course_id)
@@ -4798,7 +4813,7 @@ def _build_chat_context(db, user_id: str) -> str:
                 time_str = f" at {d.time}" if d.time else ""
                 parts.append(f"- [{d.date}{time_str}] {d.title} — {d.type or 'deadline'}")
 
-    # Summaries as course material context (truncated)
+    # Summaries as course material context (truncated to budget)
     summaries = (
         db.query(Summary)
         .filter(Summary.user_id == user_id)
@@ -4810,13 +4825,88 @@ def _build_chat_context(db, user_id: str) -> str:
         parts.append("\n## Course Material Summaries (Use these to answer questions with specific details)")
         remaining = MAX_FILE_CONTEXT_LENGTH
         for s in summaries:
-            course = db.query(Course).filter(Course.id == s.course_id).first()
-            course_name = course.name if course else "Unknown"
+            c = course_map.get(s.course_id)
+            course_name = c.name if c else "Unknown"
             excerpt = s.content[:min(4000, remaining)]
             parts.append(f"[Source: {s.title} | Course: {course_name}]\n{excerpt}")
             remaining -= len(excerpt)
             if remaining <= 0:
                 break
+
+    # Raw syllabus text — full policy details, grading rubrics, assignment descriptions
+    courses_with_syllabus = [c for c in courses if c.syllabus_text]
+    if courses_with_syllabus:
+        parts.append("\n## Syllabus Details (Use for exact grading, policies, and assignment-specific questions)")
+        syllabus_budget = MAX_SYLLABUS_CONTEXT_TOTAL
+        for c in courses_with_syllabus:
+            if syllabus_budget <= 0:
+                break
+            label = c.code or c.name
+            excerpt = c.syllabus_text[:syllabus_budget]
+            parts.append(f"\n### {label} Syllabus\n{excerpt}")
+            syllabus_budget -= len(excerpt)
+
+    # Study materials metadata — names/counts/dates only, no content
+    # Lets the model know what already exists and proactively notice gaps
+    flashcard_sets = (
+        db.query(FlashcardSet)
+        .filter(FlashcardSet.user_id == user_id)
+        .order_by(FlashcardSet.created_at.desc())
+        .all()
+    )
+    all_quizzes = (
+        db.query(Quiz)
+        .filter(Quiz.user_id == user_id)
+        .order_by(Quiz.created_at.desc())
+        .all()
+    )
+    fc_counts = dict(
+        db.query(Flashcard.flashcard_set_id, func.count(Flashcard.id))
+        .filter(Flashcard.user_id == user_id)
+        .group_by(Flashcard.flashcard_set_id)
+        .all()
+    )
+    q_counts = dict(
+        db.query(QuizQuestion.quiz_id, func.count(QuizQuestion.id))
+        .filter(QuizQuestion.user_id == user_id)
+        .group_by(QuizQuestion.quiz_id)
+        .all()
+    )
+
+    study_by_course = {
+        c.id: {"label": c.code or c.name, "fcs": [], "quizzes": [], "summaries": []}
+        for c in courses
+    }
+    for fs in flashcard_sets:
+        if fs.course_id in study_by_course:
+            cnt = fc_counts.get(fs.id, 0)
+            d = fs.created_at.strftime("%b %d") if fs.created_at else ""
+            study_by_course[fs.course_id]["fcs"].append(f'"{fs.name}" ({cnt} cards, {d})')
+    for q in all_quizzes:
+        if q.course_id in study_by_course:
+            cnt = q_counts.get(q.id, 0)
+            d = q.created_at.strftime("%b %d") if q.created_at else ""
+            study_by_course[q.course_id]["quizzes"].append(f'"{q.name}" ({cnt} questions, {d})')
+    for s in summaries:
+        if s.course_id in study_by_course:
+            d = s.created_at.strftime("%b %d") if s.created_at else ""
+            study_by_course[s.course_id]["summaries"].append(f'"{s.title}" ({d})')
+
+    if courses:
+        parts.append("\n## Study Library (existing materials — no content, just metadata)")
+        for c in courses:
+            data = study_by_course[c.id]
+            label = data["label"]
+            lines = [f"\n### {label}"]
+            if data["fcs"]:
+                lines.append("Flashcard Sets: " + ", ".join(data["fcs"]))
+            if data["quizzes"]:
+                lines.append("Quizzes: " + ", ".join(data["quizzes"]))
+            if data["summaries"]:
+                lines.append("Summaries: " + ", ".join(data["summaries"]))
+            if not (data["fcs"] or data["quizzes"] or data["summaries"]):
+                lines.append("(no study materials yet)")
+            parts.extend(lines)
 
     return "\n".join(parts)
 
@@ -4833,24 +4923,22 @@ Teaching Guidelines:
 5. **Reference sources**: Mention which course or document the info came from (e.g., "According to your Biology notes...").
 6. **Check understanding**: After explaining something complex, offer to break it down further or answer follow-up questions.
 
-IMPORTANT — Flashcards & Quizzes:
-You CAN create flashcards and quizzes directly in this chat — it's one of your best features!
+IMPORTANT — Flashcards, Quizzes & Summaries:
+You CAN create flashcards, quizzes, and summaries directly in this chat and save them to the Library instantly — no file upload needed.
 
-How it works (explain this clearly when asked):
-1. The student uploads their notes or study material using the 📎 attachment button below
-2. They tell you what to create (e.g. "make flashcards", "create a quiz", or "save summary")
-3. You automatically generate it and it gets saved to their library
-4. A card appears in the chat they can click to open it, or they can find it in the Library tab
+**Two ways to create study materials:**
+1. **Topic-based (no file needed):** Just say "make me flashcards on labor markets" or "quiz me on supply and demand" — the system generates and saves the set automatically. This is the default and works for any topic.
+2. **From uploaded notes:** For materials drawn from their own specific notes, they can attach a file using the 📎 button, then say what to create. Best when they want flashcards that match their professor's exact wording.
 
-You can create three types of study tools from uploaded material:
-- **Flashcards** — say "make flashcards" or "create flashcards"
-- **Quiz** — say "make a quiz" or "create a quiz"
-- **Summary Notes** — say "save summary", "save to library", or "summarize this" (also saves any previous AI response directly if no file is present)
+**Commands:**
+- **Flashcards** — "make flashcards on X", "create flashcards for [topic/exam]", "give me flashcards on X"
+- **Quiz** — "quiz me on X", "make a practice test on X", "create a quiz on [topic]"
+- **Summary** — "summarize X for me", "make a summary of [topic]", "save summary" (also saves your previous response directly)
 
-When a student asks if you can make study tools (without a file attached):
-- Enthusiastically say YES, you can!
-- Explain the simple steps: hit the 📎 button to attach their notes, then tell you what to create
-- Keep it brief and encouraging — e.g. "Absolutely! Just hit the 📎 button below to upload your notes, then tell me 'create flashcards', 'make a quiz', or 'save summary' and I'll save it to your library instantly."
+When a student asks if you can make study tools:
+- Say YES immediately — they can do it right now without any file
+- Be brief: "Absolutely! Just say 'make me flashcards on [topic]' and I'll create and save a set to your library right now."
+- Mention file upload only when they specifically want materials from their own notes
 
 When you receive a [System note] that a study set was created:
 - Confirm it's ready with a brief, enthusiastic message (1-2 sentences)
@@ -4858,7 +4946,7 @@ When you receive a [System note] that a study set was created:
 - NEVER write out the actual flashcard questions/answers or quiz questions as chat text — the system handles displaying them
 
 Suggest Study Tools:
-- When you finish explaining a topic, suggest: "Want to lock this in? Hit the 📎 button to upload your notes and I'll create flashcards or a quiz for you right here."
+- When you finish explaining a topic, naturally offer: "Want to save this as flashcards or a quiz? Just say 'make me flashcards on [topic]' and I'll build and save a set right now."
 - Keep suggestions brief and natural — don't be pushy.
 
 If the student asks about something NOT covered in their materials below:
@@ -5173,6 +5261,111 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                     except Exception as e:
                         logger.error(f"[Chat] Study tool generation error: {e}")
 
+            else:
+                # No file found — generate from AI knowledge + course context (topic-based)
+                user_course = _match_course_from_message(db, current_user.id, message_content or "")
+                if user_course:
+                    # Extract the topic: strip the intent prefix so "make flashcards on labor markets" → "labor markets"
+                    _stripped = re.sub(
+                        r'(?i)^(?:(?:can\s+you\s+|please\s+)?(?:make|create|generate|build|give\s+me|write)\s+'
+                        r'(?:me\s+)?(?:some\s+)?(?:a\s+)?(?:set\s+of\s+)?)?'
+                        r'(?:flashcards?|flash\s*cards?|note\s*cards?|study\s*cards?|quizzes?|a\s+quiz|'
+                        r'practice\s+tests?|multiple[\s-]choice(?:\s+(?:test|quiz))?)'
+                        r'\s*(?:on|about|for|covering|of)?\s*',
+                        '', (message_content or '').strip()
+                    ).strip()
+                    set_name = (_stripped[:60] if _stripped else (message_content or 'Study Set')[:60])
+                    # Include a compact slice of course context to ground the generation
+                    course_ctx = context[:3000] if context else ""
+                    try:
+                        if wants_flashcards:
+                            num_cards = 15
+                            m = re.search(r'(\d+)\s*(?:flash\s*card|card)', intent_lower)
+                            if m:
+                                num_cards = max(5, min(30, int(m.group(1))))
+
+                            fc_prompt = f"""You are a study assistant. Generate {num_cards} high-quality flashcards on the requested topic using your knowledge.
+Use the course context below to make the flashcards relevant to this student's specific course and grading structure.
+
+Course: {user_course.name}{f' ({user_course.code})' if user_course.code else ''}
+Student's request: {message_content}
+
+Course context:
+{course_ctx}
+
+Return ONLY a valid JSON array with exactly {num_cards} flashcards:
+[{{"front": "Question or term", "back": "Answer or definition"}}]
+Focus on key concepts, definitions, important facts, and formulas. Make questions clear and answers concise."""
+
+                            fc_response = await client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[{"role": "user", "content": fc_prompt}],
+                                temperature=0.3,
+                                max_tokens=4000,
+                            )
+                            flashcards_data = parse_json_response(fc_response.choices[0].message.content)
+                            if isinstance(flashcards_data, list) and len(flashcards_data) > 0:
+                                flashcard_set = FlashcardSet(user_id=current_user.id, course_id=user_course.id, name=set_name)
+                                db.add(flashcard_set)
+                                db.flush()
+                                for fc in flashcards_data:
+                                    db.add(Flashcard(user_id=current_user.id, flashcard_set_id=flashcard_set.id, front=fc.get("front", ""), back=fc.get("back", "")))
+                                db.commit()
+                                created_study_set = {"type": "flashcards", "id": flashcard_set.id, "name": flashcard_set.name, "count": len(flashcards_data), "course_name": user_course.name}
+                                try:
+                                    increment_ai_generation(db, current_user.id)
+                                except Exception:
+                                    pass
+
+                        elif wants_quiz:
+                            num_questions = 10
+                            m = re.search(r'(\d+)\s*(?:question|quiz)', intent_lower)
+                            if m:
+                                num_questions = max(3, min(30, int(m.group(1))))
+
+                            q_prompt = f"""You are a study assistant. Generate a {num_questions}-question multiple-choice quiz on the requested topic using your knowledge.
+Use the course context below to make the questions relevant to this student's specific course.
+
+Course: {user_course.name}{f' ({user_course.code})' if user_course.code else ''}
+Student's request: {message_content}
+
+Course context:
+{course_ctx}
+
+Return ONLY a valid JSON object:
+{{"questions": [{{"question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": "B", "explanation": "..."}}]}}
+Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Test understanding, not memorization."""
+
+                            q_response = await client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[{"role": "user", "content": q_prompt}],
+                                temperature=0.4,
+                                max_tokens=4000,
+                            )
+                            quiz_raw = parse_json_response(q_response.choices[0].message.content)
+                            if isinstance(quiz_raw, dict) and "questions" in quiz_raw:
+                                questions = quiz_raw["questions"]
+                            elif isinstance(quiz_raw, list):
+                                questions = quiz_raw
+                            else:
+                                questions = []
+                            if len(questions) > 0:
+                                quiz = Quiz(user_id=current_user.id, course_id=user_course.id, name=set_name)
+                                db.add(quiz)
+                                db.flush()
+                                for i, q in enumerate(questions):
+                                    opts = q.get("options", [])
+                                    db.add(QuizQuestion(user_id=current_user.id, quiz_id=quiz.id, question=q.get("question", ""), options=json.dumps(opts if isinstance(opts, list) else []), correct_answer=q.get("correct_answer", "A"), explanation=q.get("explanation", ""), order_num=str(i)))
+                                db.commit()
+                                created_study_set = {"type": "quiz", "id": quiz.id, "name": quiz.name, "count": len(questions), "course_name": user_course.name}
+                                try:
+                                    increment_ai_generation(db, current_user.id)
+                                except Exception:
+                                    pass
+
+                    except Exception as e:
+                        logger.error(f"[Chat] Topic-based study tool generation error: {e}")
+
         # Handle summary save intent (separate from flashcards/quiz so both can't trigger simultaneously)
         if wants_summary and not created_study_set:
             user_course = _match_course_from_message(db, current_user.id, message_content or "")
@@ -5196,7 +5389,7 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                         summary_content = await generate_summary_from_text(source_text[:40000])
                         summary_title = (source_name.rsplit('.', 1)[0] if source_name else "Chat Summary")
                     else:
-                        # Save the last assistant message directly as a summary
+                        # Prefer saving the last assistant message if there is one
                         last_assistant = next(
                             (m for m in reversed(history) if m.role == "assistant"),
                             None
@@ -5205,8 +5398,40 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                             summary_content = last_assistant.content.strip()
                             summary_title = "Chat Summary"
                         else:
-                            summary_content = None
-                            summary_title = None
+                            # No file, no prior response — generate a topic-based summary
+                            _stripped = re.sub(
+                                r'(?i)^(?:(?:can\s+you\s+|please\s+)?(?:make|create|generate|write|give\s+me)\s+'
+                                r'(?:me\s+)?(?:a\s+)?(?:study\s+)?)?'
+                                r'(?:summary|summary\s+notes?|study\s+summary|summarize(?:\s+(?:this|that))?)'
+                                r'\s*(?:on|about|for|covering|of|of\s+)?\s*',
+                                '', (message_content or '').strip()
+                            ).strip()
+                            summary_topic = _stripped if _stripped else (message_content or 'this topic')
+                            course_ctx = context[:3000] if context else ""
+                            try:
+                                sum_prompt = f"""You are a study assistant. Generate a thorough study summary on the requested topic.
+Use your knowledge and the course context provided to create a well-organized, exam-ready summary.
+
+Course: {user_course.name}{f' ({user_course.code})' if user_course.code else ''}
+Topic: {summary_topic}
+
+Course context:
+{course_ctx}
+
+Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, definitions, and important facts. Be specific and detailed enough to study from."""
+
+                                sum_response = await client.chat.completions.create(
+                                    model="gpt-4o-mini",
+                                    messages=[{"role": "user", "content": sum_prompt}],
+                                    temperature=0.3,
+                                    max_tokens=1500,
+                                )
+                                summary_content = sum_response.choices[0].message.content.strip()
+                                summary_title = (_stripped[:60] if _stripped else (message_content or 'Chat Summary')[:60])
+                            except Exception as e:
+                                logger.error(f"[Chat] Topic-based summary generation error: {e}")
+                                summary_content = None
+                                summary_title = None
 
                     if summary_content and summary_title:
                         new_summary = Summary(
