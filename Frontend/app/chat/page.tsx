@@ -73,29 +73,32 @@ export default function ChatPage() {
   return (
     <main className="min-h-screen px-4 pb-20 pt-10">
       <div className="mx-auto w-full max-w-[1200px]">
-        <h1 className="mb-2 text-3xl font-bold text-slate-900">Chat</h1>
-        <p className="mb-8 text-slate-600">
-          Your AI study assistant — ask questions, generate flashcards and quizzes, and stay on top of deadlines.
-        </p>
-
-        {/* Tabs — sticky so they stay visible even if the chat area causes a scroll */}
-        <div className="sticky top-2 z-20 mb-8 flex gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-          {(['chat', 'library'] as const).map((tab) => {
-            const labels = { chat: 'Chat', library: 'Library' }
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 rounded-full px-6 py-2.5 text-sm font-semibold transition-all duration-300 ${
-                  activeTab === tab
-                    ? 'bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {labels[tab]}
-              </button>
-            )
-          })}
+        {/* Header row: title left, tab switcher right */}
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Chat</h1>
+            <p className="mt-1 text-slate-600">
+              Your AI study assistant — ask questions, generate flashcards and quizzes, and stay on top of deadlines.
+            </p>
+          </div>
+          <div className="sticky top-3 z-20 mt-1 flex shrink-0 gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+            {(['chat', 'library'] as const).map((tab) => {
+              const labels = { chat: 'Chat', library: 'Library' }
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`rounded-full px-5 py-2 text-sm font-semibold transition-all duration-300 ${
+                    activeTab === tab
+                      ? 'bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {labels[tab]}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {/* Tab Content */}
