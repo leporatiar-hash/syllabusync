@@ -50,6 +50,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
   const [limitMessage, setLimitMessage] = useState('')
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
   const [proactiveLoading, setProactiveLoading] = useState(false)
+  const [pendingChipInput, setPendingChipInput] = useState('')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -294,6 +295,25 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  const handleChipClick = async (text: string) => {
+    if (activeConversation) {
+      setInput(text)
+      setTimeout(() => textareaRef.current?.focus(), 0)
+      return
+    }
+    setPendingChipInput(text)
+    await createConversation()
+  }
+
+  // Apply pending chip input once a conversation becomes active
+  useEffect(() => {
+    if (activeConversation && pendingChipInput) {
+      setInput(pendingChipInput)
+      setPendingChipInput('')
+      setTimeout(() => textareaRef.current?.focus(), 50)
+    }
+  }, [activeConversation, pendingChipInput])
+
   const formatTime = (dateStr: string) => {
     const d = new Date(dateStr)
     const now = new Date()
@@ -396,24 +416,36 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
         {!activeConversation ? (
           /* Empty state */
-          <div className="flex flex-1 items-center justify-center">
-            <div className="text-center">
+          <div className="flex flex-1 items-center justify-center px-4">
+            <div className="w-full max-w-md text-center">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#5B8DEF]/10">
                 <svg className="h-8 w-8 text-[#5B8DEF]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-slate-800">ClassMate AI Chat</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-500">
-                Ask questions about your courses, get help studying, or upload a file and say "create flashcards" or "make a quiz" to generate study tools.
+              <h3 className="text-lg font-semibold text-slate-800">ClassMate AI</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Ask anything about your courses, or tap a prompt below to get started.
               </p>
-              <button
-                onClick={createConversation}
-                disabled={limitReached}
-                className="mt-4 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
-              >
-                Start a new chat
-              </button>
+
+              {/* Prompt chips */}
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                {[
+                  'What are my upcoming deadlines?',
+                  'Make flashcards for my next exam',
+                  'Quiz me on a topic',
+                  'Summarize my notes',
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => handleChipClick(prompt)}
+                    disabled={limitReached}
+                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#5B8DEF]/40 hover:bg-[#5B8DEF]/5 hover:text-[#5B8DEF] hover:shadow-md disabled:opacity-50 disabled:hover:translate-y-0"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (

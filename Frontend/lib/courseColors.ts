@@ -1,6 +1,7 @@
 /**
  * Shared course color system.
- * Colors are assigned sequentially so no two courses share a color.
+ * Colors are assigned by hashing the course ID so every course always gets
+ * the same color regardless of fetch order or page context.
  * Used by both the Courses page (card gradients) and Calendar page (event badges).
  */
 
@@ -45,31 +46,31 @@ const palette: CourseColorEntry[] = [
   { bg: 'bg-[#22D3EE]', text: 'text-[#0891B2]', light: 'bg-[#CFFAFE]', border: 'border-[#22D3EE]', gradient: 'from-[#CFFAFE] to-[#ECFEFF]' },
 ]
 
-/**
- * Get the color entry for a course by its position in the user's course list.
- * Falls back to hash-based assignment if no index is provided.
- */
-export function getCourseColor(courseId: string, index?: number): CourseColorEntry {
-  if (index !== undefined) {
-    return palette[index % palette.length]
-  }
-  // Fallback: hash-based for single-course lookups without a list
+/** Deterministic hash of a course ID → palette index. */
+function hashCourseId(courseId: string): number {
   let hash = 0
   for (let i = 0; i < courseId.length; i++) {
     hash = ((hash << 5) - hash + courseId.charCodeAt(i)) | 0
   }
-  return palette[Math.abs(hash) % palette.length]
+  return Math.abs(hash) % palette.length
+}
+
+/**
+ * Get the color entry for a course. Always hash-based so the color is
+ * stable across pages, re-renders, and fetch-order changes.
+ */
+export function getCourseColor(courseId: string): CourseColorEntry {
+  return palette[hashCourseId(courseId)]
 }
 
 /**
  * Build a color map for an array of courses.
- * Assigns colors sequentially so every course gets a unique color
- * (up to 10 courses, then colors repeat with maximum spacing).
+ * Every course ID always maps to the same color entry regardless of order.
  */
 export function buildCourseColorMap(courses: { id: string }[]): Record<string, CourseColorEntry> {
   const map: Record<string, CourseColorEntry> = {}
-  for (let i = 0; i < courses.length; i++) {
-    map[courses[i].id] = palette[i % palette.length]
+  for (const course of courses) {
+    map[course.id] = palette[hashCourseId(course.id)]
   }
   return map
 }

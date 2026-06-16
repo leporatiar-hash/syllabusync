@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import posthog from 'posthog-js'
-import CreateTab from '../study-studio/CreateTab'
 import LibraryTab from '../study-studio/LibraryTab'
 import ChatTab from '../study-studio/ChatTab'
 
@@ -13,7 +12,7 @@ export default function ChatPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const [activeTab, setActiveTab] = useState<'chat' | 'library' | 'create'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'library'>('chat')
   const [courses, setCourses] = useState<any[]>([])
   const [studyTools, setStudyTools] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -79,10 +78,10 @@ export default function ChatPage() {
           Your AI study assistant — ask questions, generate flashcards and quizzes, and stay on top of deadlines.
         </p>
 
-        {/* Tabs */}
-        <div className="mb-8 flex gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-          {(['chat', 'library', 'create'] as const).map((tab) => {
-            const labels = { chat: 'Chat', library: 'Library', create: 'Create' }
+        {/* Tabs — sticky so they stay visible even if the chat area causes a scroll */}
+        <div className="sticky top-2 z-20 mb-8 flex gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+          {(['chat', 'library'] as const).map((tab) => {
+            const labels = { chat: 'Chat', library: 'Library' }
             return (
               <button
                 key={tab}
@@ -105,10 +104,8 @@ export default function ChatPage() {
             onViewLibrary={() => setActiveTab('library')}
             triggerProactive
           />
-        ) : activeTab === 'library' ? (
-          <LibraryTab courses={courses} studyTools={studyTools} loading={loading} onDelete={loadData} />
         ) : (
-          <CreateTab courses={courses} onSuccess={() => { loadData(); setActiveTab('library') }} />
+          <LibraryTab courses={courses} studyTools={studyTools} loading={loading} onDelete={loadData} />
         )}
       </div>
     </main>

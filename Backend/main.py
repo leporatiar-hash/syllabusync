@@ -836,6 +836,7 @@ class DeadlineOut(BaseModel):
     day_of_week: str | None = Field(None, description="Day of week for recurring events, e.g. 'Monday'")
     completed: bool = Field(description="Whether the user has marked this deadline as done")
     source: str | None = Field(None, description="'manual' (user-created) or 'lms' (synced from Canvas/iCal)")
+    saved_to_calendar: bool | None = Field(None, description="True if the user has saved this deadline to their calendar")
 
 
 class FlashcardOut(BaseModel):
@@ -1804,11 +1805,19 @@ DO NOT EXTRACT:
 - Topic lists without deliverables
 - Spring break, holidays (unless they're makeup days)
 
-HANDLING RECURRING ITEMS:
-If you see patterns like "Quiz every Monday", "Weekly homework due Fridays":
-- Create ONE entry with recurring=true
+HANDLING RECURRING ITEMS — CRITICAL:
+If you see patterns like "Quiz every Monday", "Weekly homework due Fridays", "Homework due every week":
+- Create EXACTLY ONE entry with recurring=true (NEVER enumerate individual instances)
 - Set frequency="weekly" and day_of_week to the specific day
-- Use the FIRST occurrence date
+- Set date to the FIRST occurrence date in the semester
+- The system will automatically expand into all individual instances
+
+BAD — do NOT do this (generates massive duplicates):
+[{{"date": "2026-08-31", "title": "Homework Due #1", "recurring": false}},
+ {{"date": "2026-08-31", "title": "Homework Due #2", "recurring": false}}, ...]
+
+GOOD — do this instead:
+{{"date": "2026-09-01", "type": "Homework", "title": "Weekly Homework", "recurring": true, "frequency": "weekly", "day_of_week": "Monday", "time": "11:59pm"}}
 
 Return ONLY a valid JSON array. Each item must have:
 {{
@@ -1857,7 +1866,18 @@ Return [] if no deadlines found."""
         expanded = expand_recurring_deadlines(validated, start_date, end_date)
         print(f"[DEBUG] {len(expanded)} deadlines after recurring expansion")
 
-        return expanded
+        # Final dedup pass after expansion (catches duplicates across multiple recurring entries)
+        seen_keys: set[str] = set()
+        final: list = []
+        for d in expanded:
+            key = f"{(d.get('title') or '')[:40].lower().strip()}_{d.get('date', '')}"
+            if key not in seen_keys:
+                seen_keys.add(key)
+                final.append(d)
+        if len(final) < len(expanded):
+            print(f"[DEBUG] Post-expansion dedup removed {len(expanded) - len(final)} duplicates → {len(final)} final")
+
+        return final
 
     except json.JSONDecodeError as e:
         print(f"[ERROR] Failed to parse deadlines JSON: {e}")
@@ -2958,6 +2978,18 @@ def list_all_deadlines(
         if to_date:
             query = query.filter(Deadline.date <= to_date)
         deadlines = query.all()
+
+        # Build saved-to-calendar lookup in one query
+        deadline_ids = [d.id for d in deadlines]
+        if deadline_ids:
+            calendar_entries = db.query(CalendarEntry).filter(
+                CalendarEntry.deadline_id.in_(deadline_ids),
+                CalendarEntry.user_id == user_id
+            ).all()
+            saved_ids: set[str] = {e.deadline_id for e in calendar_entries}
+        else:
+            saved_ids = set()
+
         return [
             {
                 "id": d.id,
@@ -2975,6 +3007,7 @@ def list_all_deadlines(
                 "completed": d.completed,
                 "source": getattr(d, 'source', 'manual') or 'manual',
                 "external_id": getattr(d, 'external_id', None),
+                "saved_to_calendar": d.id in saved_ids,
             }
             for d in sorted(deadlines, key=lambda x: x.date or "9999")
         ]
@@ -3290,23 +3323,32 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
         if course_info:
             course.course_info = course_info
 
+        seen_db: set[str] = set()
+        saved_count = 0
         for d in deadlines_data:
+            d_title = (d.get("title") or "").strip()
+            d_date = (d.get("date") or "").strip()
+            db_key = f"{d_title.lower()[:40]}_{d_date}"
+            if db_key in seen_db:
+                continue
+            seen_db.add(db_key)
             deadline = Deadline(
                 user_id=user_id,
                 course_id=course_id,
-                date=d.get("date"),
+                date=d_date,
                 time=d.get("time"),
                 type=d.get("type"),
-                title=d.get("title"),
+                title=d_title,
                 description=d.get("context") or d.get("description"),
                 recurring=d.get("recurring", False),
                 frequency=d.get("frequency"),
                 day_of_week=d.get("day_of_week")
             )
             db.add(deadline)
+            saved_count += 1
 
         db.commit()
-        print(f"[DEBUG] Inserted {len(deadlines_data)} deadlines for course {course_id}")
+        print(f"[DEBUG] Inserted {saved_count} deadlines for course {course_id} ({len(deadlines_data) - saved_count} duplicates skipped)")
 
         return {
             "course_id": course_id,
@@ -3753,15 +3795,22 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
             db.add(course)
             db.flush()  # Get the course ID
 
-            # Create deadlines
+            # Create deadlines — skip any (title, date) pair already in DB for this course
+            seen_db: set[str] = set()
             for d in deadlines_data:
+                d_title = (d.get("title") or "").strip()
+                d_date = (d.get("date") or "").strip()
+                db_key = f"{d_title.lower()[:40]}_{d_date}"
+                if db_key in seen_db:
+                    continue
+                seen_db.add(db_key)
                 deadline = Deadline(
                     user_id=user_id,
                     course_id=course.id,
-                    date=d.get("date"),
+                    date=d_date,
                     time=d.get("time"),
                     type=d.get("type"),
-                    title=d.get("title"),
+                    title=d_title,
                     description=d.get("context") or d.get("description"),
                     recurring=d.get("recurring", False),
                     frequency=d.get("frequency"),
@@ -4717,27 +4766,37 @@ def _build_chat_context(db, user_id: str) -> str:
                     if val:
                         parts.append(f"  {key}: {str(val)[:500]}")
 
-    # Upcoming deadlines (next 30 days)
+    # All incomplete deadlines within the semester window (7 days past → 365 days future)
     today = date.today()
-    thirty_days = today + timedelta(days=30)
+    seven_days_ago = today - timedelta(days=7)
+    one_year_out = today + timedelta(days=365)
     deadlines = (
         db.query(Deadline)
         .filter(
             Deadline.user_id == user_id,
             Deadline.completed == False,
-            Deadline.date >= today.isoformat(),
-            Deadline.date <= thirty_days.isoformat(),
+            Deadline.date >= seven_days_ago.isoformat(),
+            Deadline.date <= one_year_out.isoformat(),
         )
         .order_by(Deadline.date)
-        .limit(30)
+        .limit(60)
         .all()
     )
     if deadlines:
-        parts.append("\n## Upcoming Deadlines (next 30 days)")
+        # Build course lookup from already-loaded courses list
+        course_map = {c.id: c for c in courses}
+        # Group by course label
+        by_course: dict[str, list] = {}
         for d in deadlines:
-            course = db.query(Course).filter(Course.id == d.course_id).first() if d.course_id else None
-            course_name = course.name if course else "General"
-            parts.append(f"- [{d.date}] {d.title} ({course_name}) — {d.type or 'deadline'}")
+            c = course_map.get(d.course_id)
+            label = f"{c.code or c.name}" if c else "General"
+            by_course.setdefault(label, []).append(d)
+        parts.append("\n## Deadlines by Course")
+        for label, items in by_course.items():
+            parts.append(f"\n### {label}")
+            for d in items:
+                time_str = f" at {d.time}" if d.time else ""
+                parts.append(f"- [{d.date}{time_str}] {d.title} — {d.type or 'deadline'}")
 
     # Summaries as course material context (truncated)
     summaries = (
@@ -5404,14 +5463,20 @@ async def generate_proactive_message(
 
         context_str = "\n".join(ctx_lines)
 
+        user_name = profile.full_name.strip() if profile and profile.full_name and profile.full_name.strip() else None
+        name_line = f"Student's name: {user_name}" if user_name else "Student's name: (not set — do not use 'Your Name' or any placeholder)"
+
         prompt = f"""You are ClassMate AI. Write a brief, specific opening message for a student starting their study session.
 
 Student situation:
+{name_line}
 {context_str}
 
 Rules:
 - 2-3 sentences max
 - ONLY use course names and deadline titles that appear verbatim in the data above — do NOT invent or assume any course names
+- If the student's name is set, use it naturally once (e.g., "Good luck today, Alex!") — never output a placeholder like "Your Name"
+- If the student's name is not set, address them naturally without a name (e.g., "You have a quiz coming up…")
 - If there are no deadlines, offer to help them study or create materials for their actual courses listed above
 - If the student has no courses yet, invite them to add their first course
 - End with one specific actionable offer

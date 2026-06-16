@@ -25,6 +25,7 @@ interface Deadline {
   completed: boolean
   source?: string
   external_id?: string
+  saved_to_calendar?: boolean
 }
 
 interface Course {
@@ -89,6 +90,7 @@ export default function CalendarPage() {
   })
   const [creating, setCreating] = useState(false)
   const [showDaySheet, setShowDaySheet] = useState(false)
+  const [bulkSaving, setBulkSaving] = useState(false)
 
   // Infinite scroll: selected full date and month range
   const [selectedFullDate, setSelectedFullDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -511,6 +513,38 @@ export default function CalendarPage() {
     }
   }
 
+  const unsavedCount = useMemo(
+    () => deadlines.filter((d) => !d.saved_to_calendar).length,
+    [deadlines]
+  )
+
+  const saveAllToCalendar = async () => {
+    const unsaved = deadlines.filter((d) => !d.saved_to_calendar)
+    if (unsaved.length === 0) return
+    setBulkSaving(true)
+    try {
+      for (const deadline of unsaved) {
+        const res = await fetchWithAuth(`${API_URL}/deadlines/${deadline.id}/save-to-calendar`, {
+          method: 'POST',
+          cache: 'no-store',
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.detail || 'Failed to save some deadlines')
+        }
+      }
+      setDeadlines((prev) => prev.map((d) => ({ ...d, saved_to_calendar: true })))
+      setToast(`Saved ${unsaved.length} deadline${unsaved.length !== 1 ? 's' : ''} to calendar!`)
+      setTimeout(() => setToast(null), 3000)
+    } catch (err) {
+      console.error('Failed to save all to calendar:', err)
+      setToast('Failed to save some deadlines')
+      setTimeout(() => setToast(null), 2500)
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
   if (authLoading || loading) {
     return (
       <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6 bg-gradient-to-br from-white via-[#F8FAFF] to-[#EEF2FF]">
@@ -643,6 +677,15 @@ export default function CalendarPage() {
                 </button>
               )}
             </div>
+            {unsavedCount > 0 && (
+              <button
+                onClick={saveAllToCalendar}
+                disabled={bulkSaving}
+                className="flex items-center gap-2 rounded-full border border-[#5B8DEF] bg-white px-5 py-2.5 text-sm font-semibold text-[#5B8DEF] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50 disabled:hover:translate-y-0"
+              >
+                {bulkSaving ? 'Saving…' : `Save All (${unsavedCount}) to Calendar`}
+              </button>
+            )}
             <button
               onClick={() => setShowCreateModal(true)}
               className="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
@@ -701,12 +744,23 @@ export default function CalendarPage() {
                     <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">
                       {m.label} {m.year}
                     </h2>
-                    <button
-                      onClick={() => setShowCreateModal(true)}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white"
-                    >
-                      <span className="text-lg leading-none">+</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {unsavedCount > 0 && (
+                        <button
+                          onClick={saveAllToCalendar}
+                          disabled={bulkSaving}
+                          className="rounded-full border border-[#5B8DEF] px-2.5 py-1 text-[11px] font-semibold text-[#5B8DEF] active:bg-[#5B8DEF]/10 disabled:opacity-50"
+                        >
+                          {bulkSaving ? '…' : `Save (${unsavedCount})`}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-[#5B8DEF] text-white"
+                      >
+                        <span className="text-lg leading-none">+</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Weekday headers */}
