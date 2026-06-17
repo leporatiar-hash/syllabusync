@@ -2265,28 +2265,6 @@ def root():
 
 
 
-class AdminSetTierPayload(BaseModel):
-    secret: str
-    email: str
-    tier: str = "pro"
-
-@app.post("/admin/set-tier")
-def admin_set_tier(payload: AdminSetTierPayload):
-    """Temporary admin endpoint — remove after use."""
-    if payload.secret != "classmate-admin-2026":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    email = payload.email.strip().lower()
-    db = SessionLocal()
-    try:
-        profile = db.query(UserProfile).filter(UserProfile.email == email).first()
-        if not profile:
-            raise HTTPException(status_code=404, detail=f"No profile found for {email}")
-        profile.subscription_tier = payload.tier
-        db.commit()
-        return {"ok": True, "email": email, "tier": payload.tier}
-    finally:
-        db.close()
-
 
 @app.get("/health")
 def health():
