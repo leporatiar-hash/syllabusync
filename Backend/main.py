@@ -4815,34 +4815,36 @@ def _build_chat_context(db, user_id: str) -> str:
                     if val:
                         parts.append(f"  {key}: {str(val)[:500]}")
 
-    # All incomplete deadlines within the semester window (7 days past → 365 days future)
+    # Deadlines — all incomplete, ordered by date. No lower bound so past-semester deadlines
+    # are still visible to the model. Upper bound prevents far-future noise.
     today = date.today()
-    seven_days_ago = today - timedelta(days=7)
     one_year_out = today + timedelta(days=365)
     deadlines = (
         db.query(Deadline)
         .filter(
             Deadline.user_id == user_id,
             Deadline.completed == False,
-            Deadline.date >= seven_days_ago.isoformat(),
             Deadline.date <= one_year_out.isoformat(),
         )
         .order_by(Deadline.date)
-        .limit(60)
+        .limit(80)
         .all()
     )
+    parts.append(f"\n## Deadlines by Course (today: {today.isoformat()})")
     if deadlines:
         by_course: dict[str, list] = {}
         for d in deadlines:
             c = course_map.get(d.course_id)
             label = f"{c.code or c.name}" if c else "General"
             by_course.setdefault(label, []).append(d)
-        parts.append("\n## Deadlines by Course")
         for label, items in by_course.items():
             parts.append(f"\n### {label}")
             for d in items:
                 time_str = f" at {d.time}" if d.time else ""
-                parts.append(f"- [{d.date}{time_str}] {d.title} — {d.type or 'deadline'}")
+                status = "[past]" if d.date < today.isoformat() else "[upcoming]"
+                parts.append(f"- {d.date}{time_str} {status} — {d.title} ({d.type or 'deadline'}) [id:{d.id}]")
+    else:
+        parts.append("(no deadlines recorded — student has not uploaded a syllabus or added any deadlines)")
 
     # Summaries as course material context (truncated to budget)
     summaries = (
@@ -4942,6 +4944,176 @@ def _build_chat_context(db, user_id: str) -> str:
     return "\n".join(parts)
 
 
+# ── Chat tool definitions (OpenAI function calling) ──────────────────────────
+
+DEADLINE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_deadline",
+            "description": (
+                "Create a new deadline or assignment for the student. "
+                "Use when the student says things like 'add a deadline', 'add X to my calendar', "
+                "'schedule X', 'I have a quiz on [date]', 'remind me about X on [date]'. "
+                "Resolve relative dates ('next Friday', 'in two weeks') using today's date from the context."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Name of the assignment, exam, or event"},
+                    "course_code": {
+                        "type": "string",
+                        "description": "Course code or name (e.g. 'PSYC 240'). Match to the student's courses listed in context. Omit if not specified."
+                    },
+                    "date": {"type": "string", "description": "Due date in YYYY-MM-DD format. Resolve relative dates using today's date from context."},
+                    "time": {"type": "string", "description": "Due time in HH:MM 24h format (optional, omit if not specified)"},
+                    "deadline_type": {
+                        "type": "string",
+                        "enum": ["assignment", "exam", "quiz", "project", "reading", "other"],
+                        "description": "Type of deadline"
+                    }
+                },
+                "required": ["title", "date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_deadline",
+            "description": (
+                "Update an existing deadline's title, date, or time. "
+                "Use when the student wants to reschedule or rename a deadline. "
+                "You must use the deadline id shown in the Deadlines section of context."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "deadline_id": {"type": "string", "description": "The id of the deadline to update (from context, shown as [id:...])"},
+                    "title": {"type": "string", "description": "New title (omit if not changing)"},
+                    "date": {"type": "string", "description": "New date in YYYY-MM-DD format (omit if not changing)"},
+                    "time": {"type": "string", "description": "New time in HH:MM 24h format (omit if not changing)"}
+                },
+                "required": ["deadline_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_deadline",
+            "description": (
+                "Delete a deadline. Use when the student asks to remove, cancel, or delete a specific deadline. "
+                "You must use the deadline id from the Deadlines section of context."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "deadline_id": {"type": "string", "description": "The id of the deadline to delete (from context, shown as [id:...])"}
+                },
+                "required": ["deadline_id"]
+            }
+        }
+    }
+]
+
+
+def _execute_chat_tool(tool_name: str, args: dict, user_id: str, db) -> dict:
+    """Execute a deadline tool call from the chat assistant. Returns a result dict."""
+    if tool_name == "create_deadline":
+        title = (args.get("title") or "").strip()
+        date_str = (args.get("date") or "").strip()
+        time_str = args.get("time") or None
+        course_code_arg = (args.get("course_code") or "").strip().lower()
+        deadline_type = args.get("deadline_type") or "assignment"
+
+        if not title or not date_str:
+            return {"success": False, "error": "title and date are required"}
+
+        # Match course by code or name
+        course_id = None
+        course_name = None
+        if course_code_arg:
+            for c in db.query(Course).filter(Course.user_id == user_id).all():
+                if (c.code and course_code_arg in c.code.lower()) or \
+                   (c.name and course_code_arg in c.name.lower()) or \
+                   (c.code and c.code.lower() in course_code_arg):
+                    course_id = c.id
+                    course_name = c.name
+                    break
+
+        # Dedup: skip if identical title+date already exists for this course
+        existing_q = db.query(Deadline).filter(
+            Deadline.user_id == user_id,
+            Deadline.title == title,
+            Deadline.date == date_str,
+        )
+        if course_id:
+            existing_q = existing_q.filter(Deadline.course_id == course_id)
+        existing = existing_q.first()
+        if existing:
+            return {"success": True, "action": "already_exists", "deadline": {
+                "id": existing.id, "title": existing.title, "date": existing.date, "course": course_name
+            }}
+
+        deadline = Deadline(
+            user_id=user_id,
+            course_id=course_id,
+            title=title,
+            date=date_str,
+            time=time_str,
+            type=deadline_type,
+            recurring=False,
+        )
+        db.add(deadline)
+        db.commit()
+        db.refresh(deadline)
+        return {"success": True, "action": "created", "deadline": {
+            "id": deadline.id, "title": deadline.title, "date": deadline.date,
+            "time": deadline.time, "type": deadline.type, "course": course_name
+        }}
+
+    elif tool_name == "update_deadline":
+        deadline_id = (args.get("deadline_id") or "").strip()
+        deadline = db.query(Deadline).filter(
+            Deadline.id == deadline_id, Deadline.user_id == user_id
+        ).first()
+        if not deadline:
+            return {"success": False, "error": "Deadline not found"}
+
+        if args.get("title"):
+            deadline.title = args["title"].strip()
+        if args.get("date"):
+            deadline.date = args["date"].strip()
+        if "time" in args:
+            deadline.time = args["time"] or None
+
+        db.commit()
+        db.refresh(deadline)
+        return {"success": True, "action": "updated", "deadline": {
+            "id": deadline.id, "title": deadline.title, "date": deadline.date, "time": deadline.time
+        }}
+
+    elif tool_name == "delete_deadline":
+        deadline_id = (args.get("deadline_id") or "").strip()
+        deadline = db.query(Deadline).filter(
+            Deadline.id == deadline_id, Deadline.user_id == user_id
+        ).first()
+        if not deadline:
+            return {"success": False, "error": "Deadline not found"}
+
+        title, date_str = deadline.title, deadline.date
+        db.query(CalendarEntry).filter(
+            CalendarEntry.deadline_id == deadline_id,
+            CalendarEntry.user_id == user_id,
+        ).delete(synchronize_session=False)
+        db.delete(deadline)
+        db.commit()
+        return {"success": True, "action": "deleted", "deadline": {"title": title, "date": date_str}}
+
+    return {"success": False, "error": f"Unknown tool: {tool_name}"}
+
+
 CHAT_SYSTEM_PROMPT = """You are ClassMate AI, a personal academic assistant. You have access to the student's courses, upcoming deadlines, and course materials provided below.
 
 YOUR PRIMARY JOB: TEACH the student. Answer questions by pulling SPECIFIC information directly from their course materials. Don't just tell them what to study — actually explain it.
@@ -4980,14 +5152,23 @@ Suggest Study Tools:
 - When you finish explaining a topic, naturally offer: "Want to save this as flashcards or a quiz? Just say 'make me flashcards on [topic]' and I'll build and save a set right now."
 - Keep suggestions brief and natural — don't be pushy.
 
-IMPORTANT — Deadlines & Calendar:
-You have the student's actual deadline and assignment data in the context below. Answer calendar questions directly — never say you can't see their schedule.
+IMPORTANT — Deadlines & Calendar (READ + WRITE):
+You have the student's full deadline list in the context below, tagged [upcoming] or [past]. Today's date is shown at the top of the Deadlines section. Answer calendar questions directly from this data — NEVER say you can't see their schedule.
 
-**Rules:**
-- "What's due this week?" / "Do I have any upcoming deadlines?" → List them from the Deadlines section in the context. Be specific: title, course, date.
-- "When is my [assignment] due?" → Look it up in the deadlines data and give the exact date.
-- If no deadlines appear in the context, say: "It looks like you don't have any upcoming deadlines recorded — make sure your syllabus is uploaded in the Courses tab."
-- NEVER say you don't have access to their calendar or can't see their deadlines. You can. Answer from the data.
+**Read rules:**
+- "What's due this week?" → List only [upcoming] deadlines whose date is within 7 days of today. Give title, course, and date.
+- "What are my upcoming deadlines?" → List all [upcoming] deadlines.
+- "When is my [assignment] due?" → Find it in the Deadlines section and give the exact date.
+- If the context shows "(no deadlines recorded...)" → say: "It looks like you don't have any deadlines on record yet — upload your syllabus in the Courses tab to get started."
+- If context shows deadlines but all are [past] → say clearly: "All your recorded deadlines have already passed. Your most recent was [X]. Add new ones by saying 'add a deadline' or re-uploading your syllabus."
+- NEVER say you don't have access to their calendar or can't see their deadlines.
+
+**Write rules (use the calendar tools):**
+- "Add a deadline / add X to my calendar / schedule X / I have a quiz on [date]" → call create_deadline tool immediately, then confirm what was added.
+- "Move that deadline / reschedule X to [date]" → call update_deadline with the correct id from context, confirm the change.
+- "Delete / remove that deadline" → call delete_deadline with the correct id, confirm deletion.
+- If the student doesn't specify which course and they have multiple, ask before creating.
+- Always confirm after a tool call: what was created/changed/deleted, for which course, on what date.
 
 If the student asks about something NOT covered in their materials below:
 - Say clearly: "I don't see this in your uploaded materials, but here's what I know..."
@@ -5549,15 +5730,81 @@ Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, de
                     stream = await client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=_openai_messages,
+                        tools=DEADLINE_TOOLS,
+                        tool_choice="auto",
                         max_tokens=2000,
                         temperature=0.7,
                         stream=True,
                     )
+
+                    tool_calls_acc: dict[int, dict] = {}
+                    finish_reason = None
+
                     async for chunk in stream:
-                        delta = chunk.choices[0].delta.content or ""
-                        if delta:
-                            full_content += delta
-                            yield f"data: {json.dumps({'type': 'chunk', 'content': delta})}\n\n"
+                        choice = chunk.choices[0]
+                        if choice.finish_reason:
+                            finish_reason = choice.finish_reason
+                        delta = choice.delta
+
+                        if delta.content:
+                            full_content += delta.content
+                            yield f"data: {json.dumps({'type': 'chunk', 'content': delta.content})}\n\n"
+
+                        if delta.tool_calls:
+                            for tc in delta.tool_calls:
+                                idx = tc.index
+                                if idx not in tool_calls_acc:
+                                    tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                                if tc.id:
+                                    tool_calls_acc[idx]["id"] = tc.id
+                                if tc.function:
+                                    if tc.function.name:
+                                        tool_calls_acc[idx]["name"] = tc.function.name
+                                    if tc.function.arguments:
+                                        tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+                    # Execute tool calls, then stream a second confirmation response
+                    if finish_reason == "tool_calls" and tool_calls_acc:
+                        assistant_tool_msg: dict = {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": tc["id"],
+                                    "type": "function",
+                                    "function": {"name": tc["name"], "arguments": tc["arguments"]}
+                                }
+                                for _, tc in sorted(tool_calls_acc.items())
+                            ]
+                        }
+                        tool_result_msgs = []
+                        for _, tc in sorted(tool_calls_acc.items()):
+                            try:
+                                args = json.loads(tc["arguments"])
+                            except Exception:
+                                args = {}
+                            result = _execute_chat_tool(tc["name"], args, _user_id, stream_db)
+                            logger.info(f"[Chat] Tool {tc['name']} result: {result}")
+                            tool_result_msgs.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": json.dumps(result),
+                            })
+
+                        followup_msgs = _openai_messages + [assistant_tool_msg] + tool_result_msgs
+                        stream2 = await client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=followup_msgs,
+                            max_tokens=500,
+                            temperature=0.7,
+                            stream=True,
+                        )
+                        async for chunk in stream2:
+                            delta = chunk.choices[0].delta.content or ""
+                            if delta:
+                                full_content += delta
+                                yield f"data: {json.dumps({'type': 'chunk', 'content': delta})}\n\n"
+
                 except OAIRateLimitError:
                     full_content = "I'm a little busy right now — please wait a moment and try again!"
                     yield f"data: {json.dumps({'type': 'chunk', 'content': full_content})}\n\n"
