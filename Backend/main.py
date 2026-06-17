@@ -19,7 +19,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import bcrypt as _bcrypt
-import PyPDF2
+import pdfplumber
 from docx import Document
 import json
 import uuid
@@ -555,6 +555,7 @@ class Flashcard(Base):
     flashcard_set_id = Column(String, ForeignKey("flashcard_sets.id"), nullable=False)
     front = Column(Text, nullable=False)
     back = Column(Text, nullable=False)
+    grade = Column(String, nullable=True)  # "known", "learning", or null
     created_at = Column(DateTime, default=datetime.utcnow)
 
     flashcard_set = relationship("FlashcardSet", back_populates="flashcards")
@@ -943,20 +944,28 @@ def generate_flashcards_fallback(text: str):
 
 def extract_text_from_pdf(content: bytes) -> str:
     try:
-        pdf = PyPDF2.PdfReader(io.BytesIO(content))
         text = ""
-        page_count = len(pdf.pages)
-        print(f"[DEBUG] PDF has {page_count} pages")
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            page_count = len(pdf.pages)
+            print(f"[DEBUG] PDF has {page_count} pages")
+            for i, page in enumerate(pdf.pages):
+                # Extract tables first, then remaining text — preserves column structure
+                page_text = ""
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        for row in table:
+                            page_text += " | ".join(cell or "" for cell in row) + "\n"
+                        page_text += "\n"
+                # extract_text with layout=True preserves column order better than default
+                prose = page.extract_text(layout=False) or ""
+                page_text += prose
+                text += page_text + "\n"
+                if i < 3:
+                    print(f"[DEBUG] Page {i+1} extracted {len(page_text)} characters")
 
-        for i, page in enumerate(pdf.pages):
-            page_text = page.extract_text() or ""
-            text += page_text + "\n"
-            if i < 3:  # Log first 3 pages for debugging
-                print(f"[DEBUG] Page {i+1} extracted {len(page_text)} characters")
-
-        # Check if extraction was successful
         if len(text.strip()) < 50:
-            print(f"[WARNING] PDF text extraction yielded only {len(text.strip())} characters from {page_count} pages")
+            print(f"[WARNING] PDF text extraction yielded only {len(text.strip())} characters")
             raise HTTPException(
                 status_code=400,
                 detail="Unable to extract text from PDF. The file may be scanned, image-based, or password-protected. Please try a text-based PDF or use an image format instead."
@@ -1328,6 +1337,16 @@ def ensure_course_syllabus_column():
         pass  # Column already exists
 
 
+def ensure_flashcard_grade_column():
+    """Add grade column to flashcards table for per-card mastery tracking."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE flashcards ADD COLUMN grade VARCHAR"))
+            logger.info("[Migration] Added 'grade' column to flashcards")
+    except Exception:
+        pass  # Column already exists
+
+
 FREE_CHAT_MESSAGE_LIMIT = 10  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
@@ -1434,6 +1453,7 @@ ensure_referral_columns()
 ensure_subscription_columns()
 ensure_chat_columns()
 ensure_course_syllabus_column()
+ensure_flashcard_grade_column()
 Base.metadata.create_all(bind=engine)
 
 
@@ -3547,10 +3567,7 @@ async def generate_flashcards(request: Request, course_id: str, file: UploadFile
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
-            pdf = PyPDF2.PdfReader(io.BytesIO(content))
-            text = ""
-            for page in pdf.pages:
-                text += (page.extract_text() or "") + "\n"
+            text = extract_text_from_pdf(content)
         elif filename.endswith('.txt'):
             text = content.decode('utf-8')
         elif filename.endswith(('.png', '.jpg', '.jpeg')):
@@ -3731,10 +3748,30 @@ def get_flashcard_set(set_id: str, current_user: User = Depends(get_current_user
             "name": flashcard_set.name,
             "course_id": flashcard_set.course_id,
             "flashcards": [
-                {"id": fc.id, "front": fc.front, "back": fc.back}
+                {"id": fc.id, "front": fc.front, "back": fc.back, "grade": fc.grade}
                 for fc in flashcard_set.flashcards
             ]
         }
+    finally:
+        db.close()
+
+
+class FlashcardGradePayload(BaseModel):
+    grade: str  # "known" or "learning"
+
+@app.patch("/flashcards/{card_id}/grade")
+def grade_flashcard(card_id: str, payload: FlashcardGradePayload, current_user: User = Depends(get_current_user)):
+    """Persist a 'known' or 'learning' grade for a single flashcard."""
+    if payload.grade not in ("known", "learning"):
+        raise HTTPException(status_code=400, detail="grade must be 'known' or 'learning'")
+    db = SessionLocal()
+    try:
+        card = db.query(Flashcard).filter(Flashcard.id == card_id, Flashcard.user_id == current_user.id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Flashcard not found")
+        card.grade = payload.grade
+        db.commit()
+        return {"id": card_id, "grade": card.grade}
     finally:
         db.close()
 
@@ -3920,10 +3957,7 @@ async def generate_quiz(request: Request, course_id: str, file: UploadFile = Fil
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
-            pdf = PyPDF2.PdfReader(io.BytesIO(content))
-            text = ""
-            for page in pdf.pages:
-                text += (page.extract_text() or "") + "\n"
+            text = extract_text_from_pdf(content)
         elif filename.endswith('.txt'):
             text = content.decode('utf-8')
         elif filename.endswith(('.png', '.jpg', '.jpeg')):

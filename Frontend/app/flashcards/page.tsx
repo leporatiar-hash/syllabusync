@@ -11,6 +11,7 @@ interface Flashcard {
   id: string
   front: string
   back: string
+  grade?: 'known' | 'learning' | null
 }
 
 interface FlashcardSet {
@@ -95,6 +96,8 @@ function FlashcardsContent() {
   const [knownIds, setKnownIds] = useState<string[]>([])
   const [unknownIds, setUnknownIds] = useState<string[]>([])
   const [showDeckSummary, setShowDeckSummary] = useState(false)
+  const [allCards, setAllCards] = useState<Flashcard[]>([])
+  const [filterMode, setFilterMode] = useState<'all' | 'remaining'>('all')
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const reviewSectionRef = useRef<HTMLElement>(null)
 
@@ -197,9 +200,16 @@ function FlashcardsContent() {
         const res = await fetchWithAuth(`${API_URL}/flashcard-sets/${selectedSetId}`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
-          setCards(data.flashcards || [])
+          const loaded: Flashcard[] = data.flashcards || []
+          setAllCards(loaded)
+          setCards(loaded)
           setCurrentIndex(0)
           setFlipped(false)
+          setFilterMode('all')
+          setShowDeckSummary(false)
+          // Restore persisted grades into session state
+          setKnownIds(loaded.filter(c => c.grade === 'known').map(c => c.id))
+          setUnknownIds(loaded.filter(c => c.grade === 'learning').map(c => c.id))
         } else {
           throw new Error('Failed to load flashcards')
         }
@@ -207,6 +217,7 @@ function FlashcardsContent() {
         console.error('Failed to load flashcards:', err)
         setError('Failed to load flashcards')
         setCards([])
+        setAllCards([])
       } finally {
         setLoadingCards(false)
       }
@@ -227,9 +238,32 @@ function FlashcardsContent() {
     setCards(shuffled)
     setCurrentIndex(0)
     setFlipped(false)
-    setKnownIds([])
-    setUnknownIds([])
     setShowDeckSummary(false)
+  }
+
+  const handleFilterRemaining = () => {
+    const remaining = allCards.filter(c => c.grade !== 'known' && !knownIds.includes(c.id))
+    setCards(remaining.length > 0 ? remaining : allCards)
+    setFilterMode('remaining')
+    setCurrentIndex(0)
+    setFlipped(false)
+    setShowDeckSummary(false)
+  }
+
+  const handleShowAll = () => {
+    setCards(allCards)
+    setFilterMode('all')
+    setCurrentIndex(0)
+    setFlipped(false)
+    setShowDeckSummary(false)
+  }
+
+  const gradeCard = async (cardId: string, grade: 'known' | 'learning') => {
+    fetchWithAuth(`${API_URL}/flashcards/${cardId}/grade`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grade }),
+    }).catch(() => {/* fire-and-forget, optimistic */})
   }
 
   // Keyboard navigation
@@ -419,15 +453,16 @@ function FlashcardsContent() {
               <div className="flex items-center gap-3 text-sm">
                 {cards.length > 0 && (
                   <>
+                    {/* Mastery progress bar + counts */}
                     <div className="flex items-center gap-2">
-                      <div className="h-2 w-24 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] transition-all duration-300"
-                          style={{ width: `${((currentIndex + 1) / cards.length) * 100}%` }}
-                        />
+                      <div className="h-2 w-28 rounded-full bg-slate-100 overflow-hidden flex">
+                        <div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${(knownIds.length / allCards.length) * 100}%` }} />
+                        <div className="h-full bg-amber-400 transition-all duration-300" style={{ width: `${(unknownIds.length / allCards.length) * 100}%` }} />
                       </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
-                        {currentIndex + 1} / {cards.length}
+                      <span className="text-xs font-medium text-emerald-600">{knownIds.length} known</span>
+                      {unknownIds.length > 0 && <span className="text-xs font-medium text-amber-600">{unknownIds.length} learning</span>}
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                        {currentIndex + 1} / {cards.length}{filterMode === 'remaining' ? ' (filtered)' : ''}
                       </span>
                     </div>
                     <button
@@ -439,8 +474,26 @@ function FlashcardsContent() {
                       </svg>
                       Shuffle
                     </button>
+                    {/* Study remaining / show all toggle */}
+                    {knownIds.length > 0 && (
+                      filterMode === 'remaining' ? (
+                        <button
+                          onClick={handleShowAll}
+                          className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition-all hover:bg-slate-50"
+                        >
+                          Show all
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleFilterRemaining}
+                          className="flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 transition-all hover:bg-amber-100"
+                        >
+                          Study remaining ({allCards.length - knownIds.length})
+                        </button>
+                      )
+                    )}
                     <button
-                      onClick={() => { setCurrentIndex(0); setFlipped(false); setKnownIds([]); setUnknownIds([]); setShowDeckSummary(false) }}
+                      onClick={() => { setCurrentIndex(0); setFlipped(false); setShowDeckSummary(false) }}
                       className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -584,6 +637,7 @@ function FlashcardsContent() {
                           const isLast = currentIndex === cards.length - 1
                           setKnownIds(newKnown)
                           setUnknownIds(newUnknown)
+                          gradeCard(id, 'known')
                           if (isLast) {
                             setShowDeckSummary(true)
                           } else {
@@ -591,7 +645,7 @@ function FlashcardsContent() {
                             setFlipped(false)
                           }
                         }}
-                        className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-semibold text-emerald-700 transition-all duration-200 hover:bg-emerald-100"
+                        className={`flex items-center gap-2 rounded-full border px-5 py-2 text-sm font-semibold transition-all duration-200 ${knownIds.includes(current.id) ? 'border-emerald-400 bg-emerald-100 text-emerald-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                         Got it
@@ -604,6 +658,7 @@ function FlashcardsContent() {
                           const isLast = currentIndex === cards.length - 1
                           setUnknownIds(newUnknown)
                           setKnownIds(newKnown)
+                          gradeCard(id, 'learning')
                           if (isLast) {
                             setShowDeckSummary(true)
                           } else {
@@ -611,7 +666,7 @@ function FlashcardsContent() {
                             setFlipped(false)
                           }
                         }}
-                        className="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-5 py-2 text-sm font-semibold text-amber-700 transition-all duration-200 hover:bg-amber-100"
+                        className={`flex items-center gap-2 rounded-full border px-5 py-2 text-sm font-semibold transition-all duration-200 ${unknownIds.includes(current.id) ? 'border-amber-400 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01" /></svg>
                         Still learning
@@ -1029,16 +1084,15 @@ function FlashcardsContent() {
               <div className="flex items-center gap-3 text-sm">
                 {cards.length > 0 && (
                   <>
-                    {/* Progress indicator */}
                     <div className="flex items-center gap-2">
-                      <div className="h-2 w-24 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] transition-all duration-300"
-                          style={{ width: `${((currentIndex + 1) / cards.length) * 100}%` }}
-                        />
+                      <div className="h-2 w-28 rounded-full bg-slate-100 overflow-hidden flex">
+                        <div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${(knownIds.length / allCards.length) * 100}%` }} />
+                        <div className="h-full bg-amber-400 transition-all duration-300" style={{ width: `${(unknownIds.length / allCards.length) * 100}%` }} />
                       </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
-                        {currentIndex + 1} / {cards.length}
+                      <span className="text-xs font-medium text-emerald-600">{knownIds.length} known</span>
+                      {unknownIds.length > 0 && <span className="text-xs font-medium text-amber-600">{unknownIds.length} learning</span>}
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                        {currentIndex + 1} / {cards.length}{filterMode === 'remaining' ? ' (filtered)' : ''}
                       </span>
                     </div>
                     <button
@@ -1050,14 +1104,19 @@ function FlashcardsContent() {
                       </svg>
                       Shuffle
                     </button>
+                    {knownIds.length > 0 && (
+                      filterMode === 'remaining' ? (
+                        <button onClick={handleShowAll} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition-all hover:bg-slate-50">
+                          Show all
+                        </button>
+                      ) : (
+                        <button onClick={handleFilterRemaining} className="flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 transition-all hover:bg-amber-100">
+                          Study remaining ({allCards.length - knownIds.length})
+                        </button>
+                      )
+                    )}
                     <button
-                      onClick={() => {
-                        setCurrentIndex(0)
-                        setFlipped(false)
-                        setKnownIds([])
-                        setUnknownIds([])
-                        setShowDeckSummary(false)
-                      }}
+                      onClick={() => { setCurrentIndex(0); setFlipped(false); setShowDeckSummary(false) }}
                       className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
