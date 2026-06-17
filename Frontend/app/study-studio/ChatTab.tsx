@@ -477,9 +477,11 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                         <div className="whitespace-pre-wrap">
                           {(() => {
                             // Strip file content from display — show text + a compact file chip only
-                            const fileMatch = msg.content.match(/^([\s\S]*?)\n\n\[(?:Uploaded file|Attached): ([^\]]+)\](?:\n[\s\S]*)?$/)
-                            const displayText = fileMatch ? fileMatch[1].trim() : msg.content
-                            const fileName = fileMatch ? fileMatch[2] : null
+                            const marker = msg.content.match(/\[(?:Uploaded file|Attached): ([^\]]+)\]/)
+                            const fileName = marker ? marker[1] : null
+                            const displayText = fileName
+                              ? msg.content.substring(0, msg.content.indexOf(marker![0])).trim()
+                              : msg.content
                             return (
                               <>
                                 {displayText && <span>{displayText}</span>}
