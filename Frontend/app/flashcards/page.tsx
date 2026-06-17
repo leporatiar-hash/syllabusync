@@ -645,9 +645,12 @@ function FlashcardsContent() {
                             setFlipped(false)
                           }
                         }}
-                        className={`flex items-center gap-2 rounded-full border px-5 py-2 text-sm font-semibold transition-all duration-200 ${knownIds.includes(current.id) ? 'border-emerald-400 bg-emerald-100 text-emerald-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                        className={`rounded-xl px-6 py-2.5 text-sm font-semibold transition-all duration-200 ${
+                          knownIds.includes(current.id)
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95'
+                        }`}
                       >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                         Got it
                       </button>
                       <button
@@ -666,9 +669,12 @@ function FlashcardsContent() {
                             setFlipped(false)
                           }
                         }}
-                        className={`flex items-center gap-2 rounded-full border px-5 py-2 text-sm font-semibold transition-all duration-200 ${unknownIds.includes(current.id) ? 'border-amber-400 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                        className={`rounded-xl px-6 py-2.5 text-sm font-semibold transition-all duration-200 ${
+                          unknownIds.includes(current.id)
+                            ? 'bg-slate-200 text-slate-800'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95'
+                        }`}
                       >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01" /></svg>
                         Still learning
                       </button>
                     </div>
