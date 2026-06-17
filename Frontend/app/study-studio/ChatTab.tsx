@@ -196,7 +196,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
     setMessages(prev => [...prev, {
       id: tempId,
       role: 'user',
-      content: sentInput + (sentFile ? `\n\n[Attached: ${sentFile.name}]` : ''),
+      content: sentInput + (sentFile ? `\n\n[Uploaded file: ${sentFile.name}]\n` : ''),
       created_at: new Date().toISOString(),
     }])
 
@@ -474,7 +474,27 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                       }`}
                     >
                       {msg.role === 'user' ? (
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                        <div className="whitespace-pre-wrap">
+                          {(() => {
+                            // Strip file content from display — show text + a compact file chip only
+                            const fileMatch = msg.content.match(/^([\s\S]*?)\n\n\[(?:Uploaded file|Attached): ([^\]]+)\](?:\n[\s\S]*)?$/)
+                            const displayText = fileMatch ? fileMatch[1].trim() : msg.content
+                            const fileName = fileMatch ? fileMatch[2] : null
+                            return (
+                              <>
+                                {displayText && <span>{displayText}</span>}
+                                {fileName && (
+                                  <div className={`${displayText ? 'mt-2' : ''} flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-xs text-white/90`}>
+                                    <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                    </svg>
+                                    {fileName}
+                                  </div>
+                                )}
+                              </>
+                            )
+                          })()}
+                        </div>
                       ) : msg.id === streamingMsgId && msg.content === '' ? (
                         <div className="flex gap-1 py-1">
                           <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '0ms' }} />
