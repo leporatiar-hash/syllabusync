@@ -2313,6 +2313,18 @@ def api_health():
     return health()
 
 
+@app.get("/stats", tags=["public"], summary="Public platform stats")
+def get_stats():
+    """Returns aggregate platform stats. No auth required."""
+    try:
+        db = SessionLocal()
+        count = db.query(Course).count()
+        db.close()
+        return {"syllabi_count": count}
+    except Exception:
+        return {"syllabi_count": 0}
+
+
 @app.get("/auth-status")
 def auth_status():
     """Debug endpoint to check auth configuration status."""

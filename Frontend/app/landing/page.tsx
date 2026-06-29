@@ -5,17 +5,26 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
+import { API_BASE_URL } from '../../lib/config'
 
 export default function LandingPage() {
   const router = useRouter()
   const [scrollY, setScrollY] = useState(0)
   const [visibleSections, setVisibleSections] = useState<Set<string>>(new Set())
+  const [syllabiCount, setSyllabiCount] = useState<number | null>(null)
   const observerRef = useRef<IntersectionObserver | null>(null)
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY)
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/stats`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.syllabi_count != null) setSyllabiCount(data.syllabi_count) })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -65,7 +74,7 @@ export default function LandingPage() {
       </nav>
 
       {/* ── Hero ───────────────────────────────────────────────────── */}
-      <section className="pt-32 pb-20 px-6 bg-white w-full">
+      <section className="pt-20 lg:pt-24 pb-20 px-6 bg-white w-full">
         <div className="max-w-6xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
 
@@ -83,7 +92,7 @@ export default function LandingPage() {
                   <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3z" opacity=".3"/>
                   <path d="M8 6a1 1 0 011 1v4a1 1 0 11-2 0V7a1 1 0 011-1zM8 4.5a1 1 0 110 2 1 1 0 010-2z"/>
                 </svg>
-                AI-powered student workspace
+                The AI that knows your entire semester
               </div>
 
               <h1 className="text-5xl md:text-6xl font-bold text-slate-900 leading-tight mb-6">
@@ -112,6 +121,7 @@ export default function LandingPage() {
                   See How It Works
                 </button>
               </div>
+              <p className="text-sm text-slate-400 mt-3">Works in your browser — no download needed</p>
 
               {/* Social proof */}
               <div className="mt-8 flex items-center gap-3">
@@ -132,7 +142,10 @@ export default function LandingPage() {
                   ))}
                 </div>
                 <p className="text-sm text-slate-500">
-                  <span className="font-semibold text-slate-700">47 students at CofC</span> already use ClassMate · ⭐ 4.8/5
+                  {syllabiCount !== null
+                    ? <><span className="font-semibold text-slate-700">Students have uploaded {syllabiCount}+ syllabi</span> with ClassMate · ⭐ 4.8/5</>
+                    : <>Students are using ClassMate · ⭐ 4.8/5</>
+                  }
                 </p>
               </div>
             </div>
@@ -151,6 +164,7 @@ export default function LandingPage() {
                     maskImage: 'radial-gradient(ellipse at center, rgba(0,0,0,1) 68%, rgba(0,0,0,0.94) 84%, rgba(0,0,0,0) 98%)',
                   }}
                 >
+                  {/* TODO: Replace /hero.png with AI chat screenshot — drop chat-hero.png into /public and update src below */}
                   <Image
                     src="/hero.png"
                     alt="ClassMate app preview"
@@ -290,6 +304,8 @@ export default function LandingPage() {
               </p>
             </div>
           </div>
+
+          {/* TODO: Canvas integration screenshot — drop canvas-screenshot.png into /public/images and uncomment */}
 
           {/* Step 3 */}
           <div
@@ -540,7 +556,7 @@ export default function LandingPage() {
                 >
                   Start 10-Day Free Trial
                 </button>
-                <p className="text-center text-xs text-slate-400 mt-2">No charge for 10 days · Cancel anytime</p>
+                <p className="text-center text-xs text-slate-400 mt-2">After 10 days, you stay on the free plan. No charge, no gotcha.</p>
               </div>
             </div>
 
@@ -633,7 +649,7 @@ export default function LandingPage() {
               Your semester starts right now.
             </h2>
             <p className="text-lg mb-10 opacity-90 max-w-xl mx-auto">
-              Join 47 students who stopped scrambling and started studying smarter.
+              Join the students who stopped scrambling and started studying smarter.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <button
@@ -665,7 +681,7 @@ export default function LandingPage() {
           <div className="flex gap-6 text-sm text-slate-400">
             <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
             <a href="/terms" className="hover:text-white transition-colors">Terms</a>
-            <a href="mailto:leporatialex@gmail.com" className="hover:text-white transition-colors">Contact</a>
+            <a href="mailto:hello@tryclassmate.com" className="hover:text-white transition-colors">Contact</a>
           </div>
           <div className="text-sm text-slate-400">© 2026 ClassMate. All rights reserved.</div>
         </div>
