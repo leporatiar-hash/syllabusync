@@ -8,7 +8,9 @@ import AuthDebug from './AuthDebug'
 
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const isStandalonePage = pathname?.startsWith('/v2')
+  // The homepage and /v2 render their own full nav + footer (built for the
+  // logged-out marketing page), so the global chrome would otherwise double up.
+  const isStandalonePage = pathname === '/' || pathname?.startsWith('/v2')
 
   const buildId = process.env.NEXT_PUBLIC_BUILD_ID || 'dev'
   const buildTimestamp = new Date().toISOString()

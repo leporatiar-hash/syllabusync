@@ -1,5 +1,4 @@
-// Shared design tokens for the /v2 landing page, matching the existing
-// homepage's landing palette (see Frontend/app/landing/page.tsx).
+// Shared design tokens for the landing page.
 export const BRAND = '#5B4EE8'
 export const BRAND_SOFT_BG = '#EEEDFE'
 export const BRAND_SOFT_TEXT = '#3C3489'
