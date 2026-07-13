@@ -124,3 +124,45 @@ body.landing-page footer.mx-auto {
 body.landing-page .fixed.bottom-6.right-6 {
   display: none !important;
 }
+
+/* /v2 chat demo: message entrance + typing dots */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-in {
+  animation: msg-in 320ms ease-out;
+}
+
+/* /v2 demo phone: per-scene progress bar fill */
+@keyframes fill-scene {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.fill-scene {
+  animation: fill-scene linear forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-in {
+    animation: none;
+  }
+  .fill-scene {
+    animation: none;
+  }
+  .flip-card-inner {
+    transition: none;
+  }
+}
