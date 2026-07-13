@@ -1,9 +1,14 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import ChatWidget from './chat/ChatWidget'
+import dynamic from 'next/dynamic'
 import PhoneFrame from './PhoneFrame'
 import { BRAND } from './tokens'
+
+// Skips SSR entirely — this widget is decorative/interactive only, and
+// server-rendering its full scripted state machine on every request is
+// expensive for no benefit (nothing in it is real SEO content).
+const ChatWidget = dynamic(() => import('./chat/ChatWidget'), { ssr: false })
 
 export default function Hero() {
   const router = useRouter()

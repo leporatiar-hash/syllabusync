@@ -1,4 +1,12 @@
-import DemoPhone from './how-it-works/DemoPhone'
+'use client'
+
+import dynamic from 'next/dynamic'
+
+// Skips SSR entirely — the animated 4-scene phone demo is decorative/
+// interactive only, and server-rendering its full scene tree on every
+// request is expensive for no SEO benefit (the section heading below
+// stays server-rendered).
+const DemoPhone = dynamic(() => import('./how-it-works/DemoPhone'), { ssr: false })
 
 export default function HowItWorks() {
   return (
