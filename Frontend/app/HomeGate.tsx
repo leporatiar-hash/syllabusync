@@ -16,20 +16,19 @@ export default function HomeGate() {
     }
   }, [user, loading, router])
 
-  // Show loading state while checking auth
-  if (loading) {
-    return (
-      <main className="min-h-screen flex items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#5B8DEF] border-t-transparent" />
-      </main>
-    )
-  }
+  // Covers the landing page while we check auth / redirect a logged-in
+  // visitor away. The landing page itself always renders underneath —
+  // there's no top-level branch that swaps which component tree mounts.
+  const showOverlay = loading || !!user
 
-  // Show landing page for non-authenticated users
-  if (!user) {
-    return <V2LandingPage />
-  }
-
-  // While redirecting, show nothing
-  return null
+  return (
+    <div className="relative">
+      <V2LandingPage />
+      {showOverlay && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#5B8DEF] border-t-transparent" />
+        </div>
+      )}
+    </div>
+  )
 }
