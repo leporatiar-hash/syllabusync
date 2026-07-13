@@ -16,9 +16,9 @@ export default function Nav() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <a href="#top" className="flex items-center gap-2" aria-label="ClassMate home">
-          <img src="/brand/classmate-owl.png" alt="" className="h-8 w-auto" />
-          <span className="text-xl font-bold text-slate-900">ClassMate</span>
+        <a href="#top" className="flex items-center gap-2.5" aria-label="ClassMate home">
+          <img src="/brand/logo.svg" alt="" className="h-8 w-8 shrink-0" />
+          <span className="text-xl font-bold tracking-tight text-slate-900">ClassMate</span>
         </a>
 
         {/* Desktop links */}

@@ -21,13 +21,14 @@ export default async function Image() {
           fontFamily: "system-ui, sans-serif",
         }}
       >
-        <svg width="220" height="220" viewBox="0 0 32 32">
-          <rect x="5.4" y="7.3" width="21.2" height="21.2" rx="9.4" fill="#fff" />
-          <path d="M10 7.5 6.6 1.3 13.5 6Z" fill="#fff" />
-          <path d="M22 7.5 25.4 1.3 18.5 6Z" fill="#fff" />
-          <circle cx="9.8" cy="15.4" r="2.6" fill="#5B4EE8" />
-          <circle cx="22.2" cy="15.4" r="2.6" fill="#5B4EE8" />
-          <path d="M14.5 18.8h3l-1.5 2.6-1.5-2.6Z" fill="#5B4EE8" />
+        <svg width="220" height="220" viewBox="0 0 512 512">
+          <path
+            d="M368 168 A128 128 0 1 0 368 344"
+            fill="none"
+            stroke="#FFFFFF"
+            strokeWidth="76"
+            strokeLinecap="round"
+          />
         </svg>
 
         <div
