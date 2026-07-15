@@ -8,7 +8,7 @@ export interface SubscriptionInfo {
   aiGenerationsUsed: number
   aiGenerationsMax: number | null // null = unlimited
   chatMessagesUsed: number
-  chatMessagesMax: number | null // null = not available (free) or unlimited (future)
+  chatMessagesMax: number | null // null while /me/subscription hasn't loaded yet
   chatMessagesResetAt: string | null
 }
 
@@ -16,7 +16,7 @@ const DEFAULT_SUB: SubscriptionInfo = {
   tier: 'free',
   isPro: false,
   aiGenerationsUsed: 0,
-  aiGenerationsMax: 5,
+  aiGenerationsMax: 50,
   chatMessagesUsed: 0,
   chatMessagesMax: null,
   chatMessagesResetAt: null,

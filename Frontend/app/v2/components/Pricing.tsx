@@ -25,7 +25,7 @@ export default function Pricing() {
               </p>
             </div>
             <ul className="space-y-3 flex-1">
-              {['3 courses', 'Syllabus deadline extraction', 'Calendar view', 'AI chat — 10 messages/week', '50 AI generations/month'].map(
+              {['Unlimited courses', 'Syllabus deadline extraction', 'Canvas + iCal sync', 'Calendar view', 'AI chat — 20 messages/week', '50 AI generations/month'].map(
                 (f) => (
                   <li key={f} className="flex items-center gap-2.5 text-sm text-slate-700">
                     <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -61,7 +61,7 @@ export default function Pricing() {
                 </p>
               </div>
               <ul className="space-y-3 flex-1">
-                {['Unlimited courses', 'Unlimited AI chat', 'Unlimited flashcards & quizzes', 'Canvas + iCal sync', 'AI study summaries', 'Priority support'].map(
+                {['Everything in Free', 'Unlimited AI generations', 'AI chat — 50 messages/week', 'Priority support'].map(
                   (f) => (
                     <li key={f} className="flex items-center gap-2.5 text-sm text-slate-700">
                       <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ color: BRAND }}>

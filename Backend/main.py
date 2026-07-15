@@ -903,8 +903,8 @@ class SubscriptionOut(BaseModel):
     ai_generations_max: int | None = Field(None, description="Monthly AI generation limit; null = unlimited (Pro)")
     courses_used: int = Field(description="Total number of courses the user has created")
     courses_max: int | None = Field(None, description="Course limit; null = unlimited")
-    chat_messages_used: int = Field(description="Chat messages sent this week (Pro only)")
-    chat_messages_max: int | None = Field(None, description="Weekly chat message limit; null if not on Pro")
+    chat_messages_used: int = Field(description="Chat messages sent this week")
+    chat_messages_max: int | None = Field(None, description="Weekly chat message limit (higher on Pro; chat itself is never Pro-only)")
 
 
 class UserMeResponse(BaseModel):
@@ -1431,7 +1431,7 @@ def check_tier_limit(db, user_id: str, check_type: str):
                     "limit_type": "ai_generations",
                     "current": profile.ai_generations_used,
                     "max": FREE_AI_GENERATION_LIMIT,
-                    "message": "Free plan allows 5 AI generations per month. Upgrade to Pro for unlimited.",
+                    "message": f"Free plan allows {FREE_AI_GENERATION_LIMIT} AI generations per month. Upgrade to Pro for unlimited.",
                 },
             )
 
@@ -2626,8 +2626,9 @@ def get_subscription(current_user: User = Depends(get_current_user)):
     """Return detailed subscription and usage info for the authenticated user.
 
     Includes the subscription tier ('free'/'pro'), AI generation usage for the current
-    month, and weekly chat message usage. Free users get 5 AI generations/month and no
-    chat access. Pro users get unlimited AI generations and 50 chat messages/week.
+    month, and weekly chat message usage. Free users get FREE_AI_GENERATION_LIMIT AI
+    generations/month and FREE_CHAT_MESSAGE_LIMIT chat messages/week. Pro users get
+    unlimited AI generations and PRO_CHAT_MESSAGE_LIMIT chat messages/week.
     """
     db = SessionLocal()
     try:
@@ -5317,7 +5318,7 @@ async def send_chat_message(
     file: UploadFile = File(None),
     current_user: User = Depends(get_current_user),
 ):
-    """Send a message and get AI response. Pro only, 50 msgs/month."""
+    """Send a message and get AI response. Free tier gets FREE_CHAT_MESSAGE_LIMIT msgs/week; pro gets PRO_CHAT_MESSAGE_LIMIT msgs/week."""
     db = SessionLocal()
     try:
         # Verify conversation ownership
@@ -5328,7 +5329,7 @@ async def send_chat_message(
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Check chat limit (pro-only + 50/week)
+        # Check chat limit (20/week free, 50/week pro)
         check_chat_limit(db, current_user.id)
 
         message_content = content or ""

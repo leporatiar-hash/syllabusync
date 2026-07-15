@@ -446,7 +446,7 @@ export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
       {!canGenerate && (
         <UpgradePrompt
           current={aiGenerationsUsed}
-          max={aiGenerationsMax ?? 5}
+          max={aiGenerationsMax ?? 50}
         />
       )}
 

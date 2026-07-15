@@ -5,7 +5,7 @@ const faqs = [
   },
   {
     q: 'How does the free tier work?',
-    a: 'The free plan includes 3 courses, syllabus deadline extraction, a full calendar view, 50 AI generations a month, and AI chat with 10 messages per week. Pro removes those limits.',
+    a: 'The free plan includes unlimited courses, syllabus deadline extraction, Canvas + iCal sync, a full calendar view, 50 AI generations a month, and AI chat with 20 messages per week. Pro raises the AI generation limit to unlimited and the chat limit to 50 messages/week.',
   },
   {
     q: 'Does it work with Canvas or OAKS?',

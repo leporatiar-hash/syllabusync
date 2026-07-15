@@ -49,11 +49,11 @@ export default function UpgradePage() {
   }
 
   const features = [
-    { label: 'Courses', free: 'Up to 3', pro: 'Unlimited' },
+    { label: 'Courses', free: 'Unlimited', pro: 'Unlimited' },
     { label: 'Calendar & Deadlines', free: 'Full access', pro: 'Full access' },
-    { label: 'Canvas / iCal Sync', free: '—', pro: 'Full access' },
+    { label: 'Canvas / iCal Sync', free: 'Full access', pro: 'Full access' },
     { label: 'AI Study Tools (Flashcards, Quizzes, Summaries)', free: '50/month', pro: 'Unlimited' },
-    { label: 'AI Course Chat', free: '10 msgs/week', pro: '50 msgs/week' },
+    { label: 'AI Course Chat', free: '20 msgs/week', pro: '50 msgs/week' },
   ]
 
   return (

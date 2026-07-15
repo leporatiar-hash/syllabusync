@@ -55,7 +55,7 @@ export default function UpgradePrompt({ current, max, variant = 'inline' }: Upgr
       </div>
       <h3 className="text-xl font-bold text-slate-900">You&apos;ve used all your free study sets</h3>
       <p className="mt-2 text-sm text-slate-600">
-        {current ?? 0} of {max ?? 5} AI generations used this month.
+        {current ?? 0} of {max ?? 50} AI generations used this month.
         Upgrade to Pro for unlimited flashcards, quizzes, and summaries.
       </p>
       <Link
