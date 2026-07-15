@@ -1347,7 +1347,7 @@ def ensure_flashcard_grade_column():
         pass  # Column already exists
 
 
-FREE_CHAT_MESSAGE_LIMIT = 10  # Per week, free tier
+FREE_CHAT_MESSAGE_LIMIT = 20  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
 
@@ -5231,7 +5231,7 @@ def create_chat_conversation(
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new chat conversation. Pro only."""
+    """Create a new chat conversation. Free tier gets FREE_CHAT_MESSAGE_LIMIT msgs/week; pro is unlimited."""
     db = SessionLocal()
     try:
         check_chat_limit(db, current_user.id)
@@ -5252,16 +5252,10 @@ def create_chat_conversation(
 def list_chat_conversations(
     current_user: User = Depends(get_current_user),
 ):
-    """List user's chat conversations."""
+    """List user's chat conversations. Available on every tier — chat itself is capped
+    by check_chat_limit, not by whether the conversation list can be viewed."""
     db = SessionLocal()
     try:
-        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-        tier = _effective_tier(profile)
-        if tier != "pro":
-            raise HTTPException(
-                status_code=403,
-                detail={"error": "pro_required", "message": "AI Chat is a Pro feature."},
-            )
         convs = (
             db.query(ChatConversation)
             .filter(ChatConversation.user_id == current_user.id)
