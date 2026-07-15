@@ -2616,8 +2616,8 @@ class CheckoutRequest(BaseModel):
 
     @validator("plan")
     def plan_must_be_valid(cls, v):
-        if v not in ("monthly", "yearly", "semester"):
-            raise ValueError("plan must be 'monthly', 'yearly', or 'semester'")
+        if v not in ("monthly", "yearly"):
+            raise ValueError("plan must be 'monthly' or 'yearly'")
         return v
 
 
@@ -2707,12 +2707,7 @@ def create_checkout_session(
                 if not profile:
                     raise HTTPException(status_code=500, detail="Unable to create user profile")
 
-        if payload.plan == "monthly":
-            lookup_key = "classmate_pro_monthly"
-        elif payload.plan == "semester":
-            lookup_key = "SemesterlookupKey"
-        else:
-            lookup_key = "classmate_pro_yearly"
+        lookup_key = "classmate_pro_monthly" if payload.plan == "monthly" else "classmate_pro_yearly"
         try:
             prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
         except Exception as e:
