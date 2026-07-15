@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
@@ -168,6 +169,15 @@ export default function UpgradePage() {
             ))}
           </div>
         </div>
+
+        {!isPro && (
+          <p className="mt-6 text-center text-sm text-slate-400">
+            Prefer a one-time payment?{' '}
+            <Link href="/founding" className="font-semibold text-amber-600 hover:text-amber-700">
+              Become a Founding Member for $15, once
+            </Link>
+          </p>
+        )}
       </div>
     </main>
   )

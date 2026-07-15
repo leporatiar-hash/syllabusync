@@ -381,7 +381,19 @@ export default function SettingsPage() {
       {/* Subscription */}
       <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Subscription</h2>
-        {sub.isPro ? (
+        {sub.isFoundingMember ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 px-3 py-0.5 text-xs font-bold text-white">
+                Founding Member
+              </span>
+              <span className="text-sm text-slate-500">Unlimited AI generations, forever</span>
+            </div>
+            <p className="text-sm text-slate-500">
+              Thanks for backing ClassMate early — your $15 one-time purchase never expires.
+            </p>
+          </div>
+        ) : sub.isPro ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="rounded-full bg-[#5B8DEF] px-3 py-0.5 text-xs font-bold text-white">
@@ -419,12 +431,20 @@ export default function SettingsPage() {
               </div>
               <div className="text-xs text-slate-500">AI generations this month</div>
             </div>
-            <Link
-              href="/upgrade"
-              className="inline-block rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-            >
-              Upgrade to Pro
-            </Link>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="/upgrade"
+                className="inline-block rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+              >
+                Upgrade to Pro
+              </Link>
+              <Link
+                href="/founding"
+                className="text-sm font-semibold text-amber-600 hover:text-amber-700"
+              >
+                or become a Founding Member — $15 once
+              </Link>
+            </div>
           </div>
         )}
       </div>

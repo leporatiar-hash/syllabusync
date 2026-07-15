@@ -87,6 +87,12 @@ export default function Pricing() {
         </RevealOnScroll>
 
         <p className="text-center text-sm text-slate-400 mt-8">No credit card required · 10-day Pro trial included · Cancel anytime</p>
+        <p className="text-center text-sm text-slate-400 mt-2">
+          Prefer one payment, no subscription?{' '}
+          <button onClick={() => router.push('/signup?plan=founding')} className="font-semibold text-amber-600 hover:text-amber-700 underline-offset-2 hover:underline">
+            Become a Founding Member for $15, once
+          </button>
+        </p>
       </div>
     </section>
   )

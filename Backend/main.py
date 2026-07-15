@@ -608,6 +608,9 @@ class UserProfile(Base):
     ai_generations_used = Column(Integer, nullable=False, default=0)
     ai_generations_reset_at = Column(DateTime, nullable=True)
     has_completed_onboarding = Column(Boolean, nullable=False, default=False)
+    # Founding member: one-time $15 payment, permanent Pro-equivalent entitlements.
+    # Independent of subscription_tier — a founding member is never subscribed to anything.
+    founding_member = Column(Boolean, nullable=False, default=False)
     # Chat usage tracking
     chat_messages_used = Column(Integer, nullable=False, default=0)
     chat_messages_reset_at = Column(DateTime, nullable=True)
@@ -898,7 +901,8 @@ class UserProfileOut(BaseModel):
 class SubscriptionOut(BaseModel):
     """Current subscription tier and usage information."""
     tier: str = Field(description="Subscription tier: 'free' or 'pro'")
-    is_pro: bool = Field(description="Whether the user has an active Pro subscription")
+    is_pro: bool = Field(description="Whether the user has Pro-equivalent access (subscription or founding member)")
+    is_founding_member: bool = Field(description="Whether the user bought the one-time founding-member lifetime Pro access")
     ai_generations_used: int = Field(description="Number of AI generations used this month (free tier)")
     ai_generations_max: int | None = Field(None, description="Monthly AI generation limit; null = unlimited (Pro)")
     courses_used: int = Field(description="Total number of courses the user has created")
@@ -1242,6 +1246,7 @@ def ensure_referral_columns():
 # ── Subscription tier constants ──
 FREE_AI_GENERATION_LIMIT = 50
 GRANDFATHER_CUTOFF = "2025-01-01T00:00:00"  # Moved to past date - no more grandfathering
+FOUNDING_MEMBER_PRICE_LOOKUP_KEY = "classmate_founding_member"  # one-time $15 Stripe Price
 
 # Emails that always get Pro access regardless of subscription status
 ALWAYS_PRO_EMAILS: set[str] = {
@@ -1252,8 +1257,15 @@ ALWAYS_PRO_EMAILS: set[str] = {
 
 
 def _effective_tier(profile) -> str:
-    """Return the effective tier, accounting for always-pro overrides."""
+    """Return the effective tier, accounting for always-pro overrides.
+
+    Founding members and ALWAYS_PRO_EMAILS both resolve to "pro" here — this is the
+    single choke point every entitlement check goes through, so treating either as
+    pro here is what makes them pro everywhere (generation limits, chat limits, etc).
+    """
     if profile and profile.email and profile.email.lower() in ALWAYS_PRO_EMAILS:
+        return "pro"
+    if profile and profile.founding_member:
         return "pro"
     return profile.subscription_tier if profile else "free"
 
@@ -1270,6 +1282,7 @@ def ensure_subscription_columns():
         ("ai_generations_used", "INTEGER DEFAULT 0"),
         ("ai_generations_reset_at", "TIMESTAMP"),
         ("has_completed_onboarding", "BOOLEAN DEFAULT FALSE"),
+        ("founding_member", "BOOLEAN DEFAULT FALSE"),
     ]
     for col_name, col_def in subscription_cols:
         try:
@@ -1437,9 +1450,9 @@ def check_tier_limit(db, user_id: str, check_type: str):
 
 
 def increment_ai_generation(db, user_id: str):
-    """Increment the AI generation counter for free-tier users."""
+    """Increment the AI generation counter for non-pro users (raw or effective tier)."""
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
-    if profile and profile.subscription_tier == "free":
+    if profile and _effective_tier(profile) != "pro":
         profile.ai_generations_used = (profile.ai_generations_used or 0) + 1
         db.commit()
 
@@ -2429,7 +2442,7 @@ def get_me(current_user: User = Depends(get_current_user)):
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
         if not profile:
-            return {"user_id": current_user.id, "profile": None, "subscription": {"tier": "free", "is_pro": False}, "has_completed_onboarding": False}
+            return {"user_id": current_user.id, "profile": None, "subscription": {"tier": "free", "is_pro": False, "is_founding_member": False}, "has_completed_onboarding": False}
         tier = _effective_tier(profile)
         return {
             "user_id": current_user.id,
@@ -2446,6 +2459,7 @@ def get_me(current_user: User = Depends(get_current_user)):
             "subscription": {
                 "tier": tier,
                 "is_pro": tier == "pro",
+                "is_founding_member": bool(profile.founding_member),
             },
             "has_completed_onboarding": bool(profile.has_completed_onboarding),
         }
@@ -2612,12 +2626,12 @@ def record_referral(current_user: User = Depends(get_current_user), referral_cod
 # ── Subscription / Stripe endpoints ──
 
 class CheckoutRequest(BaseModel):
-    plan: str = Field(description="Billing interval: 'monthly' or 'yearly'")
+    plan: str = Field(description="Billing interval: 'monthly', 'yearly', or the one-time 'founding' purchase")
 
     @validator("plan")
     def plan_must_be_valid(cls, v):
-        if v not in ("monthly", "yearly"):
-            raise ValueError("plan must be 'monthly' or 'yearly'")
+        if v not in ("monthly", "yearly", "founding"):
+            raise ValueError("plan must be 'monthly', 'yearly', or 'founding'")
         return v
 
 
@@ -2656,6 +2670,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
         return {
             "tier": tier,
             "is_pro": tier == "pro",
+            "is_founding_member": bool(profile and profile.founding_member),
             "status": profile.subscription_status if profile else None,
             "period_end": (
                 profile.subscription_period_end.isoformat()
@@ -2683,7 +2698,8 @@ def create_checkout_session(
     payload: CheckoutRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """Create a Stripe Checkout session for subscribing to Pro."""
+    """Create a Stripe Checkout session for subscribing to Pro, or for the one-time
+    founding-member purchase."""
     stripe_lib.api_key = os.getenv("STRIPE_SECRET_KEY")
     if not stripe_lib.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured")
@@ -2708,7 +2724,15 @@ def create_checkout_session(
                 if not profile:
                     raise HTTPException(status_code=500, detail="Unable to create user profile")
 
-        lookup_key = "classmate_pro_monthly" if payload.plan == "monthly" else "classmate_pro_yearly"
+        if payload.plan == "founding" and profile.founding_member:
+            raise HTTPException(status_code=400, detail="You're already a founding member")
+
+        if payload.plan == "founding":
+            lookup_key = FOUNDING_MEMBER_PRICE_LOOKUP_KEY
+        elif payload.plan == "monthly":
+            lookup_key = "classmate_pro_monthly"
+        else:
+            lookup_key = "classmate_pro_yearly"
         try:
             prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
         except Exception as e:
@@ -2735,14 +2759,24 @@ def create_checkout_session(
 
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         try:
-            session = stripe_lib.checkout.Session.create(
-                customer=customer_id,
-                mode="subscription",
-                line_items=[{"price": prices.data[0].id, "quantity": 1}],
-                subscription_data={"trial_period_days": 10},
-                success_url=f"{frontend_url}/settings?checkout=success",
-                cancel_url=f"{frontend_url}/settings?checkout=canceled",
-            )
+            if payload.plan == "founding":
+                # One-time payment — no subscription, no trial.
+                session = stripe_lib.checkout.Session.create(
+                    customer=customer_id,
+                    mode="payment",
+                    line_items=[{"price": prices.data[0].id, "quantity": 1}],
+                    success_url=f"{frontend_url}/founding?checkout=success",
+                    cancel_url=f"{frontend_url}/founding?checkout=canceled",
+                )
+            else:
+                session = stripe_lib.checkout.Session.create(
+                    customer=customer_id,
+                    mode="subscription",
+                    line_items=[{"price": prices.data[0].id, "quantity": 1}],
+                    subscription_data={"trial_period_days": 10},
+                    success_url=f"{frontend_url}/settings?checkout=success",
+                    cancel_url=f"{frontend_url}/settings?checkout=canceled",
+                )
         except Exception as e:
             logger.error(f"[Checkout] Stripe Session.create failed: {e}")
             raise HTTPException(status_code=500, detail="Unable to create checkout session")
@@ -2805,12 +2839,17 @@ async def stripe_webhook(request: Request):
         if event["type"] == "checkout.session.completed":
             session_obj = event["data"]["object"]
             customer_id = session_obj["customer"]
-            subscription_id = session_obj.get("subscription")
 
             profile = db.query(UserProfile).filter(
                 UserProfile.stripe_customer_id == customer_id
             ).first()
-            if profile:
+            if profile and session_obj.get("mode") == "payment":
+                # One-time founding-member purchase — no subscription object involved.
+                profile.founding_member = True
+                db.commit()
+                logger.info(f"[Stripe] User {profile.user_id} became a founding member")
+            elif profile:
+                subscription_id = session_obj.get("subscription")
                 profile.subscription_tier = "pro"
                 profile.stripe_subscription_id = subscription_id
                 profile.subscription_status = "active"

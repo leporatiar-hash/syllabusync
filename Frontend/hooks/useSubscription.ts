@@ -5,6 +5,7 @@ import { API_URL, useAuthFetch } from './useAuthFetch'
 export interface SubscriptionInfo {
   tier: 'free' | 'pro'
   isPro: boolean
+  isFoundingMember: boolean
   aiGenerationsUsed: number
   aiGenerationsMax: number | null // null = unlimited
   chatMessagesUsed: number
@@ -15,6 +16,7 @@ export interface SubscriptionInfo {
 const DEFAULT_SUB: SubscriptionInfo = {
   tier: 'free',
   isPro: false,
+  isFoundingMember: false,
   aiGenerationsUsed: 0,
   aiGenerationsMax: 50,
   chatMessagesUsed: 0,
@@ -37,6 +39,7 @@ export function useSubscription() {
         setSub({
           tier: data.tier,
           isPro: data.is_pro,
+          isFoundingMember: data.is_founding_member ?? false,
           aiGenerationsUsed: data.ai_generations_used,
           aiGenerationsMax: data.ai_generations_max,
           chatMessagesUsed: data.chat_messages_used ?? 0,
