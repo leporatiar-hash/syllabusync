@@ -1,11 +1,17 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import posthog from 'posthog-js'
 import RevealOnScroll from './RevealOnScroll'
 import { BRAND } from './tokens'
 
 export default function Pricing() {
   const router = useRouter()
+
+  useEffect(() => {
+    posthog.capture('pricing_page_viewed', { page: 'landing' })
+  }, [])
 
   return (
     <section id="pricing" className="py-24 px-6 bg-white">
@@ -73,7 +79,10 @@ export default function Pricing() {
                 )}
               </ul>
               <button
-                onClick={() => router.push('/signup?plan=pro')}
+                onClick={() => {
+                  posthog.capture('upgrade_clicked', { plan: 'pro' })
+                  router.push('/signup?plan=pro')
+                }}
                 className="w-full py-3 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
                 style={{ background: BRAND }}
               >
@@ -89,7 +98,13 @@ export default function Pricing() {
         <p className="text-center text-sm text-slate-400 mt-8">No credit card required · 10-day Pro trial included · Cancel anytime</p>
         <p className="text-center text-sm text-slate-400 mt-2">
           Prefer one payment, no subscription?{' '}
-          <button onClick={() => router.push('/signup?plan=founding')} className="font-semibold text-amber-600 hover:text-amber-700 underline-offset-2 hover:underline">
+          <button
+            onClick={() => {
+              posthog.capture('upgrade_clicked', { plan: 'founding' })
+              router.push('/signup?plan=founding')
+            }}
+            className="font-semibold text-amber-600 hover:text-amber-700 underline-offset-2 hover:underline"
+          >
             Become a Founding Member for $15, once
           </button>
         </p>

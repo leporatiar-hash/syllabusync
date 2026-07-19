@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import posthog from 'posthog-js'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
@@ -14,6 +15,10 @@ export default function UpgradePage() {
   const { fetchWithAuth } = useAuthFetch()
   const { isPro, loading: subLoading } = useSubscription()
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
+
+  useEffect(() => {
+    posthog.capture('pricing_page_viewed', { page: 'upgrade' })
+  }, [])
 
   if (authLoading || subLoading) {
     return (
@@ -29,6 +34,7 @@ export default function UpgradePage() {
   }
 
   const handleCheckout = async (plan: 'monthly' | 'yearly') => {
+    posthog.capture('upgrade_clicked', { plan })
     setCheckoutLoading(plan)
     try {
       const res = await fetchWithAuth(`${API_URL}/create-checkout-session`, {
@@ -38,6 +44,7 @@ export default function UpgradePage() {
       })
       if (res.ok) {
         const data = await res.json()
+        posthog.capture('checkout_started', { plan })
         window.location.href = data.checkout_url
       } else {
         console.error('Checkout failed')

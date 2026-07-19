@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import posthog from 'posthog-js'
@@ -15,12 +15,20 @@ const ICalConnectModal = dynamic(() => import('../../components/ICalConnectModal
 const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
 const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, loading: authLoading, signOut } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
   const sub = useSubscription()
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Fires once when Stripe redirects back here after a successful subscription checkout.
+  useEffect(() => {
+    if (searchParams.get('checkout') === 'success') {
+      posthog.capture('checkout_completed')
+    }
+  }, [searchParams])
 
   const [fullName, setFullName] = useState('')
   const [schoolName, setSchoolName] = useState('')
@@ -631,6 +639,18 @@ export default function SettingsPage() {
         )}
       </div>
     </main>
+  )
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center text-sm text-slate-500">
+        Loading...
+      </div>
+    }>
+      <SettingsPageContent />
+    </Suspense>
   )
 }
 

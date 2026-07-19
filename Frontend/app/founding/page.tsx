@@ -1,7 +1,8 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import posthog from 'posthog-js'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
@@ -18,6 +19,16 @@ function FoundingContent() {
 
   const checkoutResult = searchParams.get('checkout')
 
+  useEffect(() => {
+    posthog.capture('pricing_page_viewed', { page: 'founding' })
+  }, [])
+
+  useEffect(() => {
+    if (checkoutResult === 'success') {
+      posthog.capture('founding_checkout_completed')
+    }
+  }, [checkoutResult])
+
   if (authLoading || subLoading) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-white via-[#FFFBEB] to-[#FEF3C7]">
@@ -32,6 +43,7 @@ function FoundingContent() {
   }
 
   const handleCheckout = async () => {
+    posthog.capture('upgrade_clicked', { plan: 'founding' })
     setError(null)
     setCheckoutLoading(true)
     try {
@@ -42,6 +54,7 @@ function FoundingContent() {
       })
       if (res.ok) {
         const data = await res.json()
+        posthog.capture('checkout_started', { plan: 'founding' })
         window.location.href = data.checkout_url
       } else {
         const data = await res.json().catch(() => null)
