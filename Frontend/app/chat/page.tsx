@@ -71,35 +71,22 @@ export default function ChatPage() {
   if (authLoading || !user) return null
 
   return (
-    <main className="min-h-screen px-4 pb-20 pt-10">
+    <main className="min-h-screen px-4 pb-20 pt-6">
       <div className="mx-auto w-full max-w-[1200px]">
-        {/* Header row: title left, tab switcher right */}
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Chat</h1>
-            <p className="mt-1 text-slate-600">
-              Your AI study assistant — ask questions, generate flashcards and quizzes, and stay on top of deadlines.
-            </p>
+        {activeTab === 'library' && (
+          <div className="mb-6 flex items-center gap-3">
+            <button
+              onClick={() => setActiveTab('chat')}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              </svg>
+              Back to chat
+            </button>
+            <h1 className="text-2xl font-bold text-slate-900">Library</h1>
           </div>
-          <div className="sticky top-3 z-20 mt-1 flex shrink-0 gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-            {(['chat', 'library'] as const).map((tab) => {
-              const labels = { chat: 'Chat', library: 'Library' }
-              return (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`rounded-full px-5 py-2 text-sm font-semibold transition-all duration-300 ${
-                    activeTab === tab
-                      ? 'bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {labels[tab]}
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        )}
 
         {/* Tab Content */}
         {activeTab === 'chat' ? (
