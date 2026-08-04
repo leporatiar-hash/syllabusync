@@ -5,6 +5,7 @@ import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
+import { Copy, Check, Square } from 'lucide-react'
 
 interface CreatedStudySet {
   type: 'flashcards' | 'quiz' | 'summary'
@@ -51,10 +52,26 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
   const [proactiveLoading, setProactiveLoading] = useState(false)
   const [pendingChipInput, setPendingChipInput] = useState('')
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  const copyMessage = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // clipboard access can be blocked — button still gives feedback below
+    }
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(prev => (prev === id ? null : prev)), 1500)
+  }
+
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort()
+  }
 
   // Check if limit is already reached from subscription data
   useEffect(() => {
@@ -200,10 +217,13 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
       created_at: new Date().toISOString(),
     }])
 
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     try {
       const res = await fetchWithAuth(
         `${API_URL}/chat/conversations/${activeConversation}/messages`,
-        { method: 'POST', body: formData }
+        { method: 'POST', body: formData, signal: controller.signal }
       )
 
       if (!res.ok) {
@@ -274,11 +294,18 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
         }
       }
     } catch (err) {
-      console.error('Failed to send message:', err)
-      setMessages(prev => prev.filter(m => m.id !== tempId && m.id !== streamId))
-      setStreamingMsgId(null)
+      if (controller.signal.aborted) {
+        // User-initiated stop — keep the user message and whatever partial
+        // reply already streamed in, just close out the "generating" state.
+        setStreamingMsgId(null)
+      } else {
+        console.error('Failed to send message:', err)
+        setMessages(prev => prev.filter(m => m.id !== tempId && m.id !== streamId))
+        setStreamingMsgId(null)
+      }
     } finally {
       setSending(false)
+      abortControllerRef.current = null
     }
   }
 
@@ -467,10 +494,10 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                     className={`mb-4 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                   >
                     <div
-                      className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      className={`max-w-[80%] text-sm leading-relaxed ${
                         msg.role === 'user'
-                          ? 'bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white'
-                          : 'bg-slate-100 text-slate-700'
+                          ? 'rounded-2xl rounded-tr-sm bg-slate-100 px-4 py-3 text-slate-800'
+                          : 'text-slate-800'
                       }`}
                     >
                       {msg.role === 'user' ? (
@@ -486,7 +513,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                               <>
                                 {displayText && <span>{displayText}</span>}
                                 {fileName && (
-                                  <div className={`${displayText ? 'mt-2' : ''} flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-xs text-white/90`}>
+                                  <div className={`${displayText ? 'mt-2' : ''} flex items-center gap-1.5 rounded-lg bg-slate-200 px-3 py-1.5 text-xs text-slate-600`}>
                                     <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                       <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                     </svg>
@@ -521,9 +548,18 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                           {msg.content}
                         </ReactMarkdown>
                       )}
-                      <p className={`mt-1 text-xs ${msg.role === 'user' ? 'text-white/60' : 'text-slate-400'}`}>
-                        {formatTime(msg.created_at)}
-                      </p>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <p className="text-xs text-slate-400">{formatTime(msg.created_at)}</p>
+                      {msg.role === 'assistant' && msg.content && msg.id !== streamingMsgId && (
+                        <button
+                          onClick={() => copyMessage(msg.id, msg.content)}
+                          className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-slate-400 transition-colors hover:text-slate-600"
+                        >
+                          {copiedId === msg.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                          {copiedId === msg.id ? 'Copied' : 'Copy'}
+                        </button>
+                      )}
                     </div>
                     {msg.created_study_set && (
                       <div className="mt-2 flex max-w-[80%] flex-col gap-1.5">
@@ -675,15 +711,26 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
                     className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition-colors focus:border-[#5B8DEF] focus:bg-white"
                   />
 
-                  {/* Send button */}
+                  {/* Send / stop button */}
                   <button
-                    onClick={sendMessage}
-                    disabled={(!input.trim() && !attachedFile) || sending}
-                    className="shrink-0 rounded-xl bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] p-2.5 text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+                    onClick={sending ? stopGeneration : sendMessage}
+                    disabled={!sending && !input.trim() && !attachedFile}
+                    aria-label={sending ? 'Stop generating' : 'Send message'}
+                    className={`shrink-0 rounded-xl p-2.5 shadow-sm transition-all ${
+                      sending
+                        ? 'bg-slate-800 text-white hover:bg-slate-900'
+                        : input.trim() || attachedFile
+                        ? 'bg-[#5B8DEF] text-white hover:-translate-y-0.5 hover:bg-[#4A7EE0] hover:shadow-md'
+                        : 'bg-slate-100 text-slate-400'
+                    }`}
                   >
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-                    </svg>
+                    {sending ? (
+                      <Square className="h-4 w-4" fill="currentColor" />
+                    ) : (
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                      </svg>
+                    )}
                   </button>
                 </div>
               </div>
