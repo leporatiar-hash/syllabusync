@@ -471,28 +471,17 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
   if (subLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="flex h-full items-center justify-center">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#5B4EE8] border-t-transparent" />
       </div>
     )
   }
 
   return (
-    <div className="flex h-[calc(100vh-220px)] min-h-[500px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      {/* Sidebar */}
-      <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-72 flex-col border-r border-slate-200 bg-slate-50/50`}>
+    <div className="flex h-full w-full overflow-hidden bg-white">
+      {/* Sidebar — collapsible on every breakpoint via the header's panel toggle */}
+      <div className={`${showSidebar ? 'flex' : 'hidden'} w-full md:w-72 flex-col border-r border-slate-200 bg-slate-50/50`}>
         <div className="p-3">
-          {onViewLibrary && (
-            <button
-              onClick={onViewLibrary}
-              className="mb-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v8.25m19.5 0v.75A2.25 2.25 0 0 1 19.5 17.25h-15A2.25 2.25 0 0 1 2.25 15v-.75" />
-              </svg>
-              Library
-            </button>
-          )}
           <button
             onClick={createConversation}
             disabled={limitReached}
@@ -557,31 +546,43 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
 
       {/* Chat Area */}
       <div className={`${!showSidebar ? 'flex' : 'hidden'} md:flex flex-1 flex-col`}>
-        {/* Header */}
+        {/* Header — panel toggle collapses the sidebar on every breakpoint now,
+            and Library lives here (not just in the sidebar) so it stays
+            reachable even when the sidebar is collapsed. */}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-3" style={{ height: 56 }}>
           <button
-            onClick={() => setShowSidebar(true)}
-            className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 md:hidden"
-            aria-label="Show conversations"
+            onClick={() => setShowSidebar(s => !s)}
+            className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100"
+            aria-label={showSidebar ? 'Hide conversations' : 'Show conversations'}
           >
             <PanelLeft className="h-5 w-5" />
           </button>
-          <div className="hidden items-center gap-2 md:flex">
+          <div className="flex items-center gap-2">
             <Mark size={22} radius={6} fontSize={12} />
             <span className="text-sm font-semibold text-slate-900">ClassMate</span>
           </div>
-          <div className="flex items-center gap-2 md:hidden">
-            <Mark size={22} radius={6} fontSize={12} />
-            <span className="text-sm font-semibold text-slate-900">ClassMate</span>
+          <div className="flex items-center gap-1">
+            {onViewLibrary && (
+              <button
+                onClick={onViewLibrary}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                aria-label="Library"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v8.25m19.5 0v.75A2.25 2.25 0 0 1 19.5 17.25h-15A2.25 2.25 0 0 1 2.25 15v-.75" />
+                </svg>
+                <span className="hidden sm:inline">Library</span>
+              </button>
+            )}
+            <button
+              onClick={createConversation}
+              disabled={limitReached}
+              className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 disabled:opacity-40"
+              aria-label="New chat"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            onClick={createConversation}
-            disabled={limitReached}
-            className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 disabled:opacity-40"
-            aria-label="New chat"
-          >
-            <Plus className="h-5 w-5" />
-          </button>
         </div>
 
         <input
