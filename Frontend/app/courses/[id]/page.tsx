@@ -746,7 +746,7 @@ export default function CourseDetailPage() {
         {mainTab === 'deadlines' ? (
           <div className="mt-6 grid gap-8 lg:grid-cols-[1.6fr_1fr]">
             <section className="rounded-3xl bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-slate-900">Deadline Timeline</h2>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="rounded-full bg-[#FFEDD5] px-3 py-1 font-semibold text-[#FB923C]">
@@ -755,6 +755,15 @@ export default function CourseDetailPage() {
                   <span className="rounded-full bg-[#DCFCE7] px-3 py-1 font-semibold text-[#4ADE80]">
                     {savedCount} in calendar
                   </span>
+                  {unsavedCount > 0 && (
+                    <button
+                      onClick={saveAllToCalendar}
+                      disabled={bulkSaving}
+                      className="rounded-full bg-[#5B8DEF] px-3 py-1 font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
+                    >
+                      {bulkSaving ? 'Saving...' : `Save All (${unsavedCount}) to Calendar`}
+                    </button>
+                  )}
                 </div>
               </div>
 
