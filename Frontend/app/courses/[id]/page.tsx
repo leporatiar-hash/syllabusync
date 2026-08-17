@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
-import { API_URL, useAuthFetch } from '../../../hooks/useAuthFetch'
+import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../../hooks/useAuthFetch'
 import { useAuth } from '../../../lib/useAuth'
 import posthog from 'posthog-js'
 
@@ -416,7 +416,7 @@ export default function CourseDetailPage() {
       await loadCourse()
     } catch (err) {
       console.error('Failed to upload syllabus:', err)
-      setSyllabusError(err instanceof Error ? err.message : 'Failed to upload syllabus')
+      setSyllabusError(friendlyUploadErrorMessage(err))
     } finally {
       setSyllabusLoading(false)
       setTimeout(() => setSyllabusSuccess(false), 3000)

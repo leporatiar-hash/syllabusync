@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import posthog from 'posthog-js'
-import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
+import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import { getCourseColor } from '../../lib/courseColors'
 
@@ -119,7 +119,7 @@ export default function CoursesClient() {
         setTimeout(() => setShowToast(false), 3500)
       }
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Upload failed.')
+      setUploadError(friendlyUploadErrorMessage(err))
     } finally {
       setUploading(false)
       if (syllabusInputRef.current) syllabusInputRef.current.value = ''

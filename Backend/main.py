@@ -21,6 +21,10 @@ from slowapi.errors import RateLimitExceeded
 import bcrypt as _bcrypt
 import pdfplumber
 from docx import Document
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 import json
 import uuid
 import io
@@ -987,14 +991,38 @@ def extract_text_from_pdf(content: bytes) -> str:
         )
 
 
+def _iter_docx_block_items(doc: Document):
+    """Yield paragraphs and tables from a docx body in document order.
+    doc.paragraphs and doc.tables (used separately) lose interleaving and,
+    critically, doc.paragraphs skips table cell text entirely."""
+    for child in doc.element.body.iterchildren():
+        if isinstance(child, CT_P):
+            yield Paragraph(child, doc)
+        elif isinstance(child, CT_Tbl):
+            yield Table(child, doc)
+
+
 def extract_text_from_docx(content: bytes) -> str:
     try:
         file_stream = io.BytesIO(content)
         doc = Document(file_stream)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        text = "\n".join(paragraphs)
 
-        print(f"[DEBUG] DOCX has {len(doc.paragraphs)} paragraphs")
+        parts = []
+        table_count = 0
+        for block in _iter_docx_block_items(doc):
+            if isinstance(block, Paragraph):
+                if block.text.strip():
+                    parts.append(block.text)
+            elif isinstance(block, Table):
+                table_count += 1
+                for row in block.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        parts.append(" | ".join(cells))
+                parts.append("")
+        text = "\n".join(parts)
+
+        print(f"[DEBUG] DOCX has {len(doc.paragraphs)} paragraphs, {table_count} tables")
         print(f"[DEBUG] Extracted {len(text)} characters from DOCX")
 
         # Check if extraction was successful
