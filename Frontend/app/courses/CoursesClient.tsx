@@ -17,7 +17,7 @@ interface Course {
   id: string
   name: string
   code?: string
-  semester: string
+  semester: string | null
   deadline_count?: number
   course_info?: CourseInfo | null
 }

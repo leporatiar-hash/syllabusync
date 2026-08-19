@@ -821,7 +821,7 @@ class CourseOut(BaseModel):
     id: str = Field(description="Unique course identifier (UUID)")
     name: str = Field(description="Course name, e.g. 'Biology 101'")
     code: str | None = Field(None, description="Course code/number, e.g. 'BIO 101'")
-    semester: str = Field(description="Semester or term, e.g. 'Spring 2025'")
+    semester: str | None = Field(None, description="Semester or term, e.g. 'Spring 2025'")
     start_date: str | None = Field(None, description="Course start date (YYYY-MM-DD)")
     end_date: str | None = Field(None, description="Course end date (YYYY-MM-DD)")
     deadline_count: int = Field(description="Number of deadlines/assignments in this course")
