@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import AuthWrapper from "../components/AuthWrapper";
 import BuildVerifier from "../components/BuildVerifier";
 import SiteChrome from "../components/SiteChrome";
@@ -45,6 +47,8 @@ export default function RootLayout({
         <AuthWrapper>
           <SiteChrome>{children}</SiteChrome>
         </AuthWrapper>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
