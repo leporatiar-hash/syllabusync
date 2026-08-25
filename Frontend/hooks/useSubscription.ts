@@ -11,6 +11,7 @@ export interface SubscriptionInfo {
   chatMessagesUsed: number
   chatMessagesMax: number | null // null while /me/subscription hasn't loaded yet
   chatMessagesResetAt: string | null
+  upgradePromptDismissedAt: string | null
 }
 
 const DEFAULT_SUB: SubscriptionInfo = {
@@ -22,6 +23,7 @@ const DEFAULT_SUB: SubscriptionInfo = {
   chatMessagesUsed: 0,
   chatMessagesMax: null,
   chatMessagesResetAt: null,
+  upgradePromptDismissedAt: null,
 }
 
 export function useSubscription() {
@@ -45,6 +47,7 @@ export function useSubscription() {
           chatMessagesUsed: data.chat_messages_used ?? 0,
           chatMessagesMax: data.chat_messages_max ?? null,
           chatMessagesResetAt: data.chat_messages_reset_at ?? null,
+          upgradePromptDismissedAt: data.upgrade_prompt_dismissed_at ?? null,
         })
       }
     } catch {
@@ -65,5 +68,15 @@ export function useSubscription() {
   const canChat =
     sub.chatMessagesMax === null || sub.chatMessagesUsed < sub.chatMessagesMax
 
-  return { ...sub, loading, refresh, canGenerate, canChat }
+  const dismissUpgradePrompt = useCallback(async () => {
+    const now = new Date().toISOString()
+    setSub((prev) => ({ ...prev, upgradePromptDismissedAt: now })) // optimistic
+    try {
+      await fetchWithAuth(`${API_URL}/me/upgrade-prompt/dismiss`, { method: 'POST' })
+    } catch {
+      // non-fatal — local dismissal still holds for this session
+    }
+  }, [fetchWithAuth])
+
+  return { ...sub, loading, refresh, canGenerate, canChat, dismissUpgradePrompt }
 }

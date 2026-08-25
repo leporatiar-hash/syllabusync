@@ -620,6 +620,8 @@ class UserProfile(Base):
     # Chat usage tracking
     chat_messages_used = Column(Integer, nullable=False, default=0)
     chat_messages_reset_at = Column(DateTime, nullable=True)
+    # Founding-member upgrade prompt (shown on /home after first successful course sync)
+    upgrade_prompt_dismissed_at = Column(DateTime, nullable=True)
 
 
 class CalendarEntry(Base):
@@ -917,6 +919,7 @@ class SubscriptionOut(BaseModel):
     courses_max: int | None = Field(None, description="Course limit; null = unlimited")
     chat_messages_used: int = Field(description="Chat messages sent this week")
     chat_messages_max: int | None = Field(None, description="Weekly chat message limit (higher on Pro; chat itself is never Pro-only)")
+    upgrade_prompt_dismissed_at: str | None = Field(None, description="ISO 8601 timestamp of the last time the user dismissed the founding-member upgrade prompt; null if never dismissed")
 
 
 class UserMeResponse(BaseModel):
@@ -1401,6 +1404,17 @@ def ensure_flashcard_grade_column():
         pass  # Column already exists
 
 
+def ensure_upgrade_prompt_column():
+    """Add upgrade_prompt_dismissed_at column to user_profiles for the founding-member
+    upgrade card shown on /home after first successful course sync."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN upgrade_prompt_dismissed_at TIMESTAMP"))
+            logger.info("[Migration] Added 'upgrade_prompt_dismissed_at' column to user_profiles")
+    except Exception:
+        pass  # Column already exists
+
+
 FREE_CHAT_MESSAGE_LIMIT = 20  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
@@ -1508,6 +1522,7 @@ ensure_subscription_columns()
 ensure_chat_columns()
 ensure_course_syllabus_column()
 ensure_flashcard_grade_column()
+ensure_upgrade_prompt_column()
 Base.metadata.create_all(bind=engine)
 
 
@@ -2731,7 +2746,29 @@ def get_subscription(current_user: User = Depends(get_current_user)):
                 if profile and profile.chat_messages_reset_at
                 else None
             ),
+            "upgrade_prompt_dismissed_at": (
+                profile.upgrade_prompt_dismissed_at.isoformat()
+                if profile and profile.upgrade_prompt_dismissed_at
+                else None
+            ),
         }
+    finally:
+        db.close()
+
+
+@app.post("/me/upgrade-prompt/dismiss", tags=["user"], summary="Dismiss the founding-member upgrade prompt")
+def dismiss_upgrade_prompt(current_user: User = Depends(get_current_user)):
+    """Record that the user dismissed the founding-member upgrade card on /home.
+    It won't be shown again for 7 days, or until they hit a free-tier limit — whichever
+    comes first (enforced client-side using this timestamp)."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        profile.upgrade_prompt_dismissed_at = datetime.utcnow()
+        db.commit()
+        return {"upgrade_prompt_dismissed_at": profile.upgrade_prompt_dismissed_at.isoformat()}
     finally:
         db.close()
 

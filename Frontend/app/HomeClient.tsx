@@ -9,6 +9,8 @@ import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
 import { useSubscription } from '../hooks/useSubscription'
 import UpgradePrompt from '../components/UpgradePrompt'
+import FoundingMemberPrompt from '../components/FoundingMemberPrompt'
+import { decideFoundingPrompt } from '../lib/foundingPrompt'
 
 const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
 const ICalConnectModal = dynamic(() => import('../components/ICalConnectModal'), { ssr: false })
@@ -103,7 +105,16 @@ export default function HomeClient() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const { canGenerate, isPro } = useSubscription()
+  const {
+    canGenerate,
+    isPro,
+    aiGenerationsUsed,
+    aiGenerationsMax,
+    chatMessagesUsed,
+    chatMessagesMax,
+    upgradePromptDismissedAt,
+    dismissUpgradePrompt,
+  } = useSubscription()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [loading, setLoading] = useState(true)
   const [lmsConnections, setLmsConnections] = useState<any[]>([])
@@ -203,6 +214,19 @@ export default function HomeClient() {
 
   const referralLink = referralCode ? `https://tryclassmate.com/signup?ref=${referralCode}` : ''
 
+  const foundingPromptDecision = lmsLoaded
+    ? decideFoundingPrompt({
+        isPro,
+        hasLmsConnection: lmsConnections.length > 0,
+        hasCourses: courses.length > 0,
+        aiGenerationsUsed,
+        aiGenerationsMax,
+        chatMessagesUsed,
+        chatMessagesMax,
+        upgradePromptDismissedAt,
+      })
+    : { show: false as const }
+
   const copyLink = () => {
     if (!referralLink) return
     navigator.clipboard.writeText(referralLink)
@@ -261,7 +285,11 @@ export default function HomeClient() {
 
       {!isPro && (
         <div className="mx-auto max-w-6xl px-4 pt-8">
-          <UpgradePrompt variant="promo" />
+          {foundingPromptDecision.show ? (
+            <FoundingMemberPrompt reason={foundingPromptDecision.reason} onDismiss={dismissUpgradePrompt} />
+          ) : (
+            <UpgradePrompt variant="promo" />
+          )}
         </div>
       )}
 
