@@ -10,6 +10,7 @@ import posthog from 'posthog-js'
 interface CreateTabProps {
   courses: any[]
   onSuccess: () => void
+  defaultCourseId?: string
 }
 
 interface GeneratedTools {
@@ -27,13 +28,13 @@ interface SavedResult {
   tools: GeneratedTools
 }
 
-export default function CreateTab({ courses, onSuccess }: CreateTabProps) {
+export default function CreateTab({ courses, onSuccess, defaultCourseId }: CreateTabProps) {
   const router = useRouter()
   const { fetchWithAuth } = useAuthFetch()
   const { canGenerate, aiGenerationsUsed, aiGenerationsMax, isPro } = useSubscription()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
-  const [selectedCourse, setSelectedCourse] = useState('')
+  const [selectedCourse, setSelectedCourse] = useState(defaultCourseId || '')
   const [generateFlashcards, setGenerateFlashcards] = useState(true)
   const [generateQuiz, setGenerateQuiz] = useState(true)
   const [generateSummary, setGenerateSummary] = useState(true)

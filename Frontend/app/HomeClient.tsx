@@ -10,6 +10,7 @@ import { useAuth } from '../lib/useAuth'
 import { useSubscription } from '../hooks/useSubscription'
 import UpgradePrompt from '../components/UpgradePrompt'
 import FoundingMemberPrompt from '../components/FoundingMemberPrompt'
+import FeatureDiscoveryPanel from '../components/FeatureDiscoveryPanel'
 import { decideFoundingPrompt } from '../lib/foundingPrompt'
 
 const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
@@ -126,6 +127,7 @@ export default function HomeClient() {
   const [referralCount, setReferralCount] = useState(0)
   const [copied, setCopied] = useState(false)
   const [showGettingStarted, setShowGettingStarted] = useState(false)
+  const [featureUsage, setFeatureUsage] = useState<{ used_study_guide: boolean; used_flashcards: boolean; used_chat: boolean; panel_hidden: boolean } | null>(null)
 
 
   // Show Getting Started checklist unless dismissed
@@ -212,7 +214,30 @@ export default function HomeClient() {
     loadReferral()
   }, [user])
 
+  useEffect(() => {
+    if (!user) return
+    const loadFeatureUsage = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/me/feature-usage`)
+        if (res.ok) setFeatureUsage(await res.json())
+      } catch { /* non-fatal */ }
+    }
+    loadFeatureUsage()
+  }, [user, fetchWithAuth])
+
+  const hideFeaturePanel = () => {
+    setFeatureUsage((prev) => (prev ? { ...prev, panel_hidden: true } : prev)) // optimistic
+    fetchWithAuth(`${API_URL}/me/feature-usage/hide-panel`, { method: 'POST' }).catch(() => {})
+  }
+
   const referralLink = referralCode ? `https://tryclassmate.com/signup?ref=${referralCode}` : ''
+
+  const showFeaturePanel = !!(
+    featureUsage &&
+    !featureUsage.panel_hidden &&
+    !(featureUsage.used_study_guide && featureUsage.used_flashcards && featureUsage.used_chat) &&
+    courses.length > 0
+  )
 
   const foundingPromptDecision = lmsLoaded
     ? decideFoundingPrompt({
@@ -375,6 +400,11 @@ export default function HomeClient() {
           </div>
         </div>
       </section>
+
+      {/* Get more out of your courses — feature discovery */}
+      {showFeaturePanel && (
+        <FeatureDiscoveryPanel latestCourseId={courses[0].id} onHide={hideFeaturePanel} />
+      )}
 
       {/* Getting Started Checklist */}
       {showGettingStarted && (

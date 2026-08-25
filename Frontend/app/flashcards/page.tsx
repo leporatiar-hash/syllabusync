@@ -67,6 +67,7 @@ function FlashcardsContent() {
   const { fetchWithAuth } = useAuthFetch()
   const searchParams = useSearchParams()
   const setIdParam = searchParams.get('set')
+  const courseParam = searchParams.get('course')
 
   // Debug: Force update - v2.0
 
@@ -157,7 +158,8 @@ function FlashcardsContent() {
         setQuizzes(allQuizzes)
 
         if (!selectedCourseId && data.length > 0) {
-          setSelectedCourseId(data[0].id)
+          const matchesParam = courseParam && data.some((c: Course) => c.id === courseParam)
+          setSelectedCourseId(matchesParam ? courseParam! : data[0].id)
         }
 
         if (setIdParam && allSets.find(s => s.id === setIdParam)) {

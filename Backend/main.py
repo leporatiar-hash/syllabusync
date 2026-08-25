@@ -622,6 +622,8 @@ class UserProfile(Base):
     chat_messages_reset_at = Column(DateTime, nullable=True)
     # Founding-member upgrade prompt (shown on /home after first successful course sync)
     upgrade_prompt_dismissed_at = Column(DateTime, nullable=True)
+    # "Get more out of your courses" feature-discovery panel on /home
+    feature_panel_hidden = Column(Boolean, nullable=False, default=False)
 
 
 class CalendarEntry(Base):
@@ -1415,6 +1417,17 @@ def ensure_upgrade_prompt_column():
         pass  # Column already exists
 
 
+def ensure_feature_panel_column():
+    """Add feature_panel_hidden column to user_profiles for the "Get more out of your
+    courses" feature-discovery panel on /home."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN feature_panel_hidden BOOLEAN DEFAULT FALSE"))
+            logger.info("[Migration] Added 'feature_panel_hidden' column to user_profiles")
+    except Exception:
+        pass  # Column already exists
+
+
 FREE_CHAT_MESSAGE_LIMIT = 20  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
@@ -1523,6 +1536,7 @@ ensure_chat_columns()
 ensure_course_syllabus_column()
 ensure_flashcard_grade_column()
 ensure_upgrade_prompt_column()
+ensure_feature_panel_column()
 Base.metadata.create_all(bind=engine)
 
 
@@ -2769,6 +2783,48 @@ def dismiss_upgrade_prompt(current_user: User = Depends(get_current_user)):
         profile.upgrade_prompt_dismissed_at = datetime.utcnow()
         db.commit()
         return {"upgrade_prompt_dismissed_at": profile.upgrade_prompt_dismissed_at.isoformat()}
+    finally:
+        db.close()
+
+
+@app.get("/me/feature-usage", tags=["user"], summary="Check which AI features the user has tried")
+def get_feature_usage(current_user: User = Depends(get_current_user)):
+    """Report whether the user has ever generated a study guide (summary), a flashcard
+    set, or sent a chat message — used to auto-hide the "Get more out of your courses"
+    feature-discovery panel on /home once all three have been tried."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        used_study_guide = db.query(Summary.id).filter(Summary.user_id == current_user.id).first() is not None
+        used_flashcards = db.query(FlashcardSet.id).filter(FlashcardSet.user_id == current_user.id).first() is not None
+        used_chat = (
+            db.query(ChatMessage.id)
+            .join(ChatConversation, ChatMessage.conversation_id == ChatConversation.id)
+            .filter(ChatConversation.user_id == current_user.id, ChatMessage.role == "user")
+            .first()
+            is not None
+        )
+        return {
+            "used_study_guide": used_study_guide,
+            "used_flashcards": used_flashcards,
+            "used_chat": used_chat,
+            "panel_hidden": bool(profile and profile.feature_panel_hidden),
+        }
+    finally:
+        db.close()
+
+
+@app.post("/me/feature-usage/hide-panel", tags=["user"], summary="Hide the feature-discovery panel")
+def hide_feature_panel(current_user: User = Depends(get_current_user)):
+    """Permanently hide the "Get more out of your courses" panel on /home for this user."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        profile.feature_panel_hidden = True
+        db.commit()
+        return {"panel_hidden": True}
     finally:
         db.close()
 

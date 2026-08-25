@@ -33,6 +33,7 @@ interface Conversation {
 interface ChatTabProps {
   onViewLibrary?: () => void
   triggerProactive?: boolean
+  initialPrompt?: string
 }
 
 function Mark({ size = 22, radius = 7, fontSize = 12 }: { size?: number; radius?: number; fontSize?: number }) {
@@ -136,7 +137,7 @@ function ChatComposer({
   )
 }
 
-export default function ChatTab({ onViewLibrary, triggerProactive = false }: ChatTabProps) {
+export default function ChatTab({ onViewLibrary, triggerProactive = false, initialPrompt }: ChatTabProps) {
   const { fetchWithAuth } = useAuthFetch()
   const { isPro, chatMessagesUsed, chatMessagesMax, chatMessagesResetAt, loading: subLoading } = useSubscription()
 
@@ -160,6 +161,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const initialPromptFiredRef = useRef(false)
 
   const copyMessage = async (id: string, text: string) => {
     try {
@@ -435,6 +437,14 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false }: Cha
       setTimeout(() => textareaRef.current?.focus(), 50)
     }
   }, [activeConversation, pendingChipInput])
+
+  // Deep-link entry point (e.g. from the "Get more out of your courses" panel on /home):
+  // pre-fill the composer with a suggested first prompt, same mechanism as a suggestion chip.
+  useEffect(() => {
+    if (!initialPrompt || initialPromptFiredRef.current || activeConversation) return
+    initialPromptFiredRef.current = true
+    handleChipClick(initialPrompt)
+  }, [initialPrompt, activeConversation])
 
   // Shared by both composer instances (centered empty-state one and the bottom
   // dock): before a conversation exists, submitting behaves like a suggestion

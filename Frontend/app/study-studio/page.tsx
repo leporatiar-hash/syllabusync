@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import posthog from 'posthog-js'
@@ -9,11 +9,13 @@ import CreateTab from './CreateTab'
 import LibraryTab from './LibraryTab'
 import ChatTab from './ChatTab'
 
-export default function StudyStudioPage() {
+function StudyStudioContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const courseParam = searchParams.get('course')
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const [activeTab, setActiveTab] = useState<'create' | 'library' | 'chat'>('library')
+  const [activeTab, setActiveTab] = useState<'create' | 'library' | 'chat'>(courseParam ? 'create' : 'library')
   const [courses, setCourses] = useState<any[]>([])
   const [studyTools, setStudyTools] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -159,7 +161,7 @@ export default function StudyStudioPage() {
 
         {/* Tab Content */}
         {activeTab === 'create' ? (
-          <CreateTab courses={courses} onSuccess={loadData} />
+          <CreateTab courses={courses} onSuccess={loadData} defaultCourseId={courseParam || undefined} />
         ) : activeTab === 'library' ? (
           <LibraryTab courses={courses} studyTools={studyTools} loading={loading} onDelete={loadData} />
         ) : (
@@ -167,5 +169,17 @@ export default function StudyStudioPage() {
         )}
       </div>
     </main>
+  )
+}
+
+export default function StudyStudioPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center text-sm text-slate-500">
+        Loading...
+      </div>
+    }>
+      <StudyStudioContent />
+    </Suspense>
   )
 }

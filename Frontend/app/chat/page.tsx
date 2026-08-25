@@ -1,15 +1,17 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import posthog from 'posthog-js'
 import LibraryTab from '../study-studio/LibraryTab'
 import ChatTab from '../study-studio/ChatTab'
 
-export default function ChatPage() {
+function ChatContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const promptParam = searchParams.get('prompt')
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
   const [activeTab, setActiveTab] = useState<'chat' | 'library'>('chat')
@@ -78,7 +80,8 @@ export default function ChatPage() {
       <div className="h-[calc(100vh-64px)]">
         <ChatTab
           onViewLibrary={() => setActiveTab('library')}
-          triggerProactive
+          triggerProactive={!promptParam}
+          initialPrompt={promptParam || undefined}
         />
       </div>
     )
@@ -102,5 +105,17 @@ export default function ChatPage() {
         <LibraryTab courses={courses} studyTools={studyTools} loading={loading} onDelete={loadData} />
       </div>
     </main>
+  )
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center text-sm text-slate-500">
+        Loading...
+      </div>
+    }>
+      <ChatContent />
+    </Suspense>
   )
 }
