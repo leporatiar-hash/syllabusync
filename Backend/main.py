@@ -3009,11 +3009,15 @@ def create_checkout_session(
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         try:
             if payload.plan == "founding":
-                # One-time payment — no subscription, no trial.
+                # One-time payment — no subscription, no trial. client_reference_id +
+                # metadata.user_id let the webhook tie the payment back to this user
+                # without depending on stripe_customer_id already being persisted.
                 session = stripe_lib.checkout.Session.create(
                     customer=customer_id,
                     mode="payment",
                     line_items=[{"price": prices.data[0].id, "quantity": 1}],
+                    client_reference_id=current_user.id,
+                    metadata={"user_id": current_user.id, "plan": "founding"},
                     success_url=f"{frontend_url}/founding?checkout=success",
                     cancel_url=f"{frontend_url}/founding?checkout=canceled",
                 )
@@ -3023,6 +3027,8 @@ def create_checkout_session(
                     mode="subscription",
                     line_items=[{"price": prices.data[0].id, "quantity": 1}],
                     subscription_data={"trial_period_days": 10},
+                    client_reference_id=current_user.id,
+                    metadata={"user_id": current_user.id, "plan": payload.plan},
                     success_url=f"{frontend_url}/settings?checkout=success",
                     cancel_url=f"{frontend_url}/settings?checkout=canceled",
                 )
