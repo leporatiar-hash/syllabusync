@@ -711,6 +711,18 @@ class ValuePromptResponse(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class StripeWebhookEvent(Base):
+    """Ledger of processed Stripe webhook event ids, for idempotency. Stripe redelivers
+    events on timeout/no-200, so the webhook handler inserts the event id here before
+    doing any business-logic writes; a duplicate delivery hits the primary-key
+    constraint and is treated as a no-op."""
+    __tablename__ = "stripe_webhook_events"
+
+    id = Column(String, primary_key=True)  # Stripe event id, e.g. "evt_..."
+    event_type = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ChatConversation(Base):
     """A chat conversation between a user and the AI assistant."""
     __tablename__ = "chat_conversations"
@@ -3068,9 +3080,34 @@ def create_portal_session(current_user: User = Depends(get_current_user)):
         db.close()
 
 
-@app.post("/stripe-webhook")
+def _resolve_profile_for_stripe_event(db, session_or_sub: dict):
+    """Resolve a UserProfile for a Stripe checkout.session / subscription object.
+
+    Prefers client_reference_id / metadata.user_id (set at checkout creation — see
+    create_checkout_session) since that ties back to the app's own user id directly.
+    Falls back to a stripe_customer_id lookup for objects that don't carry that
+    metadata (e.g. subscription.updated/deleted events, or older sessions predating
+    this field)."""
+    user_id = session_or_sub.get("client_reference_id") or (session_or_sub.get("metadata") or {}).get("user_id")
+    if user_id:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        if profile:
+            return profile
+
+    customer_id = session_or_sub.get("customer")
+    if customer_id:
+        return db.query(UserProfile).filter(UserProfile.stripe_customer_id == customer_id).first()
+    return None
+
+
+@app.post("/stripe/webhook", tags=["stripe"], summary="Handle Stripe webhook events")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events (no auth — Stripe calls this directly)."""
+    """Handle Stripe webhook events (no auth — Stripe calls this directly).
+
+    Verifies the signature against the raw request body, then records the event id
+    in stripe_webhook_events before doing any business-logic writes — Stripe retries
+    deliveries that don't get a prompt 200, so a redelivered event must be a no-op
+    rather than reprocessed."""
     stripe_lib.api_key = os.getenv("STRIPE_SECRET_KEY")
 
     payload = await request.body()
@@ -3091,13 +3128,20 @@ async def stripe_webhook(request: Request):
 
     db = SessionLocal()
     try:
-        if event["type"] == "checkout.session.completed":
-            session_obj = event["data"]["object"]
-            customer_id = session_obj["customer"]
+        try:
+            db.add(StripeWebhookEvent(id=event["id"], event_type=event["type"]))
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.info(f"[Stripe] Duplicate webhook event {event['id']} ({event['type']}), skipping")
+            return {"received": True, "duplicate": True}
 
-            profile = db.query(UserProfile).filter(
-                UserProfile.stripe_customer_id == customer_id
-            ).first()
+        if event["type"] == "checkout.session.completed":
+            # .to_dict() up front: StripeObject supports __getitem__ but not .get(),
+            # so working with a plain dict avoids AttributeErrors on every .get() below.
+            session_obj = event["data"]["object"].to_dict()
+            profile = _resolve_profile_for_stripe_event(db, session_obj)
+
             if profile and session_obj.get("mode") == "payment":
                 # One-time founding-member purchase — no subscription object involved.
                 profile.founding_member = True
@@ -3110,17 +3154,16 @@ async def stripe_webhook(request: Request):
                 profile.subscription_status = "active"
                 db.commit()
                 logger.info(f"[Stripe] User {profile.user_id} upgraded to pro")
+            else:
+                logger.warning(f"[Stripe] checkout.session.completed for event {event['id']}: no matching user profile")
 
         elif event["type"] in (
             "customer.subscription.updated",
             "customer.subscription.deleted",
         ):
-            subscription = event["data"]["object"]
-            customer_id = subscription["customer"]
+            subscription = event["data"]["object"].to_dict()
+            profile = _resolve_profile_for_stripe_event(db, subscription)
 
-            profile = db.query(UserProfile).filter(
-                UserProfile.stripe_customer_id == customer_id
-            ).first()
             if profile:
                 status = subscription["status"]
                 profile.subscription_status = status
