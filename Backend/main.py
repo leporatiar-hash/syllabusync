@@ -388,15 +388,20 @@ def _safe_db_url(url: str) -> str:
 
 print(f"[DB] Using DATABASE_URL={_safe_db_url(DATABASE_URL)}")
 
-# Create engine with connection pooling to prevent connection exhaustion
+# Create engine with connection pooling to prevent connection exhaustion.
+# pool_size/max_overflow are QueuePool-only — SQLite (local dev fallback) uses
+# SingletonThreadPool and rejects them, so they're only passed for Postgres.
+_pool_kwargs = {} if DATABASE_URL.startswith("sqlite") else {
+    "pool_size": 20,       # Max 20 persistent connections
+    "max_overflow": 30,    # Max 30 additional connections (50 total)
+}
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
-    pool_size=20,             # Max 20 persistent connections
-    max_overflow=30,          # Max 30 additional connections (50 total)
     pool_pre_ping=True,       # Check connections before using (prevents stale connections)
     pool_recycle=3600,        # Recycle connections after 1 hour
-    echo=False                # Set to True for SQL query logging (debug only)
+    echo=False,               # Set to True for SQL query logging (debug only)
+    **_pool_kwargs
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
