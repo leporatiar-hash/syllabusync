@@ -92,12 +92,20 @@ export const authClient = {
     email: string,
     password: string,
     referralCode?: string,
+    referralSource?: string,
+    referralSourceOther?: string,
   ): Promise<{ user: AuthUser; accessToken: string; error: null } | { user: null; accessToken: null; error: string }> {
     try {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, referral_code: referralCode || null }),
+        body: JSON.stringify({
+          email,
+          password,
+          referral_code: referralCode || null,
+          referral_source: referralSource || null,
+          referral_source_other: referralSourceOther || null,
+        }),
       })
       const data = await res.json()
       if (!res.ok) return { user: null, accessToken: null, error: data.detail || 'Registration failed' }

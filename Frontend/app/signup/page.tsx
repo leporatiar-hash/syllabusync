@@ -19,7 +19,11 @@ function SignupContent() {
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [referralSource, setReferralSource] = useState('')
+  const [referralSourceOther, setReferralSourceOther] = useState('')
   const refCode = searchParams.get('ref') || ''
+
+  const referralSourceOptions = ['ChatGPT', 'Google', 'A friend', 'Professor / class', 'TikTok / social', 'Other']
 
   useEffect(() => {
     if (!loading && user) {
@@ -50,7 +54,13 @@ function SignupContent() {
       return
     }
 
-    const { accessToken, error: regError } = await authClient.register(email, password, refCode || undefined)
+    const { accessToken, error: regError } = await authClient.register(
+      email,
+      password,
+      refCode || undefined,
+      referralSource || undefined,
+      referralSource === 'Other' ? referralSourceOther || undefined : undefined,
+    )
 
     if (regError) {
       setError(regError)
@@ -146,6 +156,33 @@ function SignupContent() {
               </Link>
             </span>
           </label>
+
+          <div>
+            <label htmlFor="referralSource" className="block text-sm font-medium text-slate-700 mb-1">
+              How did you hear about ClassMate? <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <select
+              id="referralSource"
+              value={referralSource}
+              onChange={(e) => setReferralSource(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+            >
+              <option value="">Select an option</option>
+              {referralSourceOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+            {referralSource === 'Other' && (
+              <input
+                type="text"
+                value={referralSourceOther}
+                onChange={(e) => setReferralSourceOther(e.target.value)}
+                placeholder="Tell us where you heard about us"
+                maxLength={200}
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
+              />
+            )}
+          </div>
 
           <button
             type="submit"

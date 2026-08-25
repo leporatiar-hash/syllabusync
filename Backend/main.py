@@ -602,6 +602,8 @@ class UserProfile(Base):
     profile_picture = Column(Text, nullable=True)
     referral_code = Column(String, unique=True, nullable=True, default=generate_referral_code)
     referred_by = Column(String, nullable=True)  # referral_code of the user who referred them
+    referral_source = Column(String, nullable=True)  # how they heard about ClassMate, set at signup
+    referral_source_other = Column(String, nullable=True)  # free text when referral_source == "other"
     created_at = Column(DateTime, default=datetime.utcnow)
     # Subscription / billing
     subscription_tier = Column(String, nullable=False, default="free")  # "free" or "pro"
@@ -728,6 +730,8 @@ class AuthRegisterRequest(BaseModel):
     email: str = Field(description="User email address")
     password: str = Field(description="Password (min 6 characters)")
     referral_code: str | None = Field(None, description="Optional referral code")
+    referral_source: str | None = Field(None, description="How the user heard about ClassMate, e.g. 'ChatGPT', 'Google', 'Other'")
+    referral_source_other: str | None = Field(None, description="Free-text detail when referral_source is 'Other'")
 
 
 class AuthLoginRequest(BaseModel):
@@ -1241,11 +1245,13 @@ def ensure_deadline_columns():
 
 
 def ensure_referral_columns():
-    """Add referral_code and referred_by columns to user_profiles if missing.
+    """Add referral_code, referred_by, and referral_source columns to user_profiles if missing.
     Each statement runs in its own transaction."""
     for stmt, label in [
         ("ALTER TABLE user_profiles ADD COLUMN referral_code VARCHAR", "referral_code"),
         ("ALTER TABLE user_profiles ADD COLUMN referred_by VARCHAR", "referred_by"),
+        ("ALTER TABLE user_profiles ADD COLUMN referral_source VARCHAR", "referral_source"),
+        ("ALTER TABLE user_profiles ADD COLUMN referral_source_other VARCHAR", "referral_source_other"),
     ]:
         try:
             with engine.begin() as conn:
@@ -1282,6 +1288,13 @@ ALWAYS_PRO_EMAILS: set[str] = {
     "mccammono1@g.cofc.edu",
     "bodnari@g.cofc.edu",
 }
+
+
+def _require_admin(current_user: User) -> None:
+    """Gate admin-only read endpoints. Reuses ALWAYS_PRO_EMAILS as the admin allowlist
+    since it's already the project's one privileged-access list — no separate roles table."""
+    if not current_user.email or current_user.email.lower() not in ALWAYS_PRO_EMAILS:
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 
 def _effective_tier(profile) -> str:
@@ -2149,6 +2162,8 @@ def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
         user_id=user_id,
         email=payload.email.lower(),
         referral_code=generate_referral_code(),
+        referral_source=payload.referral_source or None,
+        referral_source_other=(payload.referral_source_other or None) if payload.referral_source == "Other" else None,
     )
     db.add(profile)
     db.commit()
@@ -4396,6 +4411,32 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
                 logger.warning(f"[Feedback] Failed to send email notification: {e}")
 
         return {"message": "Feedback submitted successfully"}
+    finally:
+        db.close()
+
+
+@app.get("/admin/referral-sources", tags=["admin"], summary="[Admin] List signup referral sources")
+def admin_list_referral_sources(current_user: User = Depends(get_current_user)):
+    """Return every user's 'how did you hear about us' answer, newest signup first.
+    Admin-only (see ALWAYS_PRO_EMAILS)."""
+    _require_admin(current_user)
+    db = SessionLocal()
+    try:
+        profiles = (
+            db.query(UserProfile)
+            .filter(UserProfile.referral_source.isnot(None))
+            .order_by(UserProfile.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "email": p.email,
+                "referral_source": p.referral_source,
+                "referral_source_other": p.referral_source_other,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in profiles
+        ]
     finally:
         db.close()
 
