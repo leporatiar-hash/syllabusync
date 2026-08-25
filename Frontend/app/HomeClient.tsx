@@ -11,7 +11,9 @@ import { useSubscription } from '../hooks/useSubscription'
 import UpgradePrompt from '../components/UpgradePrompt'
 import FoundingMemberPrompt from '../components/FoundingMemberPrompt'
 import FeatureDiscoveryPanel from '../components/FeatureDiscoveryPanel'
+import ValuePropPrompt from '../components/ValuePropPrompt'
 import { decideFoundingPrompt } from '../lib/foundingPrompt'
+import { shouldShowValuePrompt } from '../lib/valuePrompt'
 
 const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
 const ICalConnectModal = dynamic(() => import('../components/ICalConnectModal'), { ssr: false })
@@ -128,6 +130,7 @@ export default function HomeClient() {
   const [copied, setCopied] = useState(false)
   const [showGettingStarted, setShowGettingStarted] = useState(false)
   const [featureUsage, setFeatureUsage] = useState<{ used_study_guide: boolean; used_flashcards: boolean; used_chat: boolean; panel_hidden: boolean } | null>(null)
+  const [showValuePrompt, setShowValuePrompt] = useState(false)
 
 
   // Show Getting Started checklist unless dismissed
@@ -228,6 +231,53 @@ export default function HomeClient() {
   const hideFeaturePanel = () => {
     setFeatureUsage((prev) => (prev ? { ...prev, panel_hidden: true } : prev)) // optimistic
     fetchWithAuth(`${API_URL}/me/feature-usage/hide-panel`, { method: 'POST' }).catch(() => {})
+  }
+
+  // Ping once per browser session (mirrors the chat_proactive_shown pattern) so the
+  // one-question value-prop prompt can trigger on 3+ sessions.
+  useEffect(() => {
+    if (!user) return
+    if (typeof sessionStorage === 'undefined') return
+    if (sessionStorage.getItem('session_pinged')) return
+    sessionStorage.setItem('session_pinged', '1')
+    fetchWithAuth(`${API_URL}/me/session-ping`, { method: 'POST' }).catch(() => {})
+  }, [user, fetchWithAuth])
+
+  useEffect(() => {
+    if (!user) return
+    const loadValuePromptStatus = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_URL}/me/value-prompt-status`)
+        if (!res.ok) return
+        const data = await res.json()
+        setShowValuePrompt(
+          shouldShowValuePrompt({
+            sessionCount: data.session_count ?? 0,
+            accountCreatedAt: data.account_created_at ?? null,
+            valuePromptShownAt: data.value_prompt_shown_at ?? null,
+          }),
+        )
+      } catch { /* non-fatal */ }
+    }
+    loadValuePromptStatus()
+  }, [user, fetchWithAuth])
+
+  const submitValuePrompt = (answer: string) => {
+    setShowValuePrompt(false) // optimistic — shown at most once regardless of network result
+    fetchWithAuth(`${API_URL}/me/value-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    }).catch(() => {})
+  }
+
+  const skipValuePrompt = () => {
+    setShowValuePrompt(false)
+    fetchWithAuth(`${API_URL}/me/value-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer: null }),
+    }).catch(() => {})
   }
 
   const referralLink = referralCode ? `https://tryclassmate.com/signup?ref=${referralCode}` : ''
@@ -593,6 +643,12 @@ export default function HomeClient() {
               </div>
             </div>
           </div>
+        </section>
+      )}
+
+      {showValuePrompt && (
+        <section className="mx-auto max-w-6xl px-4 pt-6">
+          <ValuePropPrompt onSubmit={submitValuePrompt} onSkip={skipValuePrompt} />
         </section>
       )}
 

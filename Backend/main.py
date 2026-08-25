@@ -624,6 +624,9 @@ class UserProfile(Base):
     upgrade_prompt_dismissed_at = Column(DateTime, nullable=True)
     # "Get more out of your courses" feature-discovery panel on /home
     feature_panel_hidden = Column(Boolean, nullable=False, default=False)
+    # One-question value-prop feedback ask (shown once, ever)
+    session_count = Column(Integer, nullable=False, default=0)
+    value_prompt_shown_at = Column(DateTime, nullable=True)
 
 
 class CalendarEntry(Base):
@@ -688,6 +691,18 @@ class Feedback(Base):
     user_email = Column(String, nullable=False)
     feedback_type = Column(String, nullable=False)
     message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ValuePromptResponse(Base):
+    """Answer to the one-question 'what's the one thing you'd hate to lose about
+    ClassMate?' ask, shown once ever after 3+ sessions or 7 days of account age."""
+    __tablename__ = "value_prompt_responses"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False)
+    user_email = Column(String, nullable=False)
+    answer = Column(Text, nullable=True)  # null if the user skipped
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -811,6 +826,10 @@ class QuizSubmission(BaseModel):
 class FeedbackRequest(BaseModel):
     feedback_type: str = Field(description="Category of feedback: 'bug', 'feature', 'general', etc.")
     message: str = Field(description="The feedback message text from the user")
+
+
+class ValuePromptRequest(BaseModel):
+    answer: str | None = Field(None, description="Free-text answer; null/omitted if skipped")
 
 
 class LMSConnectCanvas(BaseModel):
@@ -1428,6 +1447,21 @@ def ensure_feature_panel_column():
         pass  # Column already exists
 
 
+def ensure_value_prompt_columns():
+    """Add session_count and value_prompt_shown_at columns to user_profiles for the
+    one-question value-prop feedback ask."""
+    for stmt, label in [
+        ("ALTER TABLE user_profiles ADD COLUMN session_count INTEGER DEFAULT 0", "session_count"),
+        ("ALTER TABLE user_profiles ADD COLUMN value_prompt_shown_at TIMESTAMP", "value_prompt_shown_at"),
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+            logger.info(f"[Migration] Added '{label}' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+
+
 FREE_CHAT_MESSAGE_LIMIT = 20  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
@@ -1537,6 +1571,7 @@ ensure_course_syllabus_column()
 ensure_flashcard_grade_column()
 ensure_upgrade_prompt_column()
 ensure_feature_panel_column()
+ensure_value_prompt_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -2825,6 +2860,79 @@ def hide_feature_panel(current_user: User = Depends(get_current_user)):
         profile.feature_panel_hidden = True
         db.commit()
         return {"panel_hidden": True}
+    finally:
+        db.close()
+
+
+@app.post("/me/session-ping", tags=["user"], summary="Record a browser session for this user")
+def session_ping(current_user: User = Depends(get_current_user)):
+    """Increment the user's session counter. Called once per browser session (guarded
+    client-side) so the one-question value-prop prompt can trigger on 3+ sessions."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        profile.session_count = (profile.session_count or 0) + 1
+        db.commit()
+        return {"session_count": profile.session_count}
+    finally:
+        db.close()
+
+
+@app.get("/me/value-prompt-status", tags=["user"], summary="Get value-prop prompt eligibility data")
+def get_value_prompt_status(current_user: User = Depends(get_current_user)):
+    """Return the raw signals the frontend uses to decide whether to show the one-question
+    value-prop prompt: session count, account age, and whether it's already been shown."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        return {
+            "session_count": profile.session_count if profile else 0,
+            "account_created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "value_prompt_shown_at": (
+                profile.value_prompt_shown_at.isoformat()
+                if profile and profile.value_prompt_shown_at
+                else None
+            ),
+        }
+    finally:
+        db.close()
+
+
+@app.post("/me/value-prompt", tags=["user"], summary="Submit or skip the value-prop prompt")
+def submit_value_prompt(payload: ValuePromptRequest, current_user: User = Depends(get_current_user)):
+    """Record the user's answer (or skip) to the one-question value-prop prompt.
+    Marks it shown either way — it's shown at most once, ever."""
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        answer = (payload.answer or "").strip()
+        if answer:
+            db.add(ValuePromptResponse(user_id=current_user.id, user_email=current_user.email, answer=answer))
+
+        profile.value_prompt_shown_at = datetime.utcnow()
+        db.commit()
+        return {"message": "Recorded"}
+    finally:
+        db.close()
+
+
+@app.get("/admin/value-prompt-responses", tags=["admin"], summary="[Admin] List value-prop prompt answers")
+def admin_list_value_prompt_responses(current_user: User = Depends(get_current_user)):
+    """Return every answer to the one-question value-prop prompt, newest first.
+    Admin-only (see ALWAYS_PRO_EMAILS)."""
+    _require_admin(current_user)
+    db = SessionLocal()
+    try:
+        responses = db.query(ValuePromptResponse).order_by(ValuePromptResponse.created_at.desc()).all()
+        return [
+            {"email": r.user_email, "answer": r.answer, "created_at": r.created_at.isoformat() if r.created_at else None}
+            for r in responses
+        ]
     finally:
         db.close()
 
