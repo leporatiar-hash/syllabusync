@@ -31,8 +31,8 @@ export default function FoundingMemberPrompt({ reason, onDismiss }: Props) {
             {reason === 'limit_reached' ? "You've hit the free limit." : "You're set up."}
           </h3>
           <p className="mt-1 text-sm text-amber-800">
-            Lock in Founding Member for $15, once, forever. Unlimited AI generations and chat,
-            and you&apos;ll never see this price again.
+            Lock in Founding Member for $15, once — a full year of unlimited AI generations
+            and chat.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

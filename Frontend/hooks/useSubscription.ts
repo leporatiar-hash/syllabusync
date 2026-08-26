@@ -6,6 +6,7 @@ export interface SubscriptionInfo {
   tier: 'free' | 'pro'
   isPro: boolean
   isFoundingMember: boolean
+  foundingMemberExpiresAt: string | null // null if never purchased founding
   aiGenerationsUsed: number
   aiGenerationsMax: number | null // null = unlimited
   chatMessagesUsed: number
@@ -18,6 +19,7 @@ const DEFAULT_SUB: SubscriptionInfo = {
   tier: 'free',
   isPro: false,
   isFoundingMember: false,
+  foundingMemberExpiresAt: null,
   aiGenerationsUsed: 0,
   aiGenerationsMax: 50,
   chatMessagesUsed: 0,
@@ -42,6 +44,7 @@ export function useSubscription() {
           tier: data.tier,
           isPro: data.is_pro,
           isFoundingMember: data.is_founding_member ?? false,
+          foundingMemberExpiresAt: data.founding_member_expires_at ?? null,
           aiGenerationsUsed: data.ai_generations_used,
           aiGenerationsMax: data.ai_generations_max,
           chatMessagesUsed: data.chat_messages_used ?? 0,

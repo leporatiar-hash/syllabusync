@@ -395,10 +395,13 @@ function SettingsPageContent() {
               <span className="rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 px-3 py-0.5 text-xs font-bold text-white">
                 Founding Member
               </span>
-              <span className="text-sm text-slate-500">Unlimited AI generations, forever</span>
+              <span className="text-sm text-slate-500">Unlimited AI generations</span>
             </div>
             <p className="text-sm text-slate-500">
-              Thanks for backing ClassMate early — your $15 one-time purchase never expires.
+              Thanks for backing ClassMate early — your $15 one-time purchase covers a full year
+              {sub.foundingMemberExpiresAt && (
+                <>, through {new Date(sub.foundingMemberExpiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</>
+              )}.
             </p>
           </div>
         ) : sub.isPro ? (

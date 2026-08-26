@@ -13,7 +13,7 @@ function FoundingContent() {
   const searchParams = useSearchParams()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const { isPro, isFoundingMember, loading: subLoading } = useSubscription()
+  const { isPro, isFoundingMember, foundingMemberExpiresAt, loading: subLoading } = useSubscription()
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -82,8 +82,8 @@ function FoundingContent() {
           <p className="mt-3 text-slate-500 max-w-lg mx-auto">
             Unlimited courses, syllabus parsing, Canvas + iCal sync, and a full deadline
             calendar — that&apos;s the free plan, and it isn&apos;t going anywhere. If you want
-            to uncap the AI side and help support a student-built app, $15 once does that
-            permanently. Not a subscription. No renewal, ever.
+            to uncap the AI side and help support a student-built app, $15 once unlocks a
+            full year of unlimited AI. Not a subscription — no auto-renewal, no surprise charges.
           </p>
         </div>
 
@@ -103,9 +103,12 @@ function FoundingContent() {
 
         {isFoundingMember ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center mb-8">
-            <h3 className="text-lg font-semibold text-amber-800">You&apos;re already a founding member!</h3>
+            <h3 className="text-lg font-semibold text-amber-800">You&apos;re a founding member!</h3>
             <p className="mt-1 text-sm text-amber-700">
-              You have unlimited, permanent access to all Pro features.
+              You have unlimited access to all Pro features
+              {foundingMemberExpiresAt && (
+                <> until {new Date(foundingMemberExpiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</>
+              )}.
             </p>
             <button
               onClick={() => router.push('/settings')}
@@ -118,26 +121,35 @@ function FoundingContent() {
           <div className="rounded-2xl border-2 border-amber-300 bg-white p-8 shadow-sm mb-8">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">Founding Member</h3>
-                <p className="mt-1 text-sm text-slate-500">One payment. Unlimited AI, forever.</p>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {foundingMemberExpiresAt ? 'Renew Founding Member' : 'Founding Member'}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">One payment. Unlimited AI for a full year.</p>
               </div>
               <div className="text-right">
                 <span className="text-3xl font-bold text-slate-900">$15</span>
-                <p className="text-xs text-slate-400">one time</p>
+                <p className="text-xs text-slate-400">one time / year</p>
               </div>
             </div>
             <ul className="mt-6 space-y-2">
-              {['Unlimited AI generations (flashcards, quizzes, summaries)', 'Unlimited AI chat', 'A permanent, non-renewing purchase — not a subscription', 'Supports a student-built app'].map((f) => (
+              {['Unlimited AI generations (flashcards, quizzes, summaries)', 'Unlimited AI chat', 'One-time purchase, lasts 365 days — not a subscription', 'Supports a student-built app'].map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm text-slate-700">
                   <Check size={16} className="text-amber-500 shrink-0" />
                   {f}
                 </li>
               ))}
             </ul>
-            {isPro && (
+            {foundingMemberExpiresAt && (
+              <p className="mt-4 text-xs text-slate-400">
+                Your last founding-member period ended{' '}
+                {new Date(foundingMemberExpiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}.
+                Purchasing again starts a fresh 365-day period from today.
+              </p>
+            )}
+            {isPro && !foundingMemberExpiresAt && (
               <p className="mt-4 text-xs text-slate-400">
                 You already have Pro through a subscription. Buying founding member access
-                makes it permanent — you can cancel your subscription afterward from Settings.
+                also gives you a year of Pro that outlasts a canceled subscription.
               </p>
             )}
             {error && (
@@ -148,7 +160,7 @@ function FoundingContent() {
               disabled={checkoutLoading}
               className="mt-6 w-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
             >
-              {checkoutLoading ? 'Loading...' : 'Become a Founding Member — $15 once'}
+              {checkoutLoading ? 'Loading...' : foundingMemberExpiresAt ? 'Renew Founding Member — $15' : 'Become a Founding Member — $15 once'}
             </button>
           </div>
         )}
