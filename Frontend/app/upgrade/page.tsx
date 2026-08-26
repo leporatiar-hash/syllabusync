@@ -107,7 +107,7 @@ export default function UpgradePage() {
               <h3 className="text-lg font-semibold text-slate-900">Monthly</h3>
               <p className="mt-1 text-sm text-slate-500">Flexibility to cancel anytime</p>
               <div className="mt-4">
-                <span className="text-3xl font-bold text-slate-900">$4.99</span>
+                <span className="text-3xl font-bold text-slate-900">$5.00</span>
                 <span className="text-slate-400 text-sm">/month</span>
               </div>
               <button
@@ -128,7 +128,7 @@ export default function UpgradePage() {
               <h3 className="text-lg font-semibold text-slate-900">Yearly</h3>
               <p className="mt-1 text-sm text-slate-500">Best value for the school year</p>
               <div className="mt-4">
-                <span className="text-3xl font-bold text-slate-900">$39.99</span>
+                <span className="text-3xl font-bold text-slate-900">$40.00</span>
                 <span className="text-slate-400 text-sm">/year</span>
               </div>
               <p className="mt-1 text-xs text-slate-400">~$3.33/month</p>
