@@ -619,9 +619,11 @@ class UserProfile(Base):
     ai_generations_used = Column(Integer, nullable=False, default=0)
     ai_generations_reset_at = Column(DateTime, nullable=True)
     has_completed_onboarding = Column(Boolean, nullable=False, default=False)
-    # Founding member: one-time $15 payment, permanent Pro-equivalent entitlements.
-    # Independent of subscription_tier — a founding member is never subscribed to anything.
+    # Founding member: one-time $15 payment, grants Pro-equivalent entitlements for 365
+    # days from purchase (not permanent). Independent of subscription_tier — a founding
+    # member is never subscribed to anything. Re-purchasing after expiry resets the clock.
     founding_member = Column(Boolean, nullable=False, default=False)
+    founding_member_expires_at = Column(DateTime, nullable=True)
     # Chat usage tracking
     chat_messages_used = Column(Integer, nullable=False, default=0)
     chat_messages_reset_at = Column(DateTime, nullable=True)
@@ -950,7 +952,8 @@ class SubscriptionOut(BaseModel):
     """Current subscription tier and usage information."""
     tier: str = Field(description="Subscription tier: 'free' or 'pro'")
     is_pro: bool = Field(description="Whether the user has Pro-equivalent access (subscription or founding member)")
-    is_founding_member: bool = Field(description="Whether the user bought the one-time founding-member lifetime Pro access")
+    is_founding_member: bool = Field(description="Whether the user's founding-member grant is currently active (365 days from purchase)")
+    founding_member_expires_at: str | None = Field(None, description="ISO 8601 timestamp when founding-member Pro access expires; null if never purchased")
     ai_generations_used: int = Field(description="Number of AI generations used this month (free tier)")
     ai_generations_max: int | None = Field(None, description="Monthly AI generation limit; null = unlimited (Pro)")
     courses_used: int = Field(description="Total number of courses the user has created")
@@ -1321,7 +1324,28 @@ def ensure_referral_columns():
 # ── Subscription tier constants ──
 FREE_AI_GENERATION_LIMIT = 50
 GRANDFATHER_CUTOFF = "2025-01-01T00:00:00"  # Moved to past date - no more grandfathering
-FOUNDING_MEMBER_PRICE_LOOKUP_KEY = "classmate_founding_member"  # one-time $15 Stripe Price
+FOUNDING_MEMBER_GRANT_DAYS = 365
+
+# Plan -> (env var holding the Stripe Price id, Checkout mode). Prices are resolved
+# ONLY from these env vars, by exact Price id — never by lookup key or amount. A stale
+# lookup key once silently matched an archived $4.99 price and broke monthly checkout
+# with "The price specified is inactive" for days before anyone noticed.
+PLAN_CONFIG = {
+    "founding": {"env_var": "STRIPE_PRICE_FOUNDING", "mode": "payment"},
+    "monthly": {"env_var": "STRIPE_PRICE_MONTHLY", "mode": "subscription"},
+    "yearly": {"env_var": "STRIPE_PRICE_YEARLY", "mode": "subscription"},
+}
+
+
+def _resolve_plan_price_id(plan: str) -> str:
+    """Look up the Stripe Price id for a plan directly from its env var."""
+    price_id = os.getenv(PLAN_CONFIG[plan]["env_var"])
+    if not price_id or not price_id.startswith("price_"):
+        raise HTTPException(
+            status_code=500,
+            detail=f"{PLAN_CONFIG[plan]['env_var']} is not configured with a valid Stripe price id",
+        )
+    return price_id
 
 # Emails that always get Pro access regardless of subscription status
 ALWAYS_PRO_EMAILS: set[str] = {
@@ -1338,16 +1362,30 @@ def _require_admin(current_user: User) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def _founding_member_active(profile) -> bool:
+    """Whether founding-member access currently grants Pro (not just was purchased once).
+    It's a 365-day grant from purchase — expires_at is null only for the ancient
+    pre-expiry-column rows the migration didn't reach (treated as still active rather
+    than silently downgrading someone with no way to know why)."""
+    if not profile or not profile.founding_member:
+        return False
+    if profile.founding_member_expires_at is None:
+        return True
+    return profile.founding_member_expires_at > datetime.utcnow()
+
+
 def _effective_tier(profile) -> str:
     """Return the effective tier, accounting for always-pro overrides.
 
-    Founding members and ALWAYS_PRO_EMAILS both resolve to "pro" here — this is the
-    single choke point every entitlement check goes through, so treating either as
-    pro here is what makes them pro everywhere (generation limits, chat limits, etc).
+    Founding members (while their 365-day grant is active) and ALWAYS_PRO_EMAILS both
+    resolve to "pro" here — this is the single choke point every entitlement check goes
+    through, so treating either as pro here is what makes them pro everywhere
+    (generation limits, chat limits, etc). Falls through to subscription_tier so an
+    expired founding grant doesn't clobber an active monthly/yearly subscription.
     """
     if profile and profile.email and profile.email.lower() in ALWAYS_PRO_EMAILS:
         return "pro"
-    if profile and profile.founding_member:
+    if _founding_member_active(profile):
         return "pro"
     return profile.subscription_tier if profile else "free"
 
@@ -1479,6 +1517,35 @@ def ensure_value_prompt_columns():
             pass  # Column already exists
 
 
+def ensure_founding_member_expiry_column():
+    """Add founding_member_expires_at to user_profiles: founding access is a 365-day
+    grant from purchase, not permanent. Backfills any pre-existing founding_member=True
+    rows (from before this column existed) with a fresh 365-day window from migration
+    time, since none of those grants had an expiry to derive from."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN founding_member_expires_at TIMESTAMP"))
+        logger.info("[Migration] Added 'founding_member_expires_at' column to user_profiles")
+    except Exception:
+        pass  # Column already exists
+
+    try:
+        with engine.begin() as conn:
+            if engine.dialect.name == "postgresql":
+                conn.execute(text(
+                    "UPDATE user_profiles SET founding_member_expires_at = NOW() + INTERVAL '365 days' "
+                    "WHERE founding_member = TRUE AND founding_member_expires_at IS NULL"
+                ))
+            else:
+                conn.execute(text(
+                    "UPDATE user_profiles SET founding_member_expires_at = datetime('now', '+365 days') "
+                    "WHERE founding_member = 1 AND founding_member_expires_at IS NULL"
+                ))
+        logger.info("[Migration] Backfilled founding_member_expires_at for pre-existing founding members")
+    except Exception:
+        pass
+
+
 FREE_CHAT_MESSAGE_LIMIT = 20  # Per week, free tier
 PRO_CHAT_MESSAGE_LIMIT = 50   # Per week, pro tier
 
@@ -1589,6 +1656,7 @@ ensure_flashcard_grade_column()
 ensure_upgrade_prompt_column()
 ensure_feature_panel_column()
 ensure_value_prompt_columns()
+ensure_founding_member_expiry_column()
 Base.metadata.create_all(bind=engine)
 
 
@@ -2583,7 +2651,7 @@ def get_me(current_user: User = Depends(get_current_user)):
             "subscription": {
                 "tier": tier,
                 "is_pro": tier == "pro",
-                "is_founding_member": bool(profile.founding_member),
+                "is_founding_member": _founding_member_active(profile),
             },
             "has_completed_onboarding": bool(profile.has_completed_onboarding),
         }
@@ -2794,7 +2862,12 @@ def get_subscription(current_user: User = Depends(get_current_user)):
         return {
             "tier": tier,
             "is_pro": tier == "pro",
-            "is_founding_member": bool(profile and profile.founding_member),
+            "is_founding_member": _founding_member_active(profile),
+            "founding_member_expires_at": (
+                profile.founding_member_expires_at.isoformat()
+                if profile and profile.founding_member_expires_at
+                else None
+            ),
             "status": profile.subscription_status if profile else None,
             "period_end": (
                 profile.subscription_period_end.isoformat()
@@ -2985,25 +3058,10 @@ def create_checkout_session(
                 if not profile:
                     raise HTTPException(status_code=500, detail="Unable to create user profile")
 
-        if payload.plan == "founding" and profile.founding_member:
+        if payload.plan == "founding" and _founding_member_active(profile):
             raise HTTPException(status_code=400, detail="You're already a founding member")
 
-        if payload.plan == "founding":
-            lookup_key = FOUNDING_MEMBER_PRICE_LOOKUP_KEY
-        elif payload.plan == "monthly":
-            lookup_key = "classmate_pro_monthly"
-        else:
-            lookup_key = "classmate_pro_yearly"
-        try:
-            prices = stripe_lib.Price.list(lookup_keys=[lookup_key], limit=1)
-        except Exception as e:
-            logger.error(f"[Checkout] Stripe Price.list failed: {e}")
-            raise HTTPException(status_code=500, detail="Unable to fetch pricing from Stripe")
-        if not prices.data:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Stripe price not found for lookup key: {lookup_key}",
-            )
+        price_id = _resolve_plan_price_id(payload.plan)
 
         # Reuse existing Stripe customer or create new one
         customer_id = profile.stripe_customer_id
@@ -3026,8 +3084,8 @@ def create_checkout_session(
                 # without depending on stripe_customer_id already being persisted.
                 session = stripe_lib.checkout.Session.create(
                     customer=customer_id,
-                    mode="payment",
-                    line_items=[{"price": prices.data[0].id, "quantity": 1}],
+                    mode=PLAN_CONFIG["founding"]["mode"],
+                    line_items=[{"price": price_id, "quantity": 1}],
                     client_reference_id=current_user.id,
                     metadata={"user_id": current_user.id, "plan": "founding"},
                     success_url=f"{frontend_url}/founding?checkout=success",
@@ -3036,8 +3094,8 @@ def create_checkout_session(
             else:
                 session = stripe_lib.checkout.Session.create(
                     customer=customer_id,
-                    mode="subscription",
-                    line_items=[{"price": prices.data[0].id, "quantity": 1}],
+                    mode=PLAN_CONFIG[payload.plan]["mode"],
+                    line_items=[{"price": price_id, "quantity": 1}],
                     subscription_data={"trial_period_days": 10},
                     client_reference_id=current_user.id,
                     metadata={"user_id": current_user.id, "plan": payload.plan},
@@ -3144,9 +3202,12 @@ async def stripe_webhook(request: Request):
 
             if profile and session_obj.get("mode") == "payment":
                 # One-time founding-member purchase — no subscription object involved.
+                # Always resets the clock to a fresh 365-day window, so this also
+                # handles renewal purchases made after a previous grant expired.
                 profile.founding_member = True
+                profile.founding_member_expires_at = datetime.utcnow() + timedelta(days=FOUNDING_MEMBER_GRANT_DAYS)
                 db.commit()
-                logger.info(f"[Stripe] User {profile.user_id} became a founding member")
+                logger.info(f"[Stripe] User {profile.user_id} became a founding member (expires {profile.founding_member_expires_at.isoformat()})")
             elif profile:
                 subscription_id = session_obj.get("subscription")
                 profile.subscription_tier = "pro"
