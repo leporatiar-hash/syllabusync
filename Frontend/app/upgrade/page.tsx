@@ -115,9 +115,9 @@ export default function UpgradePage() {
                 disabled={!!checkoutLoading}
                 className="mt-6 w-full rounded-full border-2 border-[#5B8DEF] px-5 py-2.5 text-sm font-semibold text-[#5B8DEF] transition-all hover:bg-[#5B8DEF] hover:text-white disabled:opacity-50"
               >
-                {checkoutLoading === 'monthly' ? 'Loading...' : 'Start 10-Day Free Trial'}
+                {checkoutLoading === 'monthly' ? 'Loading...' : 'Upgrade to Pro'}
               </button>
-              <p className="mt-2 text-center text-xs text-slate-400">No charge for 10 days. Cancel anytime.</p>
+              <p className="mt-2 text-center text-xs text-slate-400">Cancel anytime.</p>
             </div>
 
             {/* Yearly */}
@@ -137,9 +137,9 @@ export default function UpgradePage() {
                 disabled={!!checkoutLoading}
                 className="mt-5 w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
               >
-                {checkoutLoading === 'yearly' ? 'Loading...' : 'Start 10-Day Free Trial'}
+                {checkoutLoading === 'yearly' ? 'Loading...' : 'Upgrade to Pro'}
               </button>
-              <p className="mt-2 text-center text-xs text-slate-400">No charge for 10 days. Cancel anytime.</p>
+              <p className="mt-2 text-center text-xs text-slate-400">Cancel anytime.</p>
             </div>
           </div>
         )}

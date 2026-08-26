@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import posthog from 'posthog-js'
 import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
-import { getCourseColor } from '../../lib/courseColors'
+import { getCourseColor, COLOR_PICKER_SWATCHES } from '../../lib/courseColors'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -20,6 +20,7 @@ interface Course {
   semester: string | null
   deadline_count?: number
   course_info?: CourseInfo | null
+  color?: string | null
 }
 
 // Course card gradients — shared palette, deterministic by course ID (see lib/courseColors.ts)
@@ -53,6 +54,7 @@ export default function CoursesClient() {
   const [editName, setEditName] = useState('')
   const [editCode, setEditCode] = useState('')
   const [editSemester, setEditSemester] = useState('')
+  const [editColor, setEditColor] = useState('')
   const [editError, setEditError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
 
@@ -288,6 +290,7 @@ export default function CoursesClient() {
     setEditName(course.name)
     setEditCode(course.code || '')
     setEditSemester(course.semester || '')
+    setEditColor(course.color || getCourseColor(course.id).bg.match(/#[0-9A-Fa-f]{6}/)?.[0] || '#5B8DEF')
     setEditError(null)
   }
 
@@ -306,6 +309,7 @@ export default function CoursesClient() {
           name: editName.trim(),
           code: editCode.trim() || null,
           semester: editSemester.trim() || null,
+          color: editColor || null,
         }),
         cache: 'no-store',
       })
@@ -357,11 +361,14 @@ export default function CoursesClient() {
         </div>
 
         <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {courses.map((course) => (
+          {courses.map((course) => {
+            const courseColor = getCourseColor(course.id, course.color)
+            return (
             <Link
               key={course.id}
               href={`/courses/${course.id}`}
-              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl bg-gradient-to-br ${getCourseColor(course.id).gradient} p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg`}
+              className={`group relative flex min-h-[180px] flex-col justify-between rounded-2xl bg-gradient-to-br ${courseColor.gradient} p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg`}
+              style={courseColor.customStyle?.gradient}
             >
               <div className="flex items-start justify-between">
                 <div>
@@ -426,7 +433,8 @@ export default function CoursesClient() {
                 <span className="text-xs">{course.deadline_count ?? 0} deadlines</span>
               </div>
             </Link>
-          ))}
+            )
+          })}
 
           {/* Drop-a-syllabus tile — always visible in the grid */}
           <input
@@ -640,6 +648,39 @@ export default function CoursesClient() {
                   onChange={(event) => setEditSemester(event.target.value)}
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition-all duration-300 focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Color</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {COLOR_PICKER_SWATCHES.map((swatch) => (
+                    <button
+                      key={swatch}
+                      type="button"
+                      aria-label={`Use color ${swatch}`}
+                      onClick={() => setEditColor(swatch)}
+                      className={`h-8 w-8 rounded-full transition-all duration-150 ${
+                        editColor.toLowerCase() === swatch.toLowerCase()
+                          ? 'ring-2 ring-offset-2 ring-slate-900'
+                          : 'hover:scale-110'
+                      }`}
+                      style={{ backgroundColor: swatch }}
+                    />
+                  ))}
+                  <label
+                    htmlFor="editColorCustom"
+                    className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-slate-300 text-slate-400 transition-all duration-150 hover:border-slate-400 hover:text-slate-500"
+                    title="Pick a custom color"
+                  >
+                    +
+                    <input
+                      id="editColorCustom"
+                      type="color"
+                      value={editColor || '#5B8DEF'}
+                      onChange={(event) => setEditColor(event.target.value)}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
             {editError && <div className="mt-3 text-sm text-[#FB7185]">{editError}</div>}

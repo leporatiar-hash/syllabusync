@@ -1,7 +1,7 @@
 const faqs = [
   {
-    q: 'What happens after the free trial?',
-    a: "After your 10-day Pro trial, you're moved to the free plan automatically. No charge, no surprise billing — you can upgrade to Pro whenever you're ready.",
+    q: 'Can I cancel anytime?',
+    a: "Yes — Pro is billed monthly or yearly with no long-term commitment. Cancel anytime from your account settings and you'll drop back to the free plan at the end of your billing period.",
   },
   {
     q: 'How does the free tier work?',

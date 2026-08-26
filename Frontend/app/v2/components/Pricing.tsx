@@ -86,16 +86,16 @@ export default function Pricing() {
                 className="w-full py-3 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
                 style={{ background: BRAND }}
               >
-                Start 10-Day Free Trial
+                Upgrade to Pro
               </button>
               <p className="text-center text-xs text-slate-400 mt-2">
-                After 10 days, you stay on the free plan. No charge, no gotcha.
+                Cancel anytime.
               </p>
             </div>
           </div>
         </RevealOnScroll>
 
-        <p className="text-center text-sm text-slate-400 mt-8">No credit card required · 10-day Pro trial included · Cancel anytime</p>
+        <p className="text-center text-sm text-slate-400 mt-8">Cancel anytime</p>
         <p className="text-center text-sm text-slate-400 mt-2">
           Prefer one payment, no subscription?{' '}
           <button

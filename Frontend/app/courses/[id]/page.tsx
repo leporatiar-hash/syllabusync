@@ -77,6 +77,7 @@ interface CourseDetail {
   semester: string | null
   deadline_count?: number
   course_info?: CourseInfo | null
+  color?: string | null
   deadlines?: Deadline[]
   flashcard_sets?: FlashcardSet[]
   summaries?: Summary[]

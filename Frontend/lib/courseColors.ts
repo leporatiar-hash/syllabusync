@@ -1,9 +1,21 @@
 /**
  * Shared course color system.
- * Colors are assigned by hashing the course ID so every course always gets
- * the same color regardless of fetch order or page context.
+ * By default colors are assigned by hashing the course ID so every course always gets
+ * the same color regardless of fetch order or page context. Users can override this
+ * with their own hex color (Course.color, set via PATCH /courses/{id}) — see
+ * `customStyle` below for how that's applied.
  * Used by both the Courses page (card gradients) and Calendar page (event badges).
  */
+
+import type { CSSProperties } from 'react'
+
+export interface CourseColorStyle {
+  bg?: CSSProperties
+  text?: CSSProperties
+  light?: CSSProperties
+  border?: CSSProperties
+  gradient?: CSSProperties
+}
 
 export interface CourseColorEntry {
   /** Solid accent color class for calendar event badges */
@@ -16,6 +28,15 @@ export interface CourseColorEntry {
   border: string
   /** Gradient for course cards on the Courses page */
   gradient: string
+  /**
+   * Inline-style equivalents of bg/text/light/border/gradient, set only when this
+   * entry comes from a user-picked custom color. Tailwind's build-time compiler can't
+   * generate CSS for a `bg-[#hex]` class built from a runtime value it never saw in
+   * source, so consumers must also spread the matching `customStyle.*` field as a
+   * `style` prop alongside the className — inline styles win on specificity, so this
+   * is a no-op (undefined) for the default hash-based palette below.
+   */
+  customStyle?: CourseColorStyle
 }
 
 /**
@@ -46,6 +67,56 @@ const palette: CourseColorEntry[] = [
   { bg: 'bg-[#22D3EE]', text: 'text-[#0891B2]', light: 'bg-[#CFFAFE]', border: 'border-[#22D3EE]', gradient: 'from-[#CFFAFE] to-[#ECFEFF]' },
 ]
 
+/**
+ * A curated set of swatches offered in the color picker UI. Users aren't limited to
+ * these — the picker also accepts any hex via a native color input — but these give
+ * a quick, on-brand starting point.
+ */
+export const COLOR_PICKER_SWATCHES: string[] = [
+  '#5B8DEF', '#F87171', '#4ADE80', '#A78BFA', '#FBBF24',
+  '#2DD4BF', '#F472B6', '#6366F1', '#FB923C', '#22D3EE',
+  '#EF4444', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899',
+]
+
+const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
+  return '#' + [r, g, b].map((v) => clamp(v).toString(16).padStart(2, '0')).join('')
+}
+
+/** Mix a color toward white. ratio 0 = original color, 1 = pure white. */
+function mixWithWhite(hex: string, ratio: number): string {
+  const [r, g, b] = hexToRgb(hex)
+  return rgbToHex(r + (255 - r) * ratio, g + (255 - g) * ratio, b + (255 - b) * ratio)
+}
+
+function buildCustomColorEntry(hex: string): CourseColorEntry {
+  const normalized = hex.toUpperCase()
+  const light = mixWithWhite(normalized, 0.88)
+  const gradientFrom = mixWithWhite(normalized, 0.82)
+  const gradientTo = mixWithWhite(normalized, 0.95)
+  return {
+    bg: `bg-[${normalized}]`,
+    text: `text-[${normalized}]`,
+    light: `bg-[${light}]`,
+    border: `border-[${normalized}]`,
+    gradient: `from-[${gradientFrom}] to-[${gradientTo}]`,
+    customStyle: {
+      bg: { backgroundColor: normalized },
+      text: { color: normalized },
+      light: { backgroundColor: light },
+      border: { borderColor: normalized },
+      gradient: { backgroundImage: `linear-gradient(to bottom right, ${gradientFrom}, ${gradientTo})` },
+    },
+  }
+}
+
 /** Deterministic hash of a course ID → palette index. */
 function hashCourseId(courseId: string): number {
   let hash = 0
@@ -56,21 +127,25 @@ function hashCourseId(courseId: string): number {
 }
 
 /**
- * Get the color entry for a course. Always hash-based so the color is
- * stable across pages, re-renders, and fetch-order changes.
+ * Get the color entry for a course. If `customColor` is a valid hex string, it's
+ * used (and rendered via `customStyle`, see above). Otherwise falls back to the
+ * hash-based default so the color stays stable across pages and re-renders.
  */
-export function getCourseColor(courseId: string): CourseColorEntry {
+export function getCourseColor(courseId: string, customColor?: string | null): CourseColorEntry {
+  if (customColor && HEX_COLOR_RE.test(customColor)) {
+    return buildCustomColorEntry(customColor)
+  }
   return palette[hashCourseId(courseId)]
 }
 
 /**
- * Build a color map for an array of courses.
- * Every course ID always maps to the same color entry regardless of order.
+ * Build a color map for an array of courses. Each course's own `color` (if set)
+ * takes priority; otherwise falls back to the hash-based default.
  */
-export function buildCourseColorMap(courses: { id: string }[]): Record<string, CourseColorEntry> {
+export function buildCourseColorMap(courses: { id: string; color?: string | null }[]): Record<string, CourseColorEntry> {
   const map: Record<string, CourseColorEntry> = {}
   for (const course of courses) {
-    map[course.id] = palette[hashCourseId(course.id)]
+    map[course.id] = getCourseColor(course.id, course.color)
   }
   return map
 }

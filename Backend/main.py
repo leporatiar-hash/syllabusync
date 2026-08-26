@@ -513,6 +513,7 @@ class Course(Base):
     end_date = Column(Date)
     course_info = Column(JSON, nullable=True)  # Stores extracted syllabus details (instructor, policies, etc.)
     syllabus_text = Column(Text, nullable=True)  # Raw extracted syllabus text for granular policy/content queries
+    color = Column(String, nullable=True)  # User-chosen hex accent color, e.g. '#5B8DEF'; falls back to a deterministic palette color client-side when unset
     created_at = Column(DateTime, default=datetime.utcnow)
 
     deadlines = relationship("Deadline", back_populates="course", cascade="all, delete-orphan")
@@ -813,6 +814,15 @@ class UpdateCourseRequest(BaseModel):
     start_date: str | None = Field(None, description="Updated start date in YYYY-MM-DD format")
     end_date: str | None = Field(None, description="Updated end date in YYYY-MM-DD format")
     course_info: dict | None = Field(None, description="Structured course metadata (instructor, location, office hours, etc.)")
+    color: str | None = Field(None, description="Accent color as a 6-digit hex string, e.g. '#5B8DEF'. Pass null/omit to leave unchanged.")
+
+    @validator("color")
+    def validate_color(cls, v):
+        if v is None:
+            return v
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
+            raise ValueError("color must be a 6-digit hex string, e.g. '#5B8DEF'")
+        return v.upper()
 
 
 class UpdateDeadlineRequest(BaseModel):
@@ -870,6 +880,7 @@ class CourseOut(BaseModel):
     semester: str | None = Field(None, description="Semester or term, e.g. 'Spring 2025'")
     start_date: str | None = Field(None, description="Course start date (YYYY-MM-DD)")
     end_date: str | None = Field(None, description="Course end date (YYYY-MM-DD)")
+    color: str | None = Field(None, description="User-chosen accent color as a hex string, e.g. '#5B8DEF'. Null if the user hasn't picked one, in which case the client falls back to a deterministic default.")
     deadline_count: int = Field(description="Number of deadlines/assignments in this course")
     flashcard_set_count: int = Field(description="Number of flashcard sets in this course")
     created_at: str = Field(description="ISO 8601 timestamp when the course was created")
@@ -998,27 +1009,37 @@ def generate_flashcards_fallback(text: str):
     return cards
 
 
+def _extract_pdf_text_raw(content: bytes) -> str:
+    """Extract text from a PDF's text layer (tables + prose) via pdfplumber.
+    May return an empty/short string for scanned or image-based PDFs — callers
+    decide what to do about that (raise vs. OCR fallback)."""
+    text = ""
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        page_count = len(pdf.pages)
+        print(f"[DEBUG] PDF has {page_count} pages")
+        for i, page in enumerate(pdf.pages):
+            # Extract tables first, then remaining text — preserves column structure
+            page_text = ""
+            tables = page.extract_tables()
+            if tables:
+                for table in tables:
+                    for row in table:
+                        page_text += " | ".join(cell or "" for cell in row) + "\n"
+                    page_text += "\n"
+            # extract_text with layout=True preserves column order better than default
+            prose = page.extract_text(layout=False) or ""
+            page_text += prose
+            text += page_text + "\n"
+            if i < 3:
+                print(f"[DEBUG] Page {i+1} extracted {len(page_text)} characters")
+
+    print(f"[DEBUG] Total extracted text: {len(text)} characters")
+    return text
+
+
 def extract_text_from_pdf(content: bytes) -> str:
     try:
-        text = ""
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
-            page_count = len(pdf.pages)
-            print(f"[DEBUG] PDF has {page_count} pages")
-            for i, page in enumerate(pdf.pages):
-                # Extract tables first, then remaining text — preserves column structure
-                page_text = ""
-                tables = page.extract_tables()
-                if tables:
-                    for table in tables:
-                        for row in table:
-                            page_text += " | ".join(cell or "" for cell in row) + "\n"
-                        page_text += "\n"
-                # extract_text with layout=True preserves column order better than default
-                prose = page.extract_text(layout=False) or ""
-                page_text += prose
-                text += page_text + "\n"
-                if i < 3:
-                    print(f"[DEBUG] Page {i+1} extracted {len(page_text)} characters")
+        text = _extract_pdf_text_raw(content)
 
         if len(text.strip()) < 50:
             print(f"[WARNING] PDF text extraction yielded only {len(text.strip())} characters")
@@ -1027,7 +1048,6 @@ def extract_text_from_pdf(content: bytes) -> str:
                 detail="Unable to extract text from PDF. The file may be scanned, image-based, or password-protected. Please try a text-based PDF or use an image format instead."
             )
 
-        print(f"[DEBUG] Total extracted text: {len(text)} characters")
         return text
     except HTTPException:
         raise  # Re-raise our custom exception
@@ -1037,6 +1057,61 @@ def extract_text_from_pdf(content: bytes) -> str:
             status_code=400,
             detail=f"Failed to process PDF file: {str(e)}"
         )
+
+
+_OCR_CONCURRENCY = asyncio.Semaphore(3)  # 10 concurrent gpt-4o-mini vision calls can exhaust a
+# tier's TPM budget in one burst (measured: a 10-page burst consumed a full 200k TPM window and
+# 429'd the very next call). Capping concurrency trades some latency for staying under the ceiling.
+
+
+async def _ocr_pdf_pages(content: bytes, max_pages: int = 10) -> tuple[str, int]:
+    """Rasterize PDF pages and transcribe them via vision OCR (extract_text_from_image).
+    Used as a fallback when the PDF's text layer is empty (scanned/image-based syllabus).
+    Capped at max_pages to bound OpenAI vision cost. Returns (text, pages_ocred)."""
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        pages_to_ocr = pdf.pages[:max_pages]
+
+        async def ocr_page(i: int, page) -> str:
+            img = page.to_image(resolution=150).original
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            async with _OCR_CONCURRENCY:
+                # A single transcribed syllabus page is realistically a few hundred tokens;
+                # 4000 (the default sized for one-off image uploads) would over-reserve TPM
+                # budget across a 10-page burst and starve the passes that run right after.
+                return await extract_text_from_image(buf.getvalue(), f"page_{i + 1}.png", max_tokens=1500)
+
+        page_texts = await asyncio.gather(*[ocr_page(i, page) for i, page in enumerate(pages_to_ocr)])
+
+    return "\n\n".join(page_texts), len(pages_to_ocr)
+
+
+async def extract_pdf_text_for_syllabus(content: bytes) -> str:
+    """Extract text from a syllabus PDF, falling back to vision OCR for scanned/image-based
+    files whose text layer comes back empty. Only used on syllabus upload paths — other PDF
+    uploads (notes, flashcards, quizzes) keep using extract_text_from_pdf as-is."""
+    try:
+        text = _extract_pdf_text_raw(content)
+    except Exception as e:
+        print(f"[ERROR] PDF extraction failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to process PDF file: {str(e)}")
+
+    if len(text.strip()) >= 50:
+        logger.info(f"[Syllabus] Extraction path: text-layer ({len(text)} chars)")
+        return text
+
+    logger.info("[Syllabus] Text layer yielded <50 chars, attempting OCR fallback")
+    ocr_text, pages_ocred = await _ocr_pdf_pages(content, max_pages=10)
+
+    if len(ocr_text.strip()) < 50:
+        logger.warning(f"[Syllabus] OCR fallback also yielded <50 chars ({len(ocr_text.strip())})")
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to extract text from this PDF, even after attempting OCR. The file may be a low-quality scan, password-protected, or corrupted. Please try a clearer scan or a different file."
+        )
+
+    logger.info(f"[Syllabus] Extraction path: ocr-fallback ({len(ocr_text)} chars, {pages_ocred} pages)")
+    return ocr_text
 
 
 def _iter_docx_block_items(doc: Document):
@@ -1232,8 +1307,11 @@ async def generate_summary_from_image(content: bytes, filename: str) -> str:
     return response.choices[0].message.content.strip()
 
 
-async def extract_text_from_image(content: bytes, filename: str) -> str:
-    """Use GPT-4o-mini vision to extract/transcribe text from an image of study material."""
+async def extract_text_from_image(content: bytes, filename: str, max_tokens: int = 4000) -> str:
+    """Use GPT-4o-mini vision to extract/transcribe text from an image of study material.
+    max_tokens is reserved against the account's TPM budget by OpenAI's rate limiter regardless
+    of actual usage, so batch callers (e.g. multi-page PDF OCR) should pass a smaller value —
+    the 4000 default is sized for a single arbitrary image, not a burst of page-at-a-time calls."""
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
@@ -1255,7 +1333,7 @@ async def extract_text_from_image(content: bytes, filename: str) -> str:
                 }
             ],
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=max_tokens
         )
     except Exception as e:
         _raise_if_openai_error(e)
@@ -1470,6 +1548,16 @@ def ensure_course_syllabus_column():
         pass  # Column already exists
 
 
+def ensure_course_color_column():
+    """Add color column to courses table for user-chosen accent colors."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE courses ADD COLUMN color VARCHAR"))
+            logger.info("[Migration] Added 'color' column to courses")
+    except Exception:
+        pass  # Column already exists
+
+
 def ensure_flashcard_grade_column():
     """Add grade column to flashcards table for per-card mastery tracking."""
     try:
@@ -1652,6 +1740,7 @@ ensure_referral_columns()
 ensure_subscription_columns()
 ensure_chat_columns()
 ensure_course_syllabus_column()
+ensure_course_color_column()
 ensure_flashcard_grade_column()
 ensure_upgrade_prompt_column()
 ensure_feature_panel_column()
@@ -1962,12 +2051,16 @@ If the year is 2026 and semester is Spring, start_date would be around 2026-01-1
 
 IMPORTANT: For any field where information is not found in the syllabus, use null (for strings) or empty arrays (for lists). Extract as much detail as possible."""
 
+    # Most syllabi fit well under this cap; only truncate the rare oversized doc so
+    # dates/instructor info near the end of a long syllabus aren't silently dropped.
+    metadata_text = text if len(text) <= 60000 else text[:60000]
+
     try:
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract metadata from this syllabus:\n\n{text[:15000]}"}
+                {"role": "user", "content": f"Extract metadata from this syllabus:\n\n{metadata_text}"}
             ],
             temperature=0.1,
             max_tokens=2000
@@ -2593,6 +2686,7 @@ def create_course(payload: CreateCourseRequest, current_user: User = Depends(get
             "start_date": str(course.start_date) if course.start_date else None,
             "end_date": str(course.end_date) if course.end_date else None,
             "course_info": course.course_info,
+            "color": course.color,
             "deadline_count": 0,
             "flashcard_set_count": 0,
             "created_at": course.created_at.isoformat(),
@@ -3096,7 +3190,6 @@ def create_checkout_session(
                     customer=customer_id,
                     mode=PLAN_CONFIG[payload.plan]["mode"],
                     line_items=[{"price": price_id, "quantity": 1}],
-                    subscription_data={"trial_period_days": 10},
                     client_reference_id=current_user.id,
                     metadata={"user_id": current_user.id, "plan": payload.plan},
                     success_url=f"{frontend_url}/settings?checkout=success",
@@ -3263,6 +3356,7 @@ def list_courses(current_user: User = Depends(get_current_user)):
                 "start_date": str(c.start_date) if c.start_date else None,
                 "end_date": str(c.end_date) if c.end_date else None,
                 "course_info": c.course_info,
+                "color": c.color,
                 "deadline_count": len(c.deadlines),
                 "flashcard_set_count": len(c.flashcard_sets),
                 "created_at": c.created_at.isoformat()
@@ -3309,6 +3403,7 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
             "start_date": str(course.start_date) if course.start_date else None,
             "end_date": str(course.end_date) if course.end_date else None,
             "course_info": course.course_info,
+            "color": course.color,
             "deadlines": [
                 {
                     "id": d.id,
@@ -3711,6 +3806,8 @@ def update_course(course_id: str, payload: UpdateCourseRequest, current_user: Us
             course.end_date = date.fromisoformat(payload.end_date)
         if payload.course_info is not None:
             course.course_info = payload.course_info
+        if payload.color is not None:
+            course.color = payload.color
 
         db.commit()
         db.refresh(course)
@@ -3722,6 +3819,7 @@ def update_course(course_id: str, payload: UpdateCourseRequest, current_user: Us
             "start_date": str(course.start_date) if course.start_date else None,
             "end_date": str(course.end_date) if course.end_date else None,
             "course_info": course.course_info,
+            "color": course.color,
         }
     finally:
         db.close()
@@ -3740,7 +3838,7 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
     if filename.endswith(".docx"):
         text = extract_text_from_docx(content)
     else:
-        text = extract_text_from_pdf(content)
+        text = await extract_pdf_text_for_syllabus(content)
 
     print(f"[DEBUG] Total text extracted: {len(text)} characters")
 
@@ -4215,7 +4313,7 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
         if filename.endswith(".docx"):
             text = extract_text_from_docx(content)
         else:
-            text = extract_text_from_pdf(content)
+            text = await extract_pdf_text_for_syllabus(content)
 
         print(f"[DEBUG] Total text extracted: {len(text)} characters")
 
@@ -4331,6 +4429,8 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
         finally:
             db.close()
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[ERROR] Error processing PDF: {str(e)}")
         import traceback
@@ -5832,12 +5932,16 @@ async def send_chat_message(
         # Detect study tool creation intent and generate from file (current or previous in history)
         created_study_set = None
         intent_lower = (message_content or "").lower()
-        wants_flashcards = any(k in intent_lower for k in [
-            "flashcard", "flash card", "flash-card", "create cards", "make cards", "study cards", "note cards"
-        ])
-        wants_quiz = any(k in intent_lower for k in [
-            "quiz", "test me", "practice test", "multiple choice", "practice questions", "create a test", "make a test", "create quiz", "make quiz", "generate quiz"
-        ])
+        _creation_verbs = r"(?:make|create|generate|build|give me|write)"
+        wants_flashcards = bool(re.search(
+            rf"\b{_creation_verbs}\b.{{0,20}}?\b(flash\s*-?\s*cards?|note\s*cards?|study\s*cards?)\b",
+            intent_lower
+        ))
+        wants_quiz = bool(re.search(
+            rf"\bquiz\s+me\b|\btest\s+me\b|\bpractice\s+test\b|\bmultiple[\s-]choice\b|\bpractice\s+questions\b"
+            rf"|\b{_creation_verbs}\b.{{0,20}}?\b(quiz|test)\b",
+            intent_lower
+        ))
         wants_summary = any(k in intent_lower for k in [
             "save to library", "add to library", "save this", "save that", "save it", "add this to library",
             "save summary", "save the summary", "add summary", "store this", "keep this",

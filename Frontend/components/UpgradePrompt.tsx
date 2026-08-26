@@ -24,7 +24,7 @@ export default function UpgradePrompt({ current, max, variant = 'inline' }: Upgr
           href="/upgrade"
           className="shrink-0 rounded-full border border-indigo-200 bg-white px-4 py-1.5 text-xs font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
         >
-          Try free for 10 days
+          Upgrade to Pro
         </Link>
       </div>
     )
@@ -62,12 +62,12 @@ export default function UpgradePrompt({ current, max, variant = 'inline' }: Upgr
         href="/upgrade"
         className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-base font-bold text-white shadow-lg transition-all hover:-translate-y-1 hover:shadow-xl"
       >
-        Upgrade to Pro — 10 days free
+        Upgrade to Pro
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
         </svg>
       </Link>
-      <p className="mt-2 text-xs text-slate-400">No charge for 10 days. Cancel anytime.</p>
+      <p className="mt-2 text-xs text-slate-400">Cancel anytime.</p>
     </div>
   )
 }

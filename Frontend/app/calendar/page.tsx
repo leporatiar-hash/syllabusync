@@ -32,6 +32,7 @@ interface Course {
   id: string
   name: string
   code?: string
+  color?: string | null
 }
 
 // API_URL comes from useAuthFetch hook
@@ -190,6 +191,10 @@ export default function CalendarPage() {
 
   const getDeadlineColor = (deadline: Deadline) => {
     return courseColors[deadline.course_id]?.bg || 'bg-slate-400'
+  }
+
+  const getDeadlineColorStyle = (deadline: Deadline) => {
+    return courseColors[deadline.course_id]?.customStyle?.bg
   }
 
   // Extract hex color from Tailwind bg class like 'bg-[#5B8DEF]'
@@ -1054,9 +1059,13 @@ export default function CalendarPage() {
                                   } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'} ${
                                     draggingId === deadline.id ? 'opacity-50' : ''
                                   }`}
+                                  style={deadline.type === 'Class' ? courseColor?.customStyle?.border : courseColor?.customStyle?.bg}
                                 >
                                   <div className="flex items-center justify-between gap-1">
-                                    <span className={`truncate text-[11px] font-medium ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
+                                    <span
+                                      className={`truncate text-[11px] font-medium ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}
+                                      style={deadline.type === 'Class' ? courseColor?.customStyle?.text : undefined}
+                                    >
                                       {deadline.title}
                                     </span>
                                     {deadline.time && (
@@ -1066,7 +1075,7 @@ export default function CalendarPage() {
                                   {/* Hover tooltip */}
                                   <div className="absolute left-1/2 -translate-x-1/2 top-full z-50 mt-2 hidden min-w-[220px] max-w-xs rounded-xl bg-slate-900 px-3 py-2.5 text-white shadow-2xl group-hover/badge:block before:absolute before:-top-1 before:left-1/2 before:-translate-x-1/2 before:h-2 before:w-2 before:rotate-45 before:bg-slate-900">
                                     <div className="flex items-start gap-2">
-                                      <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} />
+                                      <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${courseColor?.bg || 'bg-slate-400'}`} style={courseColor?.customStyle?.bg} />
                                       <div className="min-w-0 flex-1">
                                         <div className="text-xs font-semibold leading-tight">{deadline.title}</div>
                                         <div className="mt-1 text-[10px] text-slate-300 leading-tight">{deadline.course_name}</div>
@@ -1151,8 +1160,12 @@ export default function CalendarPage() {
                                         ? `border border-dashed ${courseColor?.border || 'border-slate-300'} bg-white/90`
                                         : (courseColor?.bg || 'bg-slate-400')
                                     } ${deadline.completed ? 'opacity-40' : 'opacity-90 hover:opacity-100'}`}
+                                    style={deadline.type === 'Class' ? courseColor?.customStyle?.border : courseColor?.customStyle?.bg}
                                   >
-                                    <div className={`font-medium truncate text-[10px] md:text-xs ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}>
+                                    <div
+                                      className={`font-medium truncate text-[10px] md:text-xs ${deadline.type === 'Class' ? (courseColor?.text || 'text-slate-600') : 'text-white'} ${deadline.completed ? 'line-through' : ''}`}
+                                      style={deadline.type === 'Class' ? courseColor?.customStyle?.text : undefined}
+                                    >
                                       {deadline.title}
                                     </div>
                                     {deadline.time && (
@@ -1204,14 +1217,24 @@ export default function CalendarPage() {
                                       ? `border-dashed ${courseColors[deadline.course_id]?.border || 'border-slate-300'} bg-white`
                                       : `border-slate-100 ${courseColors[deadline.course_id]?.light || 'bg-white'}`
                                 }`}
+                                style={
+                                  !deadline.completed
+                                    ? (deadline.type === 'Class'
+                                        ? courseColors[deadline.course_id]?.customStyle?.border
+                                        : courseColors[deadline.course_id]?.customStyle?.light)
+                                    : undefined
+                                }
                               >
-                                <div className={`mt-1 h-4 w-4 rounded-full ${getDeadlineColor(deadline)}`} />
+                                <div className={`mt-1 h-4 w-4 rounded-full ${getDeadlineColor(deadline)}`} style={getDeadlineColorStyle(deadline)} />
                                 <div className="flex-1 min-w-0">
                                   <div className={`font-semibold text-slate-900 ${deadline.completed ? 'line-through' : ''}`}>
                                     {deadline.title}
                                   </div>
                                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                    <span className={`rounded-full px-2 py-0.5 ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-600'}`}>
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-600'}`}
+                                      style={{ ...courseColors[deadline.course_id]?.customStyle?.light, ...courseColors[deadline.course_id]?.customStyle?.text }}
+                                    >
                                       {deadline.type}
                                     </span>
                                     <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
@@ -1269,7 +1292,10 @@ export default function CalendarPage() {
                         >
                           <div className="flex items-center justify-between text-xs text-slate-500">
                             <span>{deadline.date}</span>
-                            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-500'}`}>
+                            <span
+                              className={`rounded-full px-2 py-1 text-[10px] font-semibold ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-500'}`}
+                              style={{ ...courseColors[deadline.course_id]?.customStyle?.light, ...courseColors[deadline.course_id]?.customStyle?.text }}
+                            >
                               {deadline.type}
                             </span>
                           </div>
@@ -1305,7 +1331,7 @@ export default function CalendarPage() {
                           href={`/courses/${course.id}`}
                           className="flex items-center gap-2 text-xs text-slate-600 hover:text-slate-900 transition-colors"
                         >
-                          <span className={`h-3 w-3 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} />
+                          <span className={`h-3 w-3 rounded-full ${courseColors[course.id]?.bg || 'bg-slate-400'}`} style={courseColors[course.id]?.customStyle?.bg} />
                           <span className="truncate">{course.code ? `${course.code} - ${course.name}` : course.name}</span>
                         </Link>
                       ))
@@ -1337,7 +1363,10 @@ export default function CalendarPage() {
           <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between">
               <div>
-                <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${courseColors[selectedDeadline.course_id]?.light || 'bg-slate-100'} ${courseColors[selectedDeadline.course_id]?.text || 'text-slate-600'}`}>
+                <span
+                  className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${courseColors[selectedDeadline.course_id]?.light || 'bg-slate-100'} ${courseColors[selectedDeadline.course_id]?.text || 'text-slate-600'}`}
+                  style={{ ...courseColors[selectedDeadline.course_id]?.customStyle?.light, ...courseColors[selectedDeadline.course_id]?.customStyle?.text }}
+                >
                   {selectedDeadline.type}
                 </span>
                 <h2 className={`mt-3 text-xl font-semibold text-slate-900 ${selectedDeadline.completed ? 'line-through' : ''}`}>
