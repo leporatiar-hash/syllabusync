@@ -40,6 +40,9 @@ function SettingsPageContent() {
   const [academicYear, setAcademicYear] = useState('')
   const [major, setMajor] = useState('')
   const [namingStyle, setNamingStyle] = useState('simple')
+  const [regenerating, setRegenerating] = useState(false)
+  const [regenerateResult, setRegenerateResult] = useState<string | null>(null)
+  const [regenerateError, setRegenerateError] = useState<string | null>(null)
   const [profilePicture, setProfilePicture] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -138,6 +141,36 @@ function SettingsPageContent() {
       setSaveError('An unexpected error occurred. Please try again.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleRegenerateTitles = async () => {
+    setRegenerating(true)
+    setRegenerateResult(null)
+    setRegenerateError(null)
+    try {
+      const res = await fetchWithAuth(`${API_URL}/me/regenerate-deadline-titles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ naming_style: namingStyle }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setRegenerateError(data.detail || 'Failed to regenerate titles. Please try again.')
+        return
+      }
+      const data = await res.json()
+      if (data.courses_processed === 0) {
+        setRegenerateResult("No courses with a saved syllabus to update yet — upload one first.")
+      } else {
+        const parts = [`Updated ${data.deadlines_updated} deadline${data.deadlines_updated === 1 ? '' : 's'} across ${data.courses_processed} course${data.courses_processed === 1 ? '' : 's'}.`]
+        if (data.courses_failed > 0) parts.push(`${data.courses_failed} course${data.courses_failed === 1 ? '' : 's'} failed — try again later.`)
+        setRegenerateResult(parts.join(' '))
+      }
+    } catch {
+      setRegenerateError('An unexpected error occurred. Please try again.')
+    } finally {
+      setRegenerating(false)
     }
   }
 
@@ -399,6 +432,26 @@ function SettingsPageContent() {
                 <span className="mt-0.5 block text-xs text-slate-500">{opt.hint}</span>
               </button>
             ))}
+          </div>
+
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={handleRegenerateTitles}
+              disabled={regenerating}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 disabled:opacity-50"
+            >
+              {regenerating ? 'Applying to your courses…' : 'Apply to all existing courses'}
+            </button>
+            <p className="mt-1 text-xs text-slate-500">
+              Renames deadlines already pulled from your syllabi (including ones saved to your calendar) to match the style above. Doesn&apos;t add or remove deadlines, and never touches Canvas or iCal-synced ones.
+            </p>
+            {regenerateResult && (
+              <p className="mt-1 text-sm font-medium text-green-600">{regenerateResult}</p>
+            )}
+            {regenerateError && (
+              <p className="mt-1 text-sm text-red-600">{regenerateError}</p>
+            )}
           </div>
         </div>
 

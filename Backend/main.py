@@ -844,6 +844,10 @@ class UserProfileRequest(BaseModel):
     naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
 
 
+class RegenerateTitlesRequest(BaseModel):
+    naming_style: str | None = Field(None, description="'simple' or 'descriptive'; falls back to the user's saved default")
+
+
 class CreateDeadlineRequest(BaseModel):
     title: str = Field(description="Title or name of the assignment/deadline")
     date: str = Field(description="Due date in YYYY-MM-DD format")
@@ -2855,6 +2859,76 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                 "profile_picture": profile.profile_picture,
                 "naming_style": profile.naming_style or "simple",
             }
+        }
+    finally:
+        db.close()
+
+
+@app.post("/me/regenerate-deadline-titles", tags=["user"], summary="Re-run title extraction against stored syllabi for all courses")
+@limiter.limit("3/minute")
+async def regenerate_deadline_titles(request: Request, payload: RegenerateTitlesRequest, current_user: User = Depends(get_current_user)):
+    """Re-extract deadline titles for every course that has a stored syllabus, using
+    the given (or saved default) naming style, and update matching existing deadlines
+    in place — so a deadline already saved to the user's calendar keeps its id and
+    just picks up the new title, no re-save needed.
+
+    Only renames syllabus-sourced deadlines (source is "manual" or unset); Canvas- and
+    iCal-synced deadlines already carry real names and are left untouched. Matches are
+    made by date within each course — this never creates new deadlines or deletes
+    existing ones, it only renames matches it finds.
+    """
+    db = SessionLocal()
+    try:
+        naming_style = _resolve_naming_style(db, current_user.id, current_user.email, payload.naming_style)
+
+        courses = db.query(Course).filter(Course.user_id == current_user.id).all()
+        courses_with_syllabus = [c for c in courses if c.syllabus_text]
+
+        courses_processed = 0
+        courses_failed = 0
+        deadlines_updated = 0
+
+        for course in courses_with_syllabus:
+            try:
+                metadata = {
+                    "start_date": course.start_date.isoformat() if course.start_date else None,
+                    "end_date": course.end_date.isoformat() if course.end_date else None,
+                    "semester": course.semester,
+                }
+                extracted = await extract_deadlines_with_context(course.syllabus_text, metadata, naming_style=naming_style)
+
+                existing = db.query(Deadline).filter(
+                    Deadline.course_id == course.id,
+                    Deadline.user_id == current_user.id,
+                ).all()
+                unmatched = [d for d in existing if d.source in ("manual", None)]
+
+                for item in extracted:
+                    item_date = (item.get("date") or "").strip()
+                    new_title = (item.get("title") or "").strip()
+                    if not item_date or not new_title:
+                        continue
+                    match = next((d for d in unmatched if d.date == item_date), None)
+                    if not match:
+                        continue
+                    if new_title != match.title:
+                        match.title = new_title
+                        match.description = item.get("context") or item.get("description") or match.description
+                        deadlines_updated += 1
+                    unmatched.remove(match)
+
+                courses_processed += 1
+            except Exception as e:
+                logger.error(f"[regenerate-titles] Failed for course {course.id}: {e}")
+                courses_failed += 1
+
+        db.commit()
+        return {
+            "naming_style": naming_style,
+            "courses_processed": courses_processed,
+            "courses_skipped_no_syllabus": len(courses) - len(courses_with_syllabus),
+            "courses_failed": courses_failed,
+            "deadlines_updated": deadlines_updated,
         }
     finally:
         db.close()
