@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Nav from './Nav'
 import FeedbackButton from './FeedbackButton'
+import TalkToClassMateButton from './TalkToClassMateButton'
 import AuthDebug from './AuthDebug'
 
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
@@ -38,6 +39,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       </header>
       {children}
       <FeedbackButton />
+      <TalkToClassMateButton />
       <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>&copy; {new Date().getFullYear()} ClassMate</span>
