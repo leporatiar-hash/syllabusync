@@ -635,6 +635,10 @@ class UserProfile(Base):
     # One-question value-prop feedback ask (shown once, ever)
     session_count = Column(Integer, nullable=False, default=0)
     value_prompt_shown_at = Column(DateTime, nullable=True)
+    # Default deadline-naming style for syllabus AI extraction: "simple" (e.g. "Quiz 1")
+    # or "descriptive" (full topic/reading/page-range text from the syllabus). Can be
+    # overridden per-upload; this is just the pre-selected default.
+    naming_style = Column(String, nullable=False, default="simple")
 
 
 class CalendarEntry(Base):
@@ -837,6 +841,7 @@ class UserProfileRequest(BaseModel):
     school_type: str | None = Field(None, description="Type: 'university', 'community_college', 'high_school', etc.")
     academic_year: str | None = Field(None, description="Academic year: 'Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', etc.")
     major: str | None = Field(None, description="User's major or field of study")
+    naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
 
 
 class CreateDeadlineRequest(BaseModel):
@@ -957,6 +962,7 @@ class UserProfileOut(BaseModel):
     major: str | None = Field(None, description="User's major or field of study")
     profile_picture: str | None = Field(None, description="URL to the user's profile picture")
     referral_code: str | None = Field(None, description="Unique referral code to share with friends")
+    naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
 
 
 class SubscriptionOut(BaseModel):
@@ -1605,6 +1611,17 @@ def ensure_value_prompt_columns():
             pass  # Column already exists
 
 
+def ensure_naming_style_column():
+    """Add naming_style column to user_profiles: the user's default deadline-title
+    style ("simple" or "descriptive") for syllabus AI extraction."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN naming_style VARCHAR DEFAULT 'simple'"))
+            logger.info("[Migration] Added 'naming_style' column to user_profiles")
+    except Exception:
+        pass  # Column already exists
+
+
 def ensure_founding_member_expiry_column():
     """Add founding_member_expires_at to user_profiles: founding access is a 365-day
     grant from purchase, not permanent. Backfills any pre-existing founding_member=True
@@ -1746,6 +1763,7 @@ ensure_upgrade_prompt_column()
 ensure_feature_panel_column()
 ensure_value_prompt_columns()
 ensure_founding_member_expiry_column()
+ensure_naming_style_column()
 Base.metadata.create_all(bind=engine)
 
 
@@ -2086,9 +2104,15 @@ IMPORTANT: For any field where information is not found in the syllabus, use nul
         }
 
 
-async def extract_deadlines_with_context(text: str, metadata: dict):
-    """PASS 2: Extract deadlines using course metadata for context."""
-    print("[DEBUG] PASS 2: Extracting deadlines with context...")
+async def extract_deadlines_with_context(text: str, metadata: dict, naming_style: str = "simple"):
+    """PASS 2: Extract deadlines using course metadata for context.
+
+    naming_style:
+      "simple"      - short labels like "Quiz 1", "HW 1 Due" (default)
+      "descriptive" - full title built from the syllabus's own topic/reading/page-range
+                       text, e.g. "Cognitive Neuroscience: Ch. 2, pp 55-70; Appendix B, pp 391-395"
+    """
+    print(f"[DEBUG] PASS 2: Extracting deadlines with context (naming_style={naming_style})...")
 
     max_chars = 25000
     if len(text) > max_chars:
@@ -2098,6 +2122,31 @@ async def extract_deadlines_with_context(text: str, metadata: dict):
     start_date = metadata.get("start_date", "2026-01-12")
     end_date = metadata.get("end_date", "2026-05-08")
     semester = metadata.get("semester", "Spring 2026")
+
+    if naming_style == "descriptive":
+        title_instruction = (
+            "Full descriptive name built from what the syllabus actually says about this item — "
+            "include the topic, reading/chapter, and page ranges when the syllabus lists them "
+            "(e.g., 'Cognitive Neuroscience: Chapter 2, pp 55-70, Appendix B, pp 391-395', "
+            "'Quiz 1: Chapters 1-3', 'Mini Pitch 1: Customer Discovery Results Presentation'). "
+            "Do not shorten this to a generic label — put the real content here, not in 'context'."
+        )
+        examples_block = """Examples of GOOD entries:
+- {"date": "2026-01-30", "type": "Quiz", "title": "Quiz 1: Chapters 1-3", "context": "Covers chapters 1-2-3", "time": null, "recurring": false}
+- {"date": "2026-02-09", "type": "Exam", "title": "Test 1: Chapters 1-4", "context": "Covers chapters 1-2-3-4", "time": null, "recurring": false}
+- {"date": "2026-01-29", "type": "Presentation", "title": "Mini Pitch 1: Customer Discovery Results Presentation", "context": "Customer discovery results presentation", "time": null, "recurring": false}
+- {"date": "2026-04-22", "type": "Admin", "title": "Final Assignment Due: All Assignments Due, No Extensions", "context": "All assignments due, no extensions", "time": "7:00 AM", "recurring": false}
+- {"date": "2026-04-24", "type": "Exam", "title": "Final Exam: Section 6", "context": "Final test for section 6", "time": "8:00 AM", "recurring": false}
+- {"date": "2026-01-16", "type": "Homework", "title": "HW 1: Cognitive Neuroscience Chapter 2, pp 55-70, Appendix B, pp 391-395", "context": "First homework assignment due", "time": "11:59pm", "recurring": false}"""
+    else:
+        title_instruction = "Descriptive name (e.g., 'Test 1', 'Quiz 1', 'Mini Pitch 1', 'HW 1 Due')"
+        examples_block = """Examples of GOOD entries:
+- {"date": "2026-01-30", "type": "Quiz", "title": "Quiz 1", "context": "Covers chapters 1-2-3", "time": null, "recurring": false}
+- {"date": "2026-02-09", "type": "Exam", "title": "Test 1", "context": "Covers chapters 1-2-3-4", "time": null, "recurring": false}
+- {"date": "2026-01-29", "type": "Presentation", "title": "Mini Pitch 1", "context": "Customer discovery results presentation", "time": null, "recurring": false}
+- {"date": "2026-04-22", "type": "Admin", "title": "Final Assignment Due", "context": "All assignments due, no extensions", "time": "7:00 AM", "recurring": false}
+- {"date": "2026-04-24", "type": "Exam", "title": "Final Exam", "context": "Final test for section 6", "time": "8:00 AM", "recurring": false}
+- {"date": "2026-01-16", "type": "Homework", "title": "HW 1 Due", "context": "First homework assignment due", "time": "11:59pm", "recurring": false}"""
 
     system_prompt = f"""You are parsing a college course syllabus. The course runs from {start_date} to {end_date} ({semester}).
 
@@ -2151,7 +2200,7 @@ Return ONLY a valid JSON array. Each item must have:
 {{
     "date": "YYYY-MM-DD (first occurrence for recurring, or specific date)",
     "type": "Exam|Assignment|Project|Quiz|Homework|Presentation|Admin",
-    "title": "Descriptive name (e.g., 'Test 1', 'Quiz 1', 'Mini Pitch 1', 'HW 1 Due')",
+    "title": "{title_instruction}",
     "context": "Brief description from syllabus",
     "time": "Due time if mentioned (e.g., '11:59pm', '7:00 AM'), or null",
     "recurring": true/false (true if it repeats weekly),
@@ -2159,13 +2208,7 @@ Return ONLY a valid JSON array. Each item must have:
     "day_of_week": "Monday|Tuesday|...|Sunday" or null
 }}
 
-Examples of GOOD entries:
-- {{"date": "2026-01-30", "type": "Quiz", "title": "Quiz 1", "context": "Covers chapters 1-2-3", "time": null, "recurring": false}}
-- {{"date": "2026-02-09", "type": "Exam", "title": "Test 1", "context": "Covers chapters 1-2-3-4", "time": null, "recurring": false}}
-- {{"date": "2026-01-29", "type": "Presentation", "title": "Mini Pitch 1", "context": "Customer discovery results presentation", "time": null, "recurring": false}}
-- {{"date": "2026-04-22", "type": "Admin", "title": "Final Assignment Due", "context": "All assignments due, no extensions", "time": "7:00 AM", "recurring": false}}
-- {{"date": "2026-04-24", "type": "Exam", "title": "Final Exam", "context": "Final test for section 6", "time": "8:00 AM", "recurring": false}}
-- {{"date": "2026-01-16", "type": "Homework", "title": "HW 1 Due", "context": "First homework assignment due", "time": "11:59pm", "recurring": false}}
+{examples_block}
 
 Return [] if no deadlines found."""
 
@@ -2717,6 +2760,17 @@ def _resolve_profile(db, user_id: str, email: str | None = None) -> UserProfile 
     return profile
 
 
+def _resolve_naming_style(db, user_id: str, email: str | None, explicit: str | None) -> str:
+    """Resolve the deadline-naming style for a syllabus upload: an explicit per-upload
+    choice wins, otherwise fall back to the user's saved default, otherwise "simple"."""
+    if explicit in ("simple", "descriptive"):
+        return explicit
+    profile = _resolve_profile(db, user_id, email)
+    if profile and profile.naming_style in ("simple", "descriptive"):
+        return profile.naming_style
+    return "simple"
+
+
 @app.get("/me", tags=["user"], summary="Get current user profile and subscription", response_model=UserMeResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     """Return the authenticated user's profile, subscription tier, and onboarding status.
@@ -2741,6 +2795,7 @@ def get_me(current_user: User = Depends(get_current_user)):
                 "major": profile.major,
                 "profile_picture": profile.profile_picture,
                 "referral_code": profile.referral_code,
+                "naming_style": profile.naming_style or "simple",
             },
             "subscription": {
                 "tier": tier,
@@ -2759,6 +2814,8 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
 
     Safe to call multiple times — performs an upsert. Returns the saved profile fields.
     """
+    naming_style = payload.naming_style if payload.naming_style in ("simple", "descriptive") else None
+
     db = SessionLocal()
     try:
         profile = _resolve_profile(db, current_user.id, current_user.email)
@@ -2772,6 +2829,7 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                 school_type=payload.school_type,
                 academic_year=payload.academic_year,
                 major=payload.major,
+                naming_style=naming_style or "simple",
             )
             db.add(profile)
             db.commit()
@@ -2782,6 +2840,7 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
             profile.school_type = payload.school_type or profile.school_type
             profile.academic_year = payload.academic_year or profile.academic_year
             profile.major = payload.major or profile.major
+            profile.naming_style = naming_style or profile.naming_style
             db.commit()
 
         return {
@@ -2794,6 +2853,7 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                 "academic_year": profile.academic_year,
                 "major": profile.major,
                 "profile_picture": profile.profile_picture,
+                "naming_style": profile.naming_style or "simple",
             }
         }
     finally:
@@ -3827,7 +3887,13 @@ def update_course(course_id: str, payload: UpdateCourseRequest, current_user: Us
 
 @app.post("/courses/{course_id}/syllabus")
 @limiter.limit("5/minute")
-async def upload_course_syllabus(request: Request, course_id: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+async def upload_course_syllabus(
+    request: Request,
+    course_id: str,
+    file: UploadFile = File(...),
+    naming_style: str | None = Form(None, description="'simple' or 'descriptive'; falls back to the user's saved default"),
+    current_user: User = Depends(get_current_user),
+):
     """Upload a syllabus PDF or Word doc and attach extracted deadlines to an existing course."""
     logger.info(f"[DEBUG] /courses/{course_id}/syllabus request received")
 
@@ -3846,7 +3912,12 @@ async def upload_course_syllabus(request: Request, course_id: str, file: UploadF
         raise HTTPException(status_code=400, detail="Could not extract text from the uploaded file. Make sure it contains readable text.")
 
     metadata = await extract_course_metadata(text)
-    deadlines_data = await extract_deadlines_with_context(text, metadata)
+    style_db = SessionLocal()
+    try:
+        resolved_naming_style = _resolve_naming_style(style_db, current_user.id, current_user.email, naming_style)
+    finally:
+        style_db.close()
+    deadlines_data = await extract_deadlines_with_context(text, metadata, naming_style=resolved_naming_style)
     print(f"[DEBUG] Deadline extraction returned {len(deadlines_data)} items")
 
     db = SessionLocal()
@@ -4299,7 +4370,12 @@ def delete_flashcard_set(set_id: str, current_user: User = Depends(get_current_u
 
 @app.post("/upload")
 @limiter.limit("5/minute")
-async def upload_syllabus(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+async def upload_syllabus(
+    request: Request,
+    file: UploadFile = File(...),
+    naming_style: str | None = Form(None, description="'simple' or 'descriptive'; falls back to the user's saved default"),
+    current_user: User = Depends(get_current_user),
+):
     logger.info("[DEBUG] /upload request received")
     user_id = current_user.id
 
@@ -4332,7 +4408,12 @@ async def upload_syllabus(request: Request, file: UploadFile = File(...), curren
         metadata = await extract_course_metadata(text)
 
         # PASS 2: Extract deadlines with context
-        deadlines_data = await extract_deadlines_with_context(text, metadata)
+        style_db = SessionLocal()
+        try:
+            resolved_naming_style = _resolve_naming_style(style_db, current_user.id, current_user.email, naming_style)
+        finally:
+            style_db.close()
+        deadlines_data = await extract_deadlines_with_context(text, metadata, naming_style=resolved_naming_style)
 
         # Save to database
         db = SessionLocal()

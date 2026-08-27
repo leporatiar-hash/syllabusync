@@ -7,6 +7,7 @@ import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardLis
 import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../../hooks/useAuthFetch'
 import { useAuth } from '../../../lib/useAuth'
 import posthog from 'posthog-js'
+import NamingStyleModal from '../../../components/NamingStyleModal'
 
 interface Deadline {
   id: string
@@ -128,6 +129,7 @@ export default function CourseDetailPage() {
   const [syllabusLoading, setSyllabusLoading] = useState(false)
   const [syllabusSuccess, setSyllabusSuccess] = useState(false)
   const [syllabusError, setSyllabusError] = useState<string | null>(null)
+  const [showNamingModal, setShowNamingModal] = useState(false)
   const [studyFile, setStudyFile] = useState<File | null>(null)
   const [flashcardLoading, setFlashcardLoading] = useState(false)
   const [flashcardSuccess, setFlashcardSuccess] = useState(false)
@@ -390,7 +392,7 @@ export default function CourseDetailPage() {
     }
   }
 
-  const handleSyllabusUpload = async () => {
+  const handleSyllabusUpload = async (namingStyle: 'simple' | 'descriptive') => {
     if (!syllabusFile || !courseId) return
     setSyllabusLoading(true)
     setSyllabusSuccess(false)
@@ -398,6 +400,7 @@ export default function CourseDetailPage() {
 
     const formData = new FormData()
     formData.append('file', syllabusFile)
+    formData.append('naming_style', namingStyle)
 
     try {
       const url = `${API_URL}/courses/${courseId}/syllabus`
@@ -971,7 +974,7 @@ export default function CourseDetailPage() {
               )}
 
               <button
-                onClick={handleSyllabusUpload}
+                onClick={() => setShowNamingModal(true)}
                 disabled={!syllabusFile || syllabusLoading}
                 className="mt-4 w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -2170,6 +2173,16 @@ export default function CourseDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showNamingModal && (
+        <NamingStyleModal
+          onCancel={() => setShowNamingModal(false)}
+          onConfirm={(namingStyle) => {
+            setShowNamingModal(false)
+            handleSyllabusUpload(namingStyle)
+          }}
+        />
       )}
     </main>
   )

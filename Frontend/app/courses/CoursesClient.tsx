@@ -7,6 +7,7 @@ import posthog from 'posthog-js'
 import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import { getCourseColor, COLOR_PICKER_SWATCHES } from '../../lib/courseColors'
+import NamingStyleModal from '../../components/NamingStyleModal'
 
 interface CourseInfo {
   instructor?: { name?: string | null }
@@ -64,6 +65,7 @@ export default function CoursesClient() {
   const syllabusInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [pendingSyllabusFile, setPendingSyllabusFile] = useState<File | null>(null)
 
   const preventDefault = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation() }
 
@@ -81,7 +83,7 @@ export default function CoursesClient() {
     }
   }
 
-  const submitSyllabus = async (file: File) => {
+  const selectSyllabus = (file: File) => {
     if (uploading) return
     const ext = file.name.split('.').pop()?.toLowerCase()
     if (ext !== 'pdf' && ext !== 'docx') {
@@ -92,12 +94,18 @@ export default function CoursesClient() {
       setUploadError('File is too large (max 10 MB).')
       return
     }
+    setUploadError(null)
+    setPendingSyllabusFile(file)
+  }
 
+  const submitSyllabus = async (file: File, namingStyle: 'simple' | 'descriptive') => {
+    if (uploading) return
     setUploading(true)
     setUploadError(null)
     try {
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('naming_style', namingStyle)
       const res = await fetchWithAuth(`${API_URL}/upload`, {
         method: 'POST',
         body: formData,
@@ -134,12 +142,12 @@ export default function CoursesClient() {
     setUploadDragOver(false)
     if (uploading) return
     const file = e.dataTransfer.files?.[0]
-    if (file) submitSyllabus(file)
+    if (file) selectSyllabus(file)
   }
 
   const onUploadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) submitSyllabus(file)
+    if (file) selectSyllabus(file)
   }
 
   useEffect(() => {
@@ -705,6 +713,20 @@ export default function CoursesClient() {
             {toastMessage}
           </div>
         </div>
+      )}
+
+      {pendingSyllabusFile && (
+        <NamingStyleModal
+          onCancel={() => {
+            setPendingSyllabusFile(null)
+            if (syllabusInputRef.current) syllabusInputRef.current.value = ''
+          }}
+          onConfirm={(namingStyle) => {
+            const file = pendingSyllabusFile
+            setPendingSyllabusFile(null)
+            submitSyllabus(file, namingStyle)
+          }}
+        />
       )}
     </main>
   )

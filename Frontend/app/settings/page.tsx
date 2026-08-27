@@ -14,6 +14,10 @@ const ICalConnectModal = dynamic(() => import('../../components/ICalConnectModal
 
 const schoolTypes = ['High School', 'Community College', 'University', 'Graduate School']
 const academicYears = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', 'PhD']
+const namingStyles: { value: string; label: string; hint: string }[] = [
+  { value: 'simple', label: 'Simple', hint: "Short labels, e.g. \"Quiz 1\", \"HW 1 Due\"" },
+  { value: 'descriptive', label: 'Descriptive', hint: 'Full topic/reading/page detail from the syllabus' },
+]
 
 function SettingsPageContent() {
   const router = useRouter()
@@ -35,6 +39,7 @@ function SettingsPageContent() {
   const [schoolType, setSchoolType] = useState('')
   const [academicYear, setAcademicYear] = useState('')
   const [major, setMajor] = useState('')
+  const [namingStyle, setNamingStyle] = useState('simple')
   const [profilePicture, setProfilePicture] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -92,6 +97,7 @@ function SettingsPageContent() {
         setSchoolType(data.profile.school_type || '')
         setAcademicYear(data.profile.academic_year || '')
         setMajor(data.profile.major || '')
+        setNamingStyle(data.profile.naming_style || 'simple')
         setProfilePicture(data.profile.profile_picture || null)
       }
     }).catch(() => {})
@@ -118,6 +124,7 @@ function SettingsPageContent() {
           school_type: schoolType || undefined,
           academic_year: academicYear || undefined,
           major: major || undefined,
+          naming_style: namingStyle || undefined,
         }),
       })
       if (!res.ok) {
@@ -367,6 +374,32 @@ function SettingsPageContent() {
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-[#5B8DEF] focus:ring-2 focus:ring-[#5B8DEF]/20"
             placeholder="e.g. Computer Science"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Assignment Naming
+          </label>
+          <p className="mb-2 text-xs text-slate-500">
+            Default style for deadline titles pulled from an uploaded syllabus. You can also choose this each time you upload.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {namingStyles.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setNamingStyle(opt.value)}
+                className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                  namingStyle === opt.value
+                    ? 'border-[#5B8DEF] bg-[#5B8DEF]/5 ring-2 ring-[#5B8DEF]/20'
+                    : 'border-slate-300 hover:border-slate-400'
+                }`}
+              >
+                <span className="block font-medium text-slate-800">{opt.label}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">{opt.hint}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-center gap-3 pt-2">
