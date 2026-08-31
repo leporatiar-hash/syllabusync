@@ -627,7 +627,7 @@ function SettingsPageContent() {
                 </>
               )}
             </button>
-            <p className="text-center text-xs text-slate-400">Pull the latest assignments from your connected feeds</p>
+            <p className="text-center text-xs text-slate-400">We sync automatically every few hours &mdash; use this to pull the latest right now</p>
           </div>
         ) : (
           <p className="mb-4 text-sm text-slate-400">No calendar feeds connected yet.</p>

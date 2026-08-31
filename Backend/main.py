@@ -1883,6 +1883,52 @@ async def _nudge_background_loop():
         await asyncio.sleep(86400)
 
 
+LMS_SYNC_INTERVAL_SECONDS = 3 * 60 * 60  # 3 hours
+
+
+def _run_lms_background_sync():
+    """Sync every connected Canvas/iCal account so newly-posted LMS deadlines show up
+    without the student having to click "Sync" manually. Runs synchronously (called via
+    a worker thread) since sync_canvas/sync_ical make blocking HTTP calls."""
+    db = SessionLocal()
+    try:
+        connections = db.query(LMSConnection).all()
+        synced_total = 0
+        error_total = 0
+        for conn_obj in connections:
+            try:
+                if conn_obj.provider == "canvas":
+                    count, errs = sync_canvas(conn_obj, conn_obj.user_id, db)
+                elif conn_obj.provider == "ical":
+                    count, errs = sync_ical(conn_obj, conn_obj.user_id, db)
+                else:
+                    continue
+                synced_total += count
+                error_total += len(errs)
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"[LMS] Background sync failed for connection {conn_obj.id} ({conn_obj.provider}): {e}")
+        logger.info(
+            f"[LMS] Background sync complete — {len(connections)} connections, "
+            f"{synced_total} items synced, {error_total} errors"
+        )
+    except Exception as e:
+        logger.error(f"[LMS] Background sync error: {e}")
+    finally:
+        db.close()
+
+
+async def _lms_background_loop():
+    """Runs LMS sync periodically so Canvas/OAKS deadline changes propagate automatically."""
+    await asyncio.sleep(90)  # Brief startup delay, after nudge loop's
+    while True:
+        try:
+            await asyncio.to_thread(_run_lms_background_sync)
+        except Exception as e:
+            logger.error(f"[LMS] Background sync loop error: {e}")
+        await asyncio.sleep(LMS_SYNC_INTERVAL_SECONDS)
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -2417,6 +2463,10 @@ async def startup_event():
     # Launch background nudge checker (runs daily, queues NudgeFlag rows)
     asyncio.create_task(_nudge_background_loop())
     logger.info("[Startup] Nudge background loop started")
+
+    # Launch background LMS sync (runs every LMS_SYNC_INTERVAL_SECONDS, pulls new Canvas/iCal deadlines)
+    asyncio.create_task(_lms_background_loop())
+    logger.info("[Startup] LMS background sync loop started")
 
     logger.info("=" * 50)
     logger.info("[Startup] ClassMate Backend API ready!")
@@ -5222,6 +5272,20 @@ def sync_ical(connection, user_id: str, db):
                 # Try to match against user's existing courses
                 all_text = f"{summary} {description} {location} {categories} {uid}"
                 matched_course_id = _match_course(all_text, "", user_courses)
+
+                # Auto-create a course if the event's own title carries a recognizable course
+                # code with no existing match. Only trust SUMMARY (the event title) for this —
+                # location/description text is noisier (e.g. "Room 204" would look like a code).
+                if not matched_course_id:
+                    summary_codes = _extract_course_codes(summary)
+                    if summary_codes:
+                        clean_code = summary_codes[0].upper()
+                        new_course = Course(user_id=user_id, name=clean_code, code=clean_code)
+                        db.add(new_course)
+                        db.flush()  # Get the generated ID
+                        matched_course_id = new_course.id
+                        user_courses.append(new_course)  # So subsequent events can match it
+                        logger.info(f"[LMS] Auto-created course from iCal: {clean_code}")
 
                 # Parse DTSTART
                 dtstart = component.get("DTSTART")
