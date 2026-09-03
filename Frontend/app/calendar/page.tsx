@@ -270,14 +270,15 @@ export default function CalendarPage() {
 
   const upcomingWeek = useMemo(() => {
     const today = new Date()
-    const end = new Date(today)
-    end.setDate(today.getDate() + 7)
+    today.setHours(0, 0, 0, 0)
     return filteredDeadlines
       .filter((d) => {
+        if (d.completed) return false
         const dDate = new Date(d.date + 'T00:00:00')
-        return dDate >= today && dDate <= end
+        return dDate >= today
       })
       .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(0, 6)
   }, [filteredDeadlines])
 
   const navigate = (direction: 'prev' | 'next') => {
@@ -415,6 +416,30 @@ export default function CalendarPage() {
     } catch (err) {
       console.error('Failed to reassign course:', err)
       setToast('Failed to update course')
+      setTimeout(() => setToast(null), 2500)
+    }
+  }
+
+  const updateDeadlineField = async (deadlineId: string, updates: { title?: string; date?: string }) => {
+    try {
+      const res = await fetchWithAuth(`${API_URL}/deadlines/${deadlineId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        setDeadlines((prev) => prev.map((d) => (d.id === deadlineId ? { ...d, ...updates } : d)))
+        setSelectedDeadline((prev) => (prev && prev.id === deadlineId ? { ...prev, ...updates } : prev))
+        setToast('Deadline updated')
+        setTimeout(() => setToast(null), 2500)
+      } else {
+        setToast('Failed to update deadline')
+        setTimeout(() => setToast(null), 2500)
+      }
+    } catch (err) {
+      console.error('Failed to update deadline:', err)
+      setToast('Failed to update deadline')
       setTimeout(() => setToast(null), 2500)
     }
   }
@@ -1277,14 +1302,14 @@ export default function CalendarPage() {
               {/* Desktop sidebar */}
               <div className="hidden lg:flex lg:flex-col lg:gap-6">
                 <div className="rounded-3xl bg-white p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold text-slate-900">Upcoming this week</h3>
+                  <h3 className="text-lg font-semibold text-slate-900">To do</h3>
                   <div className="mt-4 space-y-3">
                     {upcomingWeek.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
                         Nothing coming up.
                       </div>
                     ) : (
-                      upcomingWeek.slice(0, 6).map((deadline) => (
+                      upcomingWeek.map((deadline) => (
                         <button
                           key={deadline.id}
                           onClick={() => setSelectedDeadline(deadline)}
@@ -1360,29 +1385,45 @@ export default function CalendarPage() {
       {/* Deadline Detail Modal */}
       {selectedDeadline && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 backdrop-blur" onClick={() => setSelectedDeadline(null)}>
-          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between">
-              <div>
+          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-3xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
                 <span
                   className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${courseColors[selectedDeadline.course_id]?.light || 'bg-slate-100'} ${courseColors[selectedDeadline.course_id]?.text || 'text-slate-600'}`}
                   style={{ ...courseColors[selectedDeadline.course_id]?.customStyle?.light, ...courseColors[selectedDeadline.course_id]?.customStyle?.text }}
                 >
                   {selectedDeadline.type}
                 </span>
-                <h2 className={`mt-3 text-xl font-semibold text-slate-900 ${selectedDeadline.completed ? 'line-through' : ''}`}>
-                  {selectedDeadline.title}
-                </h2>
+                <input
+                  type="text"
+                  value={selectedDeadline.title}
+                  onChange={(e) => setSelectedDeadline({ ...selectedDeadline, title: e.target.value })}
+                  onBlur={(e) => {
+                    const trimmed = e.target.value.trim()
+                    const original = deadlines.find((d) => d.id === selectedDeadline.id)?.title || ''
+                    if (!trimmed) {
+                      setSelectedDeadline({ ...selectedDeadline, title: original })
+                    } else if (trimmed !== original) {
+                      updateDeadlineField(selectedDeadline.id, { title: trimmed })
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                  }}
+                  className={`mt-3 -ml-2 w-full rounded-lg border border-transparent bg-transparent px-2 py-1 text-xl font-semibold text-slate-900 outline-none transition-colors hover:border-slate-200 focus:border-[#5B8DEF] focus:bg-white focus:ring-2 focus:ring-[#5B8DEF]/20 ${selectedDeadline.completed ? 'text-slate-400 line-through' : ''}`}
+                />
               </div>
               <button
                 onClick={() => setSelectedDeadline(null)}
-                className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 transition-all duration-300 hover:border-slate-300"
+                className="shrink-0 rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 transition-all duration-300 hover:border-slate-300"
               >
                 Close
               </button>
             </div>
 
             <div className="mt-4 space-y-3">
-              <div className="flex items-center gap-3 text-sm text-slate-600">
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span className="text-slate-400">Course:</span>
                 <select
                   value={selectedDeadline.course_id || ''}
@@ -1404,20 +1445,31 @@ export default function CalendarPage() {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span className="text-slate-400">Date:</span>
-                <span>{selectedDeadline.date}</span>
+                <input
+                  type="date"
+                  value={selectedDeadline.date}
+                  onChange={(e) => {
+                    const newDate = e.target.value
+                    if (!newDate) return
+                    setSelectedDeadline({ ...selectedDeadline, date: newDate })
+                    updateDeadlineField(selectedDeadline.id, { date: newDate })
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 outline-none transition-colors focus:border-[#5B8DEF] focus:ring-1 focus:ring-[#5B8DEF]/20"
+                />
                 {selectedDeadline.time && <span className="text-slate-400">at {selectedDeadline.time}</span>}
               </div>
               {selectedDeadline.description && (
                 <div className="text-sm text-slate-600">
                   <span className="text-slate-400">Details:</span>
-                  <p className="mt-1">{selectedDeadline.description}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words">{selectedDeadline.description}</p>
                 </div>
               )}
             </div>
+            </div>
 
-            <div className="mt-6 flex items-center justify-between">
+            <div className="flex shrink-0 items-center justify-between border-t border-slate-100 px-8 py-5">
               <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
                 <input
                   type="checkbox"

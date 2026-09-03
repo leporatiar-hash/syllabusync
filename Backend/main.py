@@ -830,6 +830,7 @@ class UpdateCourseRequest(BaseModel):
 
 
 class UpdateDeadlineRequest(BaseModel):
+    title: str | None = Field(None, description="New deadline title")
     date: str | None = Field(None, description="New due date in YYYY-MM-DD format")
     course_id: str | None = Field(None, description="Move deadline to a different course ID")
 
@@ -3828,13 +3829,19 @@ def toggle_deadline_complete(deadline_id: str, current_user: User = Depends(get_
 
 @app.patch("/deadlines/{deadline_id}")
 def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, current_user: User = Depends(get_current_user)):
-    """Update deadline fields (date, course_id)."""
+    """Update deadline fields (title, date, course_id)."""
     db = SessionLocal()
     try:
         user_id = current_user.id
         deadline = db.query(Deadline).filter(Deadline.id == deadline_id, Deadline.user_id == user_id).first()
         if not deadline:
             raise HTTPException(status_code=404, detail="Deadline not found")
+
+        if payload.title is not None:
+            trimmed_title = payload.title.strip()
+            if not trimmed_title:
+                raise HTTPException(status_code=400, detail="Title cannot be empty")
+            deadline.title = trimmed_title
 
         if payload.date:
             deadline.date = payload.date
@@ -3852,6 +3859,7 @@ def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, current_us
         course = db.query(Course).filter(Course.id == deadline.course_id).first() if deadline.course_id else None
         return {
             "id": deadline.id,
+            "title": deadline.title,
             "date": deadline.date,
             "course_id": deadline.course_id,
             "course_name": course.name if course else None,
