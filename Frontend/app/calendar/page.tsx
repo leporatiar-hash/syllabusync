@@ -48,6 +48,7 @@ const typeColors: Record<string, { bg: string; text: string; icon: ReactNode }> 
   Admin: { bg: 'bg-slate-100', text: 'text-slate-700', icon: <ClipboardList size={12} /> },
   Deadline: { bg: 'bg-slate-100', text: 'text-slate-700', icon: <Clock size={12} /> },
   Class: { bg: 'bg-teal-50', text: 'text-teal-600', icon: <Clock size={12} /> },
+  Task: { bg: 'bg-amber-100', text: 'text-amber-700', icon: <ClipboardList size={12} /> },
 }
 
 // Course colors — shared palette, deterministic by course ID (see lib/courseColors.ts)
@@ -92,6 +93,8 @@ export default function CalendarPage() {
   const [creating, setCreating] = useState(false)
   const [showDaySheet, setShowDaySheet] = useState(false)
   const [bulkSaving, setBulkSaving] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [addingTask, setAddingTask] = useState(false)
 
   // Infinite scroll: selected full date and month range
   const [selectedFullDate, setSelectedFullDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -540,6 +543,38 @@ export default function CalendarPage() {
       setTimeout(() => setToast(null), 2500)
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleAddTask = async () => {
+    const title = newTaskTitle.trim()
+    if (!title) return
+
+    setAddingTask(true)
+    try {
+      const res = await fetchWithAuth(`${API_URL}/deadlines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          date: todayStr,
+          type: 'Task',
+          course_id: null,
+        }),
+        cache: 'no-store',
+      })
+
+      if (!res.ok) throw new Error('Failed to add task')
+
+      const created = await res.json()
+      setDeadlines((prev) => [...prev, created])
+      setNewTaskTitle('')
+    } catch (err) {
+      console.error('Failed to add task:', err)
+      setToast('Failed to add task')
+      setTimeout(() => setToast(null), 2500)
+    } finally {
+      setAddingTask(false)
     }
   }
 
@@ -1262,7 +1297,7 @@ export default function CalendarPage() {
                                     >
                                       {deadline.type}
                                     </span>
-                                    <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
+                                    <span>{deadline.course_code || deadline.course_name || (deadline.type === 'Task' ? 'Personal' : 'No course')}</span>
                                     {deadline.source && deadline.source !== 'manual' && (
                                       <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
                                         {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
@@ -1303,6 +1338,26 @@ export default function CalendarPage() {
               <div className="hidden lg:flex lg:flex-col lg:gap-6">
                 <div className="rounded-3xl bg-white p-6 shadow-sm">
                   <h3 className="text-lg font-semibold text-slate-900">To do</h3>
+                  <div className="mt-4 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddTask()
+                      }}
+                      placeholder="Add a task..."
+                      disabled={addingTask}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-[#5B8DEF] focus:bg-white focus:ring-2 focus:ring-[#5B8DEF]/20 disabled:opacity-60"
+                    />
+                    <button
+                      onClick={handleAddTask}
+                      disabled={addingTask || !newTaskTitle.trim()}
+                      className="shrink-0 rounded-xl bg-[#5B8DEF] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4A7CDE] disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                  </div>
                   <div className="mt-4 space-y-3">
                     {upcomingWeek.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
@@ -1328,7 +1383,7 @@ export default function CalendarPage() {
                             {deadline.title}
                           </div>
                           <div className="flex items-center gap-1 text-xs text-slate-500">
-                            <span>{deadline.course_code || deadline.course_name || 'No course'}</span>
+                            <span>{deadline.course_code || deadline.course_name || (deadline.type === 'Task' ? 'Personal' : 'No course')}</span>
                             {deadline.source && deadline.source !== 'manual' && (
                               <span className="rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-semibold text-indigo-600">
                                 {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}

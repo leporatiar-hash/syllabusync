@@ -3739,18 +3739,18 @@ def list_all_deadlines(
 def create_deadline(payload: CreateDeadlineRequest, current_user: User = Depends(get_current_user)):
     """Create a manually-entered deadline (assignment, exam, quiz, etc.) for a course.
 
-    Requires `course_id` in the payload. Returns the created deadline with course name/code.
+    `course_id` is optional — omit it to create a personal task/to-do item not tied to
+    any course. Returns the created deadline with course name/code (null if none).
     For AI-extracted deadlines from a syllabus, use POST /courses/{course_id}/syllabus instead.
     """
     db = SessionLocal()
     try:
         user_id = current_user.id
-        if not payload.course_id:
-            raise HTTPException(status_code=400, detail="course_id is required")
-
-        course = db.query(Course).filter(Course.id == payload.course_id, Course.user_id == user_id).first()
-        if not course:
-            raise HTTPException(status_code=404, detail="Course not found")
+        course = None
+        if payload.course_id:
+            course = db.query(Course).filter(Course.id == payload.course_id, Course.user_id == user_id).first()
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
 
         deadline = Deadline(
             user_id=user_id,
