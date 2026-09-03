@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useRef, useCallback, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useAuth } from '../../lib/useAuth'
 import { useSubscription } from '../../hooks/useSubscription'
@@ -283,6 +283,49 @@ export default function CalendarPage() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(0, 6)
   }, [filteredDeadlines])
+
+  const [todoOrder, setTodoOrder] = useState<string[]>([])
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('todoOrder')
+      if (saved) setTodoOrder(JSON.parse(saved))
+    } catch {
+      // ignore malformed/unavailable storage
+    }
+  }, [])
+
+  const orderedTodo = useMemo(() => {
+    const byId = new Map(upcomingWeek.map((d) => [d.id, d]))
+    const ordered: Deadline[] = []
+    const seen = new Set<string>()
+    for (const id of todoOrder) {
+      const d = byId.get(id)
+      if (d) {
+        ordered.push(d)
+        seen.add(id)
+      }
+    }
+    for (const d of upcomingWeek) {
+      if (!seen.has(d.id)) ordered.push(d)
+    }
+    return ordered
+  }, [upcomingWeek, todoOrder])
+
+  const moveTodoItem = (id: string, direction: 'up' | 'down') => {
+    const ids = orderedTodo.map((d) => d.id)
+    const idx = ids.indexOf(id)
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1
+    if (idx === -1 || swapWith < 0 || swapWith >= ids.length) return
+    const newIds = [...ids]
+    ;[newIds[idx], newIds[swapWith]] = [newIds[swapWith], newIds[idx]]
+    setTodoOrder(newIds)
+    try {
+      localStorage.setItem('todoOrder', JSON.stringify(newIds))
+    } catch {
+      // ignore unavailable storage
+    }
+  }
 
   const navigate = (direction: 'prev' | 'next') => {
     const newDate = new Date(currentDate)
@@ -1337,7 +1380,7 @@ export default function CalendarPage() {
               {/* Desktop sidebar */}
               <div className="hidden lg:flex lg:flex-col lg:gap-6">
                 <div className="rounded-3xl bg-white p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold text-slate-900">To do</h3>
+                  <h3 className="text-lg font-semibold text-slate-900">To Do List</h3>
                   <div className="mt-4 flex items-center gap-2">
                     <input
                       type="text"
@@ -1364,33 +1407,55 @@ export default function CalendarPage() {
                         Nothing coming up.
                       </div>
                     ) : (
-                      upcomingWeek.map((deadline) => (
-                        <button
+                      orderedTodo.map((deadline, idx) => (
+                        <div
                           key={deadline.id}
-                          onClick={() => setSelectedDeadline(deadline)}
-                          className="w-full text-left rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+                          className="flex items-stretch gap-1 rounded-2xl border border-slate-100 bg-slate-50 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
                         >
-                          <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span>{deadline.date}</span>
-                            <span
-                              className={`rounded-full px-2 py-1 text-[10px] font-semibold ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-500'}`}
-                              style={{ ...courseColors[deadline.course_id]?.customStyle?.light, ...courseColors[deadline.course_id]?.customStyle?.text }}
-                            >
-                              {deadline.type}
-                            </span>
-                          </div>
-                          <div className={`mt-1 text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through opacity-60' : ''}`}>
-                            {deadline.title}
-                          </div>
-                          <div className="flex items-center gap-1 text-xs text-slate-500">
-                            <span>{deadline.course_code || deadline.course_name || (deadline.type === 'Task' ? 'Personal' : 'No course')}</span>
-                            {deadline.source && deadline.source !== 'manual' && (
-                              <span className="rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-semibold text-indigo-600">
-                                {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
+                          <button
+                            onClick={() => setSelectedDeadline(deadline)}
+                            className="min-w-0 flex-1 text-left px-4 py-3"
+                          >
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                              <span>{deadline.date}</span>
+                              <span
+                                className={`rounded-full px-2 py-1 text-[10px] font-semibold ${courseColors[deadline.course_id]?.light || 'bg-slate-100'} ${courseColors[deadline.course_id]?.text || 'text-slate-500'}`}
+                                style={{ ...courseColors[deadline.course_id]?.customStyle?.light, ...courseColors[deadline.course_id]?.customStyle?.text }}
+                              >
+                                {deadline.type}
                               </span>
-                            )}
+                            </div>
+                            <div className={`mt-1 text-sm font-semibold text-slate-900 ${deadline.completed ? 'line-through opacity-60' : ''}`}>
+                              {deadline.title}
+                            </div>
+                            <div className="flex items-center gap-1 text-xs text-slate-500">
+                              <span>{deadline.course_code || deadline.course_name || (deadline.type === 'Task' ? 'Personal' : 'No course')}</span>
+                              {deadline.source && deadline.source !== 'manual' && (
+                                <span className="rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-semibold text-indigo-600">
+                                  {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                          <div className="flex flex-col items-center justify-center gap-0.5 pr-2">
+                            <button
+                              onClick={() => moveTodoItem(deadline.id, 'up')}
+                              disabled={idx === 0}
+                              aria-label="Move up"
+                              className="rounded p-0.5 text-slate-400 transition-colors hover:text-slate-700 disabled:opacity-30 disabled:hover:text-slate-400"
+                            >
+                              <ChevronUp size={16} />
+                            </button>
+                            <button
+                              onClick={() => moveTodoItem(deadline.id, 'down')}
+                              disabled={idx === orderedTodo.length - 1}
+                              aria-label="Move down"
+                              className="rounded p-0.5 text-slate-400 transition-colors hover:text-slate-700 disabled:opacity-30 disabled:hover:text-slate-400"
+                            >
+                              <ChevronDown size={16} />
+                            </button>
                           </div>
-                        </button>
+                        </div>
                       ))
                     )}
                   </div>
