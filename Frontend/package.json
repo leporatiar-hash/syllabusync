@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node lib/foundingPrompt.test.ts && node lib/valuePrompt.test.ts"
+    "test": "node lib/foundingPrompt.test.ts && node lib/valuePrompt.test.ts && node lib/noteMarkdown.test.ts"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.38.0",
@@ -24,7 +24,8 @@
     "posthog-js": "^1.345.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

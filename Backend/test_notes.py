@@ -15,6 +15,12 @@ Covers:
   - unauthenticated requests get 401
   - size limits (title / content) and the per-course note cap
   - deleting a course deletes its notes; deleting an account deletes its notes
+  - search (?q=): case-insensitive on title + body, snippets, literal % and _, isolation
+  - list previews strip markdown markers; ?full=true includes bodies (and only then)
+  - the student's notes reach the chat context (private, budgeted, ranked by relevance)
+  - chat quizzes/flashcards "from my notes": intent detection, note selection, grounded prompts
+  - a note's text can be run through the real flashcard / quiz / summary endpoints as a .txt
+    upload (OpenAI faked), including the free-tier limit and minimum-length behaviour
 """
 import os
 import tempfile
@@ -38,11 +44,11 @@ import main  # noqa: E402
 client = TestClient(main.app)
 
 
-def check(name: str, condition: bool):
+def check(name: str, condition: bool, detail: str = ""):
     status = "PASS" if condition else "FAIL"
-    print(f"[{status}] {name}")
+    print(f"[{status}] {name}" + (f"  -> {detail}" if detail and not condition else ""))
     if not condition:
-        raise AssertionError(name)
+        raise AssertionError(f"{name} {detail}".strip())
 
 
 def make_user_and_course(label: str):
@@ -233,6 +239,277 @@ def test_cascades():
     check("other users' notes survive account deletion", count_notes(user_id=keep_uid) == 1)
 
 
+def add_note(user_id, course_id, title="", content="", updated_at=None):
+    db = main.SessionLocal()
+    try:
+        n = main.Note(user_id=user_id, course_id=course_id, title=title, content=content)
+        if updated_at is not None:
+            n.updated_at = updated_at
+        db.add(n)
+        db.commit()
+        return n.id
+    finally:
+        db.close()
+
+
+def test_search_and_full():
+    h, course, uid = make_user_and_course("gina")
+    hb, course_b, uid_b = make_user_and_course("hank")
+    long_body = ("intro filler " * 20) + "the ELASTICITY of demand matters here " + ("outro filler " * 20)
+    t_id = client.post(f"/courses/{course}/notes", json={"title": "Elasticity basics", "content": "nothing relevant"}, headers=h).json()["id"]
+    b_id = client.post(f"/courses/{course}/notes", json={"title": "Week 2", "content": long_body}, headers=h).json()["id"]
+    pct = client.post(f"/courses/{course}/notes", json={"title": "Sale", "content": "everything is 50% off"}, headers=h).json()["id"]
+    und = client.post(f"/courses/{course}/notes", json={"title": "Vars", "content": "use snake_case names"}, headers=h).json()["id"]
+    plain = client.post(f"/courses/{course}/notes", json={"title": "Other", "content": "plain words"}, headers=h).json()["id"]
+    # another course of the same user, and another user's course: same search term must not leak
+    other_course = client.post("/courses", json={"name": "Other course"}, headers=h).json()["id"]
+    client.post(f"/courses/{other_course}/notes", json={"title": "elasticity elsewhere", "content": "x"}, headers=h)
+    client.post(f"/courses/{course_b}/notes", json={"title": "elasticity bob", "content": "bob-secret"}, headers=hb)
+
+    def search(q, headers=h, cid=None):
+        r = client.get(f"/courses/{cid or course}/notes", params={"q": q}, headers=headers)
+        return r
+
+    r = search("elasticity")
+    ids = {n["id"] for n in r.json()}
+    check("search is case-insensitive and matches title + body", r.status_code == 200 and ids == {t_id, b_id}, str(ids))
+    check("search is scoped to the course (other course's note not returned)", all("elsewhere" not in n["title"] for n in r.json()))
+    check("search never returns another user's notes", all("bob" not in n["title"] and "bob-secret" not in n["preview"] for n in r.json()))
+    snippet = next(n for n in r.json() if n["id"] == b_id)["preview"]
+    check("body match: snippet is centered on the match", "ELASTICITY of demand" in snippet and snippet.startswith("…") and snippet.endswith("…"), snippet)
+    check("snippet is short", len(snippet) <= 210, str(len(snippet)))
+    title_hit = next(n for n in r.json() if n["id"] == t_id)
+    check("title-only match falls back to the normal preview", title_hit["preview"] == "nothing relevant")
+
+    check("'%' is searched literally (matches only the note containing it)", [n["id"] for n in search("%").json()] == [pct])
+    check("'_' is searched literally (matches only the note containing it)", [n["id"] for n in search("_").json()] == [und])
+    check("no match -> empty list", search("zzzz-nope").json() == [])
+    check("whitespace-only query = no filter", len(search("   ").json()) == 5)
+    check("query over 100 chars -> 422", search("q" * 101).status_code == 422)
+    check("another user's course search -> 404", search("elasticity", headers=hb).status_code == 404)
+    check("bob searching his own course sees only his note", [n["title"] for n in search("elasticity", headers=hb, cid=course_b).json()] == ["elasticity bob"])
+
+    # full=true
+    default = client.get(f"/courses/{course}/notes", headers=h).json()
+    check("default list has no bodies", all("content" not in n for n in default))
+    full = client.get(f"/courses/{course}/notes", params={"full": "true"}, headers=h).json()
+    check("full=true includes complete bodies", {n["id"]: n["content"] for n in full}[b_id] == long_body)
+    check("full + q combine", [n["id"] for n in client.get(f"/courses/{course}/notes", params={"full": "true", "q": "snake"}, headers=h).json()] == [und])
+
+
+def test_preview_strips_markdown():
+    h, course, _ = make_user_and_course("ivy")
+    body = "## Heading\n- [ ] task one\n- [x] done **bold** item\n> quoted `code`\n1. first\n* star bullet"
+    nid = client.post(f"/courses/{course}/notes", json={"title": "md", "content": body}, headers=h).json()["id"]
+    prev = client.get(f"/courses/{course}/notes", headers=h).json()[0]["preview"]
+    check("markdown markers are stripped from the preview", prev == "Heading task one done bold item quoted code first star bullet", prev)
+    check("the stored body is untouched (still markdown)", client.get(f"/notes/{nid}", headers=h).json()["content"] == body)
+
+
+def notes_section(ctx: str) -> str:
+    marker = "## Student's Own Notes"
+    if marker not in ctx:
+        return ""
+    rest = ctx.split(marker, 1)[1]
+    return rest.split("\n## ", 1)[0]
+
+
+def test_chat_context_notes():
+    from datetime import datetime, timedelta
+
+    def ctx_for(uid, message=None):
+        db = main.SessionLocal()
+        try:
+            return main._build_chat_context(db, uid, message)
+        finally:
+            db.close()
+
+    # basics: own notes included, others' excluded, empty-body notes omitted, no header without notes
+    _, course, uid = make_user_and_course("jo")
+    _, course_b, uid_b = make_user_and_course("kim")
+    check("no notes -> no notes section", "Student's Own Notes" not in ctx_for(uid))
+    add_note(uid, course, "Kessler lecture", "The Kessler equilibrium is reached when marginal cost equals price.")
+    add_note(uid, course, "Title only, no body", "")
+    add_note(uid_b, course_b, "Bob private", "bob-private-notes-content")
+    ctx = ctx_for(uid, "hi")
+    check("own note title + body are in the context", "Kessler lecture" in ctx and "marginal cost equals price" in ctx)
+    check("course label is attached to the note", "Course: jo course" in notes_section(ctx))
+    check("another user's notes never appear", "bob-private-notes-content" not in ctx and "Bob private" not in ctx)
+    check("notes with an empty body are skipped", "Title only, no body" not in ctx)
+    check("bob's context has only his own note", "bob-private-notes-content" in ctx_for(uid_b) and "Kessler" not in ctx_for(uid_b))
+
+    # per-note truncation and total budget
+    _, course2, uid2 = make_user_and_course("lee")
+    for i in range(6):
+        add_note(uid2, course2, f"big {i}", f"{i}" * 5000, updated_at=datetime.utcnow() - timedelta(minutes=i))
+    sec = notes_section(ctx_for(uid2, "hi"))
+    check("total notes budget caps how many notes are included (4 of 6 at 2500 chars)", sec.count("[Note:") == 4, str(sec.count("[Note:")))
+    check("truncated notes are marked", "…[truncated]" in sec)
+    check("section stays near the budget", len(sec) <= main.MAX_NOTES_CONTEXT_TOTAL + 4 * 200, str(len(sec)))
+
+    # relevance: an OLD note the student asks about beats newer, unrelated notes even when the budget is full
+    _, course3, uid3 = make_user_and_course("max")
+    add_note(uid3, course3, "Zorblatt Convention", "Signed in 1847; established the Zorblatt tariff schedule.", updated_at=datetime.utcnow() - timedelta(days=90))
+    for i in range(12):
+        add_note(uid3, course3, f"filler {i}", "unrelated filler text " * 120, updated_at=datetime.utcnow() - timedelta(minutes=i))
+    check("without a relevant message the old note is crowded out by recent ones", "Zorblatt tariff" not in ctx_for(uid3, "how am I doing?"))
+    check("asking about it pulls the old note in (keyword relevance)", "Zorblatt tariff schedule" in ctx_for(uid3, "What do my notes say about the Zorblatt convention?"))
+
+    # relevance: mentioning a course code boosts that course's notes
+    db = main.SessionLocal()
+    try:
+        psyc = main.Course(user_id=uid3, name="Intro Psychology", code="PSYC 240")
+        db.add(psyc)
+        db.commit()
+        psyc_id = psyc.id
+    finally:
+        db.close()
+    add_note(uid3, psyc_id, "Memory", "Working memory holds about seven items.", updated_at=datetime.utcnow() - timedelta(days=200))
+    check("old note is excluded when nothing points at its course", "Working memory holds" not in ctx_for(uid3, "what should I do today"))
+    check("mentioning the course code includes that course's notes", "Working memory holds" in ctx_for(uid3, "quiz me on my PSYC 240 notes"))
+
+
+def test_note_to_study_tools():
+    """The frontend sends a note's text as a .txt upload to the three existing generators."""
+    import json as _json
+    from types import SimpleNamespace
+
+    calls = []
+
+    class FakeCompletions:
+        async def create(self, **kw):
+            sys_prompt = kw["messages"][0]["content"].lower()
+            calls.append(kw["messages"][-1]["content"])
+            if "flashcards" in sys_prompt:
+                body = _json.dumps([{"front": f"Q{i}", "back": f"A{i}"} for i in range(5)])
+            elif "quiz" in sys_prompt:
+                body = _json.dumps({"questions": [{"question": f"Q{i}?", "options": ["A) a", "B) b", "C) c", "D) d"], "correct_answer": "B", "explanation": "because"} for i in range(3)]})
+            else:
+                body = "Overview: elasticity.\n- key point"
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=body))])
+
+    real_client = main.client
+    main.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    try:
+        h, course, uid = make_user_and_course("nina")
+        db = main.SessionLocal()
+        try:
+            db.add(main.UserProfile(user_id=uid, email=f"nina-{main.generate_uuid()}@example.com"))
+            db.commit()
+        finally:
+            db.close()
+
+        note_text = "## Elasticity\n- Price elasticity of demand measures how quantity responds to price.\n- [ ] Review the midpoint formula"
+        fname = "Ch. 3- Elasticity.txt"  # what the frontend builds from the title "Ch. 3: Elasticity"
+        upload = lambda path, text=note_text, name=fname: client.post(path, files={"file": (name, text.encode("utf-8"), "text/plain")}, headers=h)
+
+        r1 = upload(f"/courses/{course}/flashcards")
+        r2 = upload(f"/courses/{course}/generate-quiz")
+        r3 = upload(f"/courses/{course}/summaries")
+        check("flashcards from a note (.txt) -> 200", r1.status_code == 200, r1.text[:200])
+        check("quiz from a note (.txt) -> 200", r2.status_code == 200, r2.text[:200])
+        check("summary from a note (.txt) -> 200", r3.status_code == 200, r3.text[:200])
+        check("the note's text is what reaches the model", len(calls) == 3 and all("Price elasticity of demand" in c and "midpoint formula" in c for c in calls))
+        check("generated sets are named after the note title", r1.json()["flashcard_set"]["name"] == "Ch. 3- Elasticity" and r3.json()["title"] == "Ch. 3- Elasticity")
+        detail = client.get(f"/courses/{course}", headers=h).json()
+        check("all three land in the course's study library", len(detail["flashcard_sets"]) == 1 and len(detail["quizzes"]) == 1 and len(detail["summaries"]) == 1)
+        check("quiz is named after the note too", detail["quizzes"][0]["name"] == "Ch. 3- Elasticity")
+        db = main.SessionLocal()
+        try:
+            used = db.query(main.UserProfile).filter(main.UserProfile.user_id == uid).first().ai_generations_used
+        finally:
+            db.close()
+        check("each generation counts toward the free-tier allowance (3 used)", used == 3, str(used))
+
+        # too-short notes are refused with a clear message
+        short = upload(f"/courses/{course}/flashcards", text="too short", name="tiny.txt")
+        check("a very short note -> 400 'not enough text'", short.status_code == 400 and "enough text" in short.text)
+
+        # free-tier limit -> structured 403 the frontend can recognise
+        db = main.SessionLocal()
+        try:
+            prof = db.query(main.UserProfile).filter(main.UserProfile.user_id == uid).first()
+            prof.ai_generations_used = main.FREE_AI_GENERATION_LIMIT
+            db.commit()
+        finally:
+            db.close()
+        for path in ("flashcards", "generate-quiz", "summaries"):
+            r = upload(f"/courses/{course}/{path}")
+            d = r.json().get("detail", {})
+            check(f"at the free limit {path} -> 403 limit_reached", r.status_code == 403 and isinstance(d, dict) and d.get("error") == "limit_reached", r.text[:160])
+    finally:
+        main.client = real_client
+
+
+def test_chat_notes_generation_helpers():
+    from datetime import datetime, timedelta
+
+    # which messages mean "use my notes"
+    yes = ["quiz me on my notes", "Make flashcards from my Econ notes", "create a quiz on my notes for PSYC 240", "quiz me on the notes", "flashcards from these notes", "make a quiz on my note"]
+    no = ["make me flashcards on labor markets", "make note cards on labor markets", "quiz me on supply and demand", "make notecards for chapter 3", "what is the note taking method?", "create a quiz on my notecards"]
+    for m in yes:
+        check(f"'{m}' is a notes request", main._mentions_notes(m))
+    for m in no:
+        check(f"'{m}' is NOT a notes request", not main._mentions_notes(m))
+
+    # picks the notes: single-course, relevance-ranked, private, budgeted
+    _, course_a, uid = make_user_and_course("olga")
+    db = main.SessionLocal()
+    try:
+        b = main.Course(user_id=uid, name="Intro Psychology", code="PSYC 240")
+        db.add(b)
+        db.commit()
+        course_b = b.id
+    finally:
+        db.close()
+    _, other_course, other_uid = make_user_and_course("pete")
+    add_note(uid, course_a, "Elasticity", "Price elasticity of demand measures responsiveness.", updated_at=datetime.utcnow() - timedelta(days=3))
+    add_note(uid, course_b, "Memory", "Working memory holds about seven items.", updated_at=datetime.utcnow() - timedelta(days=1))
+    add_note(other_uid, other_course, "Pete private", "pete-only-content")
+
+    def pick(msg):
+        db = main.SessionLocal()
+        try:
+            return main._notes_for_generation(db, uid, msg)
+        finally:
+            db.close()
+
+    text, course = pick("quiz me on my notes")
+    check("no course named: takes the most recent note's course", course is not None and course.id == course_b and "Working memory" in text)
+    check("...and keeps to a single course", "Price elasticity" not in text)
+    text, course = pick("quiz me on my elasticity notes")
+    check("keyword relevance picks the matching note's course", course.id == course_a and "Price elasticity" in text)
+    text, course = pick("quiz me on my PSYC 240 notes")
+    check("a named course restricts the notes to that course", course.id == course_b and "Working memory" in text and "Price elasticity" not in text)
+    text, course = pick("quiz me on my ECON notes")  # 'olga course' is the name; not mentioned -> falls back to ranking
+    check("never includes another user's notes", "pete-only-content" not in (text or ""))
+    db = main.SessionLocal()
+    try:
+        none_text, none_course = main._notes_for_generation(db, other_uid + "-nobody", "quiz me on my notes")
+    finally:
+        db.close()
+    check("no notes -> (None, None), so no generic 'my notes' set gets invented", none_text is None and none_course is None)
+
+    # budget: a huge pile of notes is cut to the generation budget
+    _, course_c, uid_c = make_user_and_course("quinn")
+    for i in range(10):
+        add_note(uid_c, course_c, f"Big {i}", "x" * 5000, updated_at=datetime.utcnow() - timedelta(minutes=i))
+    db = main.SessionLocal()
+    try:
+        big, _c = main._notes_for_generation(db, uid_c, "quiz me on my notes")
+    finally:
+        db.close()
+    check("generation text respects the character budget", len(big) <= main.MAX_NOTES_GENERATION_CHARS + 200, str(len(big)))
+
+    # prompts: grounded ONLY in the notes, right JSON shape, request echoed
+    fake_course = type("C", (), {"name": "Econ", "code": "ECON 101"})()
+    fc = main._notes_generation_prompt("flashcards", 15, fake_course, "make flashcards from my notes", "NOTES-BODY")
+    qz = main._notes_generation_prompt("quiz", 10, fake_course, "quiz me on my notes", "NOTES-BODY")
+    check("flashcard prompt is grounded in the notes only", "NOTES-BODY" in fc and "ONLY on what the student's notes" in fc and '"front"' in fc)
+    check("quiz prompt is grounded in the notes only", "NOTES-BODY" in qz and "ONLY on what the student's notes" in qz and '"correct_answer"' in qz)
+    check("prompts carry the course label and the student's request", "ECON 101" in fc and "quiz me on my notes" in qz)
+
+
 if __name__ == "__main__":
     try:
         test_crud_happy_path()
@@ -240,6 +517,11 @@ if __name__ == "__main__":
         test_requires_auth()
         test_limits()
         test_cascades()
+        test_search_and_full()
+        test_preview_strips_markdown()
+        test_chat_context_notes()
+        test_note_to_study_tools()
+        test_chat_notes_generation_helpers()
         print("\nAll notes tests passed.")
     finally:
         try:

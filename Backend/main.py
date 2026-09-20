@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
 from jose import JWTError, jwt, jwk
 from jose.utils import base64url_decode
-from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text, func
+from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, ForeignKey, Text, JSON, Integer, text, func, or_
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -987,7 +987,8 @@ class NoteSummaryOut(BaseModel):
     id: str = Field(description="Unique note identifier (UUID)")
     course_id: str = Field(description="ID of the course this note belongs to")
     title: str = Field(description="Note title (may be empty)")
-    preview: str = Field(description="First ~120 characters of the body, whitespace collapsed")
+    preview: str = Field(description="First ~120 characters of the body with markdown markers stripped and whitespace collapsed; when searching, a snippet around the first match")
+    content: str | None = Field(None, description="Full body; only present when the list is requested with full=true")
     updated_at: str = Field(description="ISO 8601 timestamp of the last edit")
 
 
@@ -4315,12 +4316,39 @@ def _note_out(note: Note) -> dict:
     }
 
 
-@app.get("/courses/{course_id}/notes", tags=["notes"], summary="List the user's notes for a course", response_model=list[NoteSummaryOut])
-def list_course_notes(course_id: str, current_user: User = Depends(get_current_user)):
+_NOTE_MD_LINE_PREFIX = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)")
+_NOTE_MD_INLINE = re.compile(r"(\*\*|__|~~|`)")
+
+
+def _note_preview(body: str, limit: int = 120) -> str:
+    """One-line plain-text preview of a note body: drops heading/bullet/checkbox markers and
+    bold/code marks, collapses whitespace. Keep in sync with makePreview in CourseNotes.tsx."""
+    lines = [_NOTE_MD_LINE_PREFIX.sub("", line) for line in (body or "")[:1000].splitlines()]
+    return _NOTE_MD_INLINE.sub("", " ".join(" ".join(lines).split()))[:limit]
+
+
+def _note_snippet(body: str, q: str) -> str | None:
+    """A short preview centered on the first case-insensitive match of q in body, or None if no match."""
+    idx = (body or "").lower().find(q.lower())
+    if idx < 0:
+        return None
+    start, end = max(0, idx - 40), min(len(body), idx + len(q) + 80)
+    return ("…" if start > 0 else "") + _note_preview(body[start:end], limit=200) + ("…" if end < len(body) else "")
+
+
+@app.get("/courses/{course_id}/notes", tags=["notes"], summary="List (or search) the user's notes for a course", response_model=list[NoteSummaryOut], response_model_exclude_none=True)
+def list_course_notes(
+    course_id: str,
+    q: str | None = Query(None, max_length=100, description="Case-insensitive search across note titles and bodies"),
+    full: bool = Query(False, description="Include each note's full body (used to build study tools from all notes)"),
+    current_user: User = Depends(get_current_user),
+):
     """Return all of the user's notes for a course, most recently edited first.
 
     Bodies are truncated to a short `preview`; fetch a single note via GET /notes/{note_id}
-    for the full text. Returns 404 if the course does not exist or belongs to a different user.
+    for the full text, or pass `full=true` to include every body. Pass `q` to keep only notes
+    whose title or body contains it (case-insensitive); `preview` then shows a snippet around the match.
+    Returns 404 if the course does not exist or belongs to a different user.
     """
     db = SessionLocal()
     try:
@@ -4328,22 +4356,26 @@ def list_course_notes(course_id: str, current_user: User = Depends(get_current_u
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
-        notes = (
-            db.query(Note)
-            .filter(Note.course_id == course_id, Note.user_id == user_id)
-            .order_by(Note.updated_at.desc())
-            .all()
-        )
-        return [
-            {
+        query = db.query(Note).filter(Note.course_id == course_id, Note.user_id == user_id)
+        needle = (q or "").strip()
+        if needle:
+            # Escape LIKE wildcards so "50%" or "a_b" are searched literally
+            pattern = "%" + needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            query = query.filter(or_(Note.title.ilike(pattern, escape="\\"), Note.content.ilike(pattern, escape="\\")))
+        notes = query.order_by(Note.updated_at.desc()).all()
+        rows = []
+        for n in notes:
+            row = {
                 "id": n.id,
                 "course_id": n.course_id,
                 "title": n.title or "",
-                "preview": " ".join((n.content or "")[:400].split())[:120],
+                "preview": (_note_snippet(n.content or "", needle) if needle else None) or _note_preview(n.content or ""),
                 "updated_at": (n.updated_at or n.created_at).isoformat(),
             }
-            for n in notes
-        ]
+            if full:
+                row["content"] = n.content or ""
+            rows.append(row)
+        return rows
     finally:
         db.close()
 
@@ -5765,10 +5797,127 @@ def _match_course_from_message(db, user_id: str, message: str) -> "Course | None
 
 
 MAX_SYLLABUS_CONTEXT_TOTAL = 8000  # Max chars of raw syllabus text across all courses
+MAX_NOTES_CONTEXT_TOTAL = 8000  # Max chars of the student's own notes across all courses
+MAX_NOTE_CONTEXT_EACH = 2500  # Max chars taken from any single note
+MAX_NOTES_CONSIDERED = 60  # Most-recently-edited notes considered before ranking by relevance
 
 
-def _build_chat_context(db, user_id: str) -> str:
-    """Build system context from user's courses, deadlines, course materials, and study library."""
+def _select_notes_for_chat(notes: list, courses: list, message: str | None) -> list:
+    """Rank notes by relevance to the student's message (course mentioned, then keyword overlap
+    with the note's title/body), then recency. The caller applies the character budget."""
+    msg = (message or "").lower()
+    words = {w for w in re.findall(r"[a-z0-9]{4,}", msg)}
+    mentioned = {
+        c.id for c in courses
+        if (c.code and c.code.lower() in msg) or (c.name and c.name.lower() in msg)
+    }
+
+    def score(n) -> int:
+        title = (n.title or "").lower()
+        body = (n.content or "").lower()
+        pts = 0
+        if n.course_id in mentioned:
+            pts += 20
+        for w in words:
+            if w in title:
+                pts += 5
+            if w in body:
+                pts += 1
+        return pts
+
+    # sorted() is stable, so equal scores keep the incoming most-recently-edited-first order
+    return sorted(notes, key=score, reverse=True)
+
+
+MAX_NOTES_GENERATION_CHARS = 12000  # notes text fed to a chat-generated quiz / flashcard set
+
+_NOTES_MENTION = re.compile(r"\bnotes\b|\b(?:my|this|that)\s+note\b(?!\s*(?:cards?|book|taking))")
+
+
+def _mentions_notes(message: str) -> bool:
+    """True when the message refers to the student's notes ("quiz me on my notes", "flashcards from my econ notes")
+    rather than just using the word in "note cards"."""
+    return bool(_NOTES_MENTION.search((message or "").lower()))
+
+
+def _notes_for_generation(db, user_id: str, message: str):
+    """Pick the student's notes to base a chat-generated quiz/flashcard set on.
+
+    Returns (text, course) or (None, None) when they have no notes to use. If the message names a course,
+    only that course's notes are used; otherwise the most relevant notes across all courses are, and the set
+    is attached to the course of the top-ranked note."""
+    courses = db.query(Course).filter(Course.user_id == user_id).all()
+    notes = (
+        db.query(Note)
+        .filter(Note.user_id == user_id)
+        .order_by(Note.updated_at.desc())
+        .limit(MAX_NOTES_CONSIDERED)
+        .all()
+    )
+    notes = [n for n in notes if (n.content or "").strip()]
+    msg = (message or "").lower()
+    named = [c for c in courses if (c.code and c.code.lower() in msg) or (c.name and c.name.lower() in msg)]
+    if named:
+        named_ids = {c.id for c in named}
+        notes = [n for n in notes if n.course_id in named_ids]
+    if not notes:
+        return None, None
+    ranked = _select_notes_for_chat(notes, courses, message)
+    course_by_id = {c.id: c for c in courses}
+    target = course_by_id.get(ranked[0].course_id)
+    if not target:
+        return None, None
+    # A single quiz/set is about one class: keep to the top note's course
+    in_target = [n for n in ranked if n.course_id == target.id]
+    pieces, total = [], 0
+    for n in in_target:
+        body = n.content.strip()
+        piece = f"# {n.title.strip()}\n{body}" if (n.title or "").strip() else body
+        if pieces and total + len(piece) > MAX_NOTES_GENERATION_CHARS:
+            break
+        pieces.append(piece[:MAX_NOTES_GENERATION_CHARS])
+        total += len(piece)
+    return "\n\n---\n\n".join(pieces), target
+
+
+def _notes_generation_prompt(kind: str, count: int, course, request: str, notes_text: str) -> str:
+    """Prompt for a quiz / flashcard set grounded ONLY in the student's notes (same JSON shapes as the topic-based prompts)."""
+    course_line = f"Course: {course.name}{f' ({course.code})' if course.code else ''}"
+    grounding = (
+        "Base every item ONLY on what the student's notes below say. Do not add facts that are not in the notes; "
+        "if the notes are thin, make fewer, safer items rather than inventing details."
+    )
+    if kind == "flashcards":
+        return f"""You are a study assistant. Generate up to {count} high-quality flashcards from the student's own notes.
+{grounding}
+
+{course_line}
+Student's request: {request}
+
+Student's notes:
+{notes_text}
+
+Return ONLY a valid JSON array of flashcards:
+[{{"front": "Question or term", "back": "Answer or definition"}}]
+Make questions clear and answers concise."""
+    return f"""You are a study assistant. Generate a multiple-choice quiz of up to {count} questions from the student's own notes.
+{grounding}
+
+{course_line}
+Student's request: {request}
+
+Student's notes:
+{notes_text}
+
+Return ONLY a valid JSON object:
+{{"questions": [{{"question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": "B", "explanation": "..."}}]}}
+Each question has 4 options (A, B, C, D). Test understanding, not memorization."""
+
+
+def _build_chat_context(db, user_id: str, message: str | None = None) -> str:
+    """Build system context from user's courses, deadlines, course materials, notes, and study library.
+
+    `message` (the student's latest message) is only used to pick which of their notes to include."""
     parts: list[str] = []
 
     # Courses (build shared lookup once)
@@ -5838,6 +5987,31 @@ def _build_chat_context(db, user_id: str) -> str:
             remaining -= len(excerpt)
             if remaining <= 0:
                 break
+
+    # The student's own notes — most relevant to the current message first, within a fixed budget
+    recent_notes = (
+        db.query(Note)
+        .filter(Note.user_id == user_id)
+        .order_by(Note.updated_at.desc())
+        .limit(MAX_NOTES_CONSIDERED)
+        .all()
+    )
+    recent_notes = [n for n in recent_notes if (n.content or "").strip()]
+    if recent_notes:
+        parts.append("\n## Student's Own Notes (written by the student in their own words — use them to answer questions about the class and to quiz them)")
+        notes_budget = MAX_NOTES_CONTEXT_TOTAL
+        for n in _select_notes_for_chat(recent_notes, courses, message):
+            if notes_budget <= 0:
+                break
+            c = course_map.get(n.course_id)
+            course_label = (c.code or c.name) if c else "Unknown"
+            body = n.content.strip()
+            excerpt = body[:min(MAX_NOTE_CONTEXT_EACH, notes_budget)]
+            more = " …[truncated]" if len(excerpt) < len(body) else ""
+            edited = (n.updated_at or n.created_at)
+            edited_str = edited.strftime("%b %d") if edited else ""
+            parts.append(f"[Note: {n.title or 'Untitled'} | Course: {course_label} | Edited {edited_str}]\n{excerpt}{more}")
+            notes_budget -= len(excerpt)
 
     # Raw syllabus text — full policy details, grading rubrics, assignment descriptions
     courses_with_syllabus = [c for c in courses if c.syllabus_text]
@@ -6318,7 +6492,7 @@ async def send_chat_message(
         db.refresh(user_msg)
 
         # Build context and get last 20 messages
-        context = _build_chat_context(db, current_user.id)
+        context = _build_chat_context(db, current_user.id, message_content)
         system_prompt = CHAT_SYSTEM_PROMPT.format(context=context)
 
         history = (
@@ -6336,6 +6510,7 @@ async def send_chat_message(
 
         # Detect study tool creation intent and generate from file (current or previous in history)
         created_study_set = None
+        notes_missing = False  # asked for a set "from my notes" but has no notes: nothing gets created
         intent_lower = (message_content or "").lower()
         _creation_verbs = r"(?:make|create|generate|build|give me|write)"
         wants_flashcards = bool(re.search(
@@ -6456,6 +6631,13 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
             else:
                 # No file found — generate from AI knowledge + course context (topic-based)
                 user_course = _match_course_from_message(db, current_user.id, message_content or "")
+                notes_text = None
+                if _mentions_notes(message_content or ""):
+                    # "quiz me on my notes": build it from their actual notes (not from the words "my notes")
+                    notes_text, notes_course = _notes_for_generation(db, current_user.id, message_content or "")
+                    # No usable notes -> don't invent a generic set literally called "my notes"
+                    user_course = notes_course if notes_text else None
+                    notes_missing = not notes_text
                 if user_course:
                     # Extract the topic: strip the intent prefix so "make flashcards on labor markets" → "labor markets"
                     _stripped = re.sub(
@@ -6467,6 +6649,8 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                         '', (message_content or '').strip()
                     ).strip()
                     set_name = (_stripped[:60] if _stripped else (message_content or 'Study Set')[:60])
+                    if notes_text:
+                        set_name = f"{user_course.code or user_course.name} notes"
                     # Include a compact slice of course context to ground the generation
                     course_ctx = context[:3000] if context else ""
                     try:
@@ -6488,6 +6672,9 @@ Course context:
 Return ONLY a valid JSON array with exactly {num_cards} flashcards:
 [{{"front": "Question or term", "back": "Answer or definition"}}]
 Focus on key concepts, definitions, important facts, and formulas. Make questions clear and answers concise."""
+
+                            if notes_text:
+                                fc_prompt = _notes_generation_prompt("flashcards", num_cards, user_course, message_content or "", notes_text)
 
                             fc_response = await client.chat.completions.create(
                                 model="gpt-4o-mini",
@@ -6527,6 +6714,9 @@ Course context:
 Return ONLY a valid JSON object:
 {{"questions": [{{"question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": "B", "explanation": "..."}}]}}
 Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Test understanding, not memorization."""
+
+                            if notes_text:
+                                q_prompt = _notes_generation_prompt("quiz", num_questions, user_course, message_content or "", notes_text)
 
                             q_response = await client.chat.completions.create(
                                 model="gpt-4o-mini",
@@ -6660,6 +6850,14 @@ Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, de
                 f"({detail}) has been created and saved to "
                 f"the course '{created_study_set['course_name']}'. "
                 f"Tell the user it's ready and they can find it in the Study Studio Library tab.]"
+            )
+        elif notes_missing:
+            # The base prompt says these requests are always auto-saved, so without this the model claims a set exists
+            openai_messages[-1]["content"] += (
+                "\n\n[System note: The student asked for a quiz or flashcards from their notes, but they have no notes "
+                "saved in ClassMate yet, so NOTHING was created. Do not say anything was created, saved, or is in the "
+                "Library. Tell them they can write notes in the Notes tab of any class (or paste the material here), and "
+                "offer to make a quiz or flashcards on a topic instead.]"
             )
 
         # Capture data needed by the stream generator before closing the DB session

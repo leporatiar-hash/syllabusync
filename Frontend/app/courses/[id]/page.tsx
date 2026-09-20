@@ -1443,7 +1443,7 @@ export default function CourseDetailPage() {
           </div>
         ) : mainTab === 'notes' ? (
           /* Notes Tab — mounted only while open so leaving the tab flushes any pending autosave */
-          courseId ? <CourseNotes courseId={courseId} /> : null
+          courseId ? <CourseNotes courseId={courseId} courseName={course?.code || course?.name} onStudyToolsCreated={loadCourse} /> : null
         ) : (
           /* Course Info Tab */
           <div className="mt-6">
