@@ -8,7 +8,13 @@ import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../../hook
 import { useAuth } from '../../../lib/useAuth'
 import posthog from 'posthog-js'
 import NamingStyleModal from '../../../components/NamingStyleModal'
-import CourseNotes from '../../../components/CourseNotes'
+import dynamic from 'next/dynamic'
+
+// The rich-text editor is a sizeable dependency; only download it when someone opens the Notes tab.
+const CourseNotes = dynamic(() => import('../../../components/CourseNotes'), {
+  ssr: false,
+  loading: () => <div className="mt-6 rounded-3xl bg-white p-8 text-sm text-slate-500 shadow-sm">Loading notes…</div>,
+})
 
 interface Deadline {
   id: string

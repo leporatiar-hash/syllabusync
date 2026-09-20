@@ -19,6 +19,7 @@ Covers:
   - list previews strip markdown markers; ?full=true includes bodies (and only then)
   - the student's notes reach the chat context (private, budgeted, ranked by relevance)
   - chat quizzes/flashcards "from my notes": intent detection, note selection, grounded prompts
+  - the rich-text document field (content_json): round-trip, stale-document rules, validation, isolation, migration
   - a note's text can be run through the real flashcard / quiz / summary endpoints as a .txt
     upload (OpenAI faked), including the free-tier limit and minimum-length behaviour
 """
@@ -304,6 +305,9 @@ def test_preview_strips_markdown():
     prev = client.get(f"/courses/{course}/notes", headers=h).json()[0]["preview"]
     check("markdown markers are stripped from the preview", prev == "Heading task one done bold item quoted code first star bullet", prev)
     check("the stored body is untouched (still markdown)", client.get(f"/notes/{nid}", headers=h).json()["content"] == body)
+    client.post(f"/courses/{course}/notes", json={"title": "it", "content": "an *important* idea and ***vital*** one, 2*3*4 and a * b"}, headers=h)
+    previews = {n["title"]: n["preview"] for n in client.get(f"/courses/{course}/notes", headers=h).json()}
+    check("italics and bold-italics are stripped from previews, multiplication is not", previews["it"] == "an important idea and vital one, 2*3*4 and a * b", previews["it"])
 
 
 def notes_section(ctx: str) -> str:
@@ -510,6 +514,86 @@ def test_chat_notes_generation_helpers():
     check("prompts carry the course label and the student's request", "ECON 101" in fc and "quiz me on my notes" in qz)
 
 
+def test_note_document_field():
+    h, course, uid = make_user_and_course("rita")
+    hb, course_b, _ = make_user_and_course("sam")
+
+    def para(text):
+        return {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+
+    doc = {"type": "doc", "content": [para("hello **world**"), {"type": "bulletList", "content": []}]}
+    r = client.post(f"/courses/{course}/notes", json={"title": "t", "content": "hello world", "content_json": doc}, headers=h)
+    check("create with a document -> 200", r.status_code == 200)
+    nid = r.json()["id"]
+    check("document round-trips exactly", r.json()["content_json"] == doc and client.get(f"/notes/{nid}", headers=h).json()["content_json"] == doc)
+    check("list rows never carry the document", all("content_json" not in n for n in client.get(f"/courses/{course}/notes", headers=h).json()))
+    check("full=true list rows don't carry the document either (text only)", all("content_json" not in n for n in client.get(f"/courses/{course}/notes", params={"full": "true"}, headers=h).json()))
+
+    # a title-only edit must not touch the document
+    r = client.patch(f"/notes/{nid}", json={"title": "renamed"}, headers=h)
+    check("title-only patch keeps the document", r.json()["content_json"] == doc and r.json()["title"] == "renamed")
+
+    # text + document together
+    doc2 = {"type": "doc", "content": [para("second version")]}
+    r = client.patch(f"/notes/{nid}", json={"content": "second version", "content_json": doc2}, headers=h)
+    check("content + document patch stores both", r.status_code == 200 and r.json()["content_json"] == doc2 and r.json()["content"] == "second version")
+
+    # text without a document (older client / other writer) drops the now-stale document
+    r = client.patch(f"/notes/{nid}", json={"content": "edited elsewhere"}, headers=h)
+    check("content-only patch drops the stale document", r.status_code == 200 and r.json()["content_json"] is None and r.json()["content"] == "edited elsewhere")
+    check("...and that persists", client.get(f"/notes/{nid}", headers=h).json()["content_json"] is None)
+
+    # a document alone is refused (the text would go stale)
+    r = client.patch(f"/notes/{nid}", json={"content_json": doc2}, headers=h)
+    check("document without content -> 400", r.status_code == 400)
+
+    # validation
+    check("wrong document type -> 422", client.patch(f"/notes/{nid}", json={"content": "x", "content_json": {"type": "paragraph"}}, headers=h).status_code == 422)
+    check("document content must be a list -> 422", client.patch(f"/notes/{nid}", json={"content": "x", "content_json": {"type": "doc", "content": "nope"}}, headers=h).status_code == 422)
+    big = {"type": "doc", "content": [para("y" * 1000) for _ in range(600)]}
+    r = client.patch(f"/notes/{nid}", json={"content": "x", "content_json": big}, headers=h)
+    check("oversized document -> 422", r.status_code == 422)
+    check("...and the stored note was not changed by the refused writes", client.get(f"/notes/{nid}", headers=h).json()["content"] == "edited elsewhere")
+
+    # isolation
+    client.patch(f"/notes/{nid}", json={"content": "secret doc", "content_json": doc2}, headers=h)
+    r = client.get(f"/notes/{nid}", headers=hb)
+    check("another user cannot read the document (404, nothing leaked)", r.status_code == 404 and "second version" not in r.text)
+
+    # legacy notes have no document; a corrupt stored document degrades to null instead of erroring
+    legacy = add_note(uid, course, "legacy", "written before the rich editor")
+    check("a note without a document returns content_json null", client.get(f"/notes/{legacy}", headers=h).json()["content_json"] is None)
+    db = main.SessionLocal()
+    try:
+        n = db.query(main.Note).filter(main.Note.id == nid).first()
+        n.content_json = "{not valid json"
+        db.commit()
+    finally:
+        db.close()
+    r = client.get(f"/notes/{nid}", headers=h)
+    check("a corrupt stored document reads back as null (client falls back to the text)", r.status_code == 200 and r.json()["content_json"] is None and r.json()["content"] == "secret doc")
+
+
+def test_note_migration():
+    """Production already has a notes table without content_json; the startup migration must add it in place."""
+    from sqlalchemy import text as sql
+    h, course, uid = make_user_and_course("tess")
+    keep = add_note(uid, course, "existing", "data that predates the column")
+    with main.engine.begin() as conn:
+        conn.execute(sql("ALTER TABLE notes DROP COLUMN content_json"))
+        cols = [row[1] for row in conn.execute(sql("PRAGMA table_info(notes)"))]
+    check("(setup) the column is gone, like a pre-upgrade table", "content_json" not in cols)
+    main.ensure_note_columns()
+    with main.engine.begin() as conn:
+        cols = [row[1] for row in conn.execute(sql("PRAGMA table_info(notes)"))]
+    check("migration adds content_json", "content_json" in cols)
+    main.ensure_note_columns()
+    check("migration is idempotent (second run is a no-op)", True)
+    got = client.get(f"/notes/{keep}", headers=h)
+    check("existing rows survive and read back with a null document", got.status_code == 200 and got.json()["content"] == "data that predates the column" and got.json()["content_json"] is None)
+    check("and the table works for new writes", client.post(f"/courses/{course}/notes", json={"content": "new", "content_json": {"type": "doc", "content": []}}, headers=h).status_code == 200)
+
+
 if __name__ == "__main__":
     try:
         test_crud_happy_path()
@@ -522,6 +606,8 @@ if __name__ == "__main__":
         test_chat_context_notes()
         test_note_to_study_tools()
         test_chat_notes_generation_helpers()
+        test_note_document_field()
+        test_note_migration()
         print("\nAll notes tests passed.")
     finally:
         try:

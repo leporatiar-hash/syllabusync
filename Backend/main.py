@@ -593,7 +593,8 @@ class Note(Base):
     user_id = Column(String, nullable=False)
     course_id = Column(String, ForeignKey("courses.id"), nullable=False)
     title = Column(String, nullable=False, default="")
-    content = Column(Text, nullable=False, default="")
+    content = Column(Text, nullable=False, default="")  # plain text derived from the document; what search / chat / study tools read
+    content_json = Column(Text, nullable=True)  # the editor's rich-text document (JSON); null for notes written before the rich editor
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -876,17 +877,40 @@ class CreateDeadlineRequest(BaseModel):
 
 NOTE_TITLE_MAX_CHARS = 200
 NOTE_CONTENT_MAX_CHARS = 100_000
+NOTE_JSON_MAX_CHARS = 500_000  # serialized size of the editor document (it is larger than the text it describes)
 NOTES_PER_COURSE_MAX = 200
+
+
+def _check_note_doc(doc: dict | None) -> dict | None:
+    """Light sanity check on an editor document: right shape and bounded size. The editor validates the
+    structure itself when it loads it (and falls back to the text if it can't)."""
+    if doc is None:
+        return None
+    if doc.get("type") != "doc" or not isinstance(doc.get("content", []), list):
+        raise ValueError("content_json must be a rich-text document")
+    if len(json.dumps(doc, separators=(",", ":"))) > NOTE_JSON_MAX_CHARS:
+        raise ValueError("Note is too large")
+    return doc
 
 
 class CreateNoteRequest(BaseModel):
     title: str = Field("", max_length=NOTE_TITLE_MAX_CHARS, description="Note title (optional)")
     content: str = Field("", max_length=NOTE_CONTENT_MAX_CHARS, description="Plain-text note body (optional)")
+    content_json: dict | None = Field(None, description="The editor's rich-text document for this note (optional)")
+
+    @validator("content_json")
+    def validate_content_json(cls, v):
+        return _check_note_doc(v)
 
 
 class UpdateNoteRequest(BaseModel):
     title: str | None = Field(None, max_length=NOTE_TITLE_MAX_CHARS, description="New title; omit to leave unchanged")
     content: str | None = Field(None, max_length=NOTE_CONTENT_MAX_CHARS, description="New plain-text body; omit to leave unchanged")
+    content_json: dict | None = Field(None, description="New rich-text document; must accompany `content`. If `content` is sent without it, the stored document is dropped (it would be stale).")
+
+    @validator("content_json")
+    def validate_content_json(cls, v):
+        return _check_note_doc(v)
 
 
 class QuizSubmission(BaseModel):
@@ -973,11 +997,12 @@ class SummaryOut(BaseModel):
 
 
 class NoteOut(BaseModel):
-    """A plain-text note a student wrote for a course."""
+    """A note a student wrote for a course."""
     id: str = Field(description="Unique note identifier (UUID)")
     course_id: str = Field(description="ID of the course this note belongs to")
     title: str = Field(description="Note title (may be empty)")
-    content: str = Field(description="Full plain-text note body")
+    content: str = Field(description="Full note body as plain text (headings, lists and checklists as line-start markers, bold as **…**)")
+    content_json: dict | None = Field(None, description="The editor's rich-text document; null for notes written before the rich editor existed")
     created_at: str = Field(description="ISO 8601 timestamp when the note was created")
     updated_at: str = Field(description="ISO 8601 timestamp of the last edit")
 
@@ -1678,6 +1703,19 @@ def ensure_naming_style_column():
         pass  # Column already exists
 
 
+def ensure_note_columns():
+    """Add notes.content_json (the rich-text editor's document) to a notes table created before it existed.
+    Safe for SQLite and Postgres; a no-op once the column is there."""
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(notes)"))]
+            if cols and "content_json" not in cols:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN content_json TEXT"))
+                logger.info("[Migration] Added 'content_json' column to notes")
+        else:
+            conn.execute(text("ALTER TABLE notes ADD COLUMN IF NOT EXISTS content_json TEXT"))
+
+
 def ensure_founding_member_expiry_column():
     """Add founding_member_expires_at to user_profiles: founding access is a 365-day
     grant from purchase, not permanent. Backfills any pre-existing founding_member=True
@@ -1820,6 +1858,7 @@ ensure_feature_panel_column()
 ensure_value_prompt_columns()
 ensure_founding_member_expiry_column()
 ensure_naming_style_column()
+ensure_note_columns()
 Base.metadata.create_all(bind=engine)
 
 
@@ -4311,20 +4350,33 @@ def _note_out(note: Note) -> dict:
         "course_id": note.course_id,
         "title": note.title or "",
         "content": note.content or "",
+        "content_json": _load_note_doc(note),
         "created_at": note.created_at.isoformat(),
         "updated_at": (note.updated_at or note.created_at).isoformat(),
     }
 
 
+def _load_note_doc(note: Note) -> dict | None:
+    if not note.content_json:
+        return None
+    try:
+        doc = json.loads(note.content_json)
+        return doc if isinstance(doc, dict) else None
+    except ValueError:
+        return None  # unreadable document: the client falls back to the text
+
+
 _NOTE_MD_LINE_PREFIX = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)")
 _NOTE_MD_INLINE = re.compile(r"(\*\*|__|~~|`)")
+_NOTE_MD_ITALIC = re.compile(r"(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])")
 
 
 def _note_preview(body: str, limit: int = 120) -> str:
     """One-line plain-text preview of a note body: drops heading/bullet/checkbox markers and
     bold/code marks, collapses whitespace. Keep in sync with makePreview in CourseNotes.tsx."""
     lines = [_NOTE_MD_LINE_PREFIX.sub("", line) for line in (body or "")[:1000].splitlines()]
-    return _NOTE_MD_INLINE.sub("", " ".join(" ".join(lines).split()))[:limit]
+    text_ = _NOTE_MD_INLINE.sub("", " ".join(" ".join(lines).split()))
+    return _NOTE_MD_ITALIC.sub(r"\1", text_)[:limit]
 
 
 def _note_snippet(body: str, q: str) -> str | None:
@@ -4403,6 +4455,7 @@ def create_note(course_id: str, payload: CreateNoteRequest, current_user: User =
             course_id=course_id,
             title=payload.title.strip(),
             content=payload.content,
+            content_json=json.dumps(payload.content_json, separators=(",", ":")) if payload.content_json else None,
         )
         db.add(note)
         db.commit()
@@ -4436,8 +4489,12 @@ def update_note(note_id: str, payload: UpdateNoteRequest, current_user: User = D
             raise HTTPException(status_code=404, detail="Note not found")
         if payload.title is not None:
             note.title = payload.title.strip()
+        if payload.content_json is not None and payload.content is None:
+            raise HTTPException(status_code=400, detail="content_json must be sent together with content")
         if payload.content is not None:
             note.content = payload.content
+            # New text with no matching document (e.g. an older client): keep no document rather than a stale one
+            note.content_json = json.dumps(payload.content_json, separators=(",", ":")) if payload.content_json else None
         db.commit()
         db.refresh(note)
         return _note_out(note)

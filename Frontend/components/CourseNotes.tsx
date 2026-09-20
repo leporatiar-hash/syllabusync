@@ -1,19 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, Bold, Eye, Heading2, List, ListChecks, NotebookPen, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { NotebookPen, Plus, Search, X } from 'lucide-react'
 import posthog from 'posthog-js'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
-import {
-  continueList,
-  highlightParts,
-  makePreview,
-  toggleBold,
-  toggleChecklistLine,
-  toggleLinePrefix,
-  type LineKind,
-} from '../lib/noteMarkdown'
-import NotePreview from './NotePreview'
+import { docToText, emptyDoc, type NoteDoc } from '../lib/noteDoc'
+import { highlightParts, makePreview } from '../lib/noteMarkdown'
+import NoteEditorPane, { noteDocFor, type NoteEditorApi } from './NoteEditor'
 import NoteStudyDialog from './NoteStudyDialog'
 
 interface NoteListItem {
@@ -26,7 +19,8 @@ interface NoteListItem {
 interface Draft {
   id: string
   title: string
-  content: string
+  content: string // plain text derived from the document; refreshed from the editor whenever we save
+  createdAt: string
 }
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -60,6 +54,15 @@ function formatWhen(ts: string): string {
   })
 }
 
+/** "Sun, Sep 20 · ECON 101" under the title. */
+function formatMeta(createdAt: string, courseName?: string): string {
+  const d = parseUtc(createdAt)
+  const date = Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined })
+  return [date, courseName].filter(Boolean).join(' · ')
+}
+
 function sortNotes(notes: NoteListItem[]): NoteListItem[] {
   return [...notes].sort((a, b) => parseUtc(b.updated_at).getTime() - parseUtc(a.updated_at).getTime())
 }
@@ -88,7 +91,7 @@ export default function CourseNotes({
   onStudyToolsCreated,
 }: {
   courseId: string
-  /** Used to name study sets built from "all notes in this class". */
+  /** Shown under the title, and used to name study sets built from "all notes in this class". */
   courseName?: string
   /** Called after study tools are created from a note, so the page can refresh its Study Tools list. */
   onStudyToolsCreated?: () => void
@@ -101,19 +104,21 @@ export default function CourseNotes({
   const [notice, setNotice] = useState<string | null>(null)
 
   // activeId is set the moment a note is chosen (so the editor pane appears immediately on
-  // mobile); draft holds its text once the full note has loaded.
+  // mobile); draft holds its title once the full note has loaded, and editorDoc the document the
+  // editor opens with. The editor owns the text from then on (it isn't controlled by React state).
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [editorDoc, setEditorDoc] = useState<NoteDoc | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit')
-  const [studyOpen, setStudyOpen] = useState(false)
+  const [studyNote, setStudyNote] = useState<{ title: string; content: string } | null>(null)
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<NoteListItem[] | null>(null)
   const [searchError, setSearchError] = useState(false)
+  const [autoFocusTitle, setAutoFocusTitle] = useState(false)
 
   // Autosave state lives in refs so timers, unload handlers and the save loop always see the
   // latest text without re-subscribing on every keystroke.
@@ -125,13 +130,14 @@ export default function CourseNotes({
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openSeqRef = useRef(0)
   const unmountedRef = useRef(false)
-  const focusTitleRef = useRef(false)
   const titleInputRef = useRef<HTMLInputElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorApiRef = useRef<NoteEditorApi | null>(null)
+  const editorChangedRef = useRef(false) // the editor has changes we haven't pulled into draftRef yet
+  const docRef = useRef<NoteDoc | null>(null) // document as of the last pull (sent as content_json)
+  const contentVersionRef = useRef(0) // bumped each time the body changes...
+  const savedVersionRef = useRef(0) // ...and the version the server has, so title-only saves don't resend the body
   const flushRef = useRef<(keepalive?: boolean) => Promise<boolean>>(async () => true)
   const timerSaveRef = useRef<() => void>(() => {})
-  const handleEditRef = useRef<(patch: Partial<Pick<Draft, 'title' | 'content'>>) => void>(() => {})
-  const pendingSelRef = useRef<{ start: number; end: number } | null>(null)
   const searchSeqRef = useRef(0)
   const finishActiveRef = useRef<(keepalive?: boolean) => Promise<boolean>>(async () => true)
 
@@ -180,6 +186,18 @@ export default function CourseNotes({
     }, SAVE_DEBOUNCE_MS)
   }, [])
 
+  /** Pull the editor's current document (and the plain text derived from it) into the draft. */
+  const syncFromEditor = useCallback(() => {
+    const api = editorApiRef.current
+    const current = draftRef.current
+    if (!editorChangedRef.current || !api || !current) return
+    editorChangedRef.current = false
+    const doc = api.getDoc()
+    docRef.current = doc
+    draftRef.current = { ...current, content: docToText(doc) }
+    contentVersionRef.current++
+  }, [])
+
   /** One PATCH of the current draft. Resolves false if it failed (text stays dirty) or the note is gone. */
   const saveOnce = useCallback(
     (keepalive = false): Promise<boolean> => {
@@ -193,9 +211,19 @@ export default function CourseNotes({
       }
 
       const run = (async () => {
+        syncFromEditor()
         const snapshot = draftRef.current
         if (!snapshot) return true
         const { id, title, content } = snapshot
+        const sendBody = contentVersionRef.current !== savedVersionRef.current
+        const sentVersion = contentVersionRef.current
+        if (sendBody && content.length > CONTENT_MAX) {
+          // Not retryable: it won't get shorter by itself
+          dirtyRef.current = true
+          setSaveStatus('error')
+          setNotice('This note is too long to save (the limit is about 100,000 characters). Trim it or split it into two notes.')
+          return false
+        }
         dirtyRef.current = false
         if (maxWaitRef.current) {
           clearTimeout(maxWaitRef.current)
@@ -203,7 +231,7 @@ export default function CourseNotes({
         }
         setSaveStatus('saving')
         try {
-          const body = JSON.stringify({ title, content })
+          const body = JSON.stringify(sendBody ? { title, content, content_json: docRef.current } : { title })
           const res = await fetchWithAuth(`${API_URL}/notes/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -228,6 +256,7 @@ export default function CourseNotes({
             return false
           }
           const saved = await res.json()
+          if (sendBody) savedVersionRef.current = sentVersion
           setNotes((prev) =>
             sortNotes(
               prev.map((n) =>
@@ -253,7 +282,7 @@ export default function CourseNotes({
       })
       return run
     },
-    [fetchWithAuth, dropNote],
+    [fetchWithAuth, dropNote, syncFromEditor],
   )
 
   /** Fired by the debounce / max-wait / retry timers. */
@@ -290,12 +319,8 @@ export default function CourseNotes({
     timerSaveRef.current = timerSave
   }, [flush, timerSave])
 
-  const handleEdit = (patch: Partial<Pick<Draft, 'title' | 'content'>>) => {
-    const current = draftRef.current
-    if (!current) return
-    const next = { ...current, ...patch }
-    draftRef.current = next
-    setDraft(next)
+  /** Something changed (title or body): mark unsaved and schedule a save. */
+  const markEdited = () => {
     dirtyRef.current = true
     setSaveStatus('saving')
     armDebounce()
@@ -307,19 +332,31 @@ export default function CourseNotes({
     }
   }
 
-  useEffect(() => {
-    handleEditRef.current = handleEdit
-  })
+  const handleTitleChange = (value: string) => {
+    const current = draftRef.current
+    if (!current) return
+    const next = { ...current, title: value }
+    draftRef.current = next
+    setDraft(next)
+    markEdited()
+  }
+
+  const handleContentChange = () => {
+    if (!draftRef.current) return
+    editorChangedRef.current = true
+    markEdited()
+  }
 
   /**
    * Save whatever is open and close it. Returns false (and leaves the note open) if the save
    * failed, so navigating away can never silently drop unsaved text. A note left completely
-   * empty is deleted rather than kept around as a blank "Untitled note".
+   * empty is deleted rather than kept around as a blank "New note".
    */
   const finishActive = useCallback(
     async (keepalive = false): Promise<boolean> => {
       const ok = await flushRef.current(keepalive)
       if (!ok) return false
+      syncFromEditor()
       const current = draftRef.current
       draftRef.current = null
       if (current && !current.title.trim() && !current.content.trim()) {
@@ -328,7 +365,7 @@ export default function CourseNotes({
       }
       return true
     },
-    [fetchWithAuth, dropNote],
+    [fetchWithAuth, dropNote, syncFromEditor],
   )
 
   useEffect(() => {
@@ -355,7 +392,8 @@ export default function CourseNotes({
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide)
       window.removeEventListener('beforeunload', onBeforeUnload)
-      // Leaving the Notes tab (or the course page) mid-edit: save best-effort.
+      // Leaving the Notes tab (or the course page) mid-edit: save best-effort. The editor is
+      // still mounted at this point, so its latest document can be read.
       void finishActiveRef.current(true)
       unmountedRef.current = true
       clearTimers()
@@ -363,6 +401,14 @@ export default function CourseNotes({
   }, [])
 
   // ── Opening / creating / deleting ───────────────────────────────
+  const resetSaveTracking = () => {
+    dirtyRef.current = false
+    editorChangedRef.current = false
+    docRef.current = null
+    contentVersionRef.current = 0
+    savedVersionRef.current = 0
+  }
+
   const openNote = async (id: string) => {
     if (id === activeId) return
     setNotice(null)
@@ -377,8 +423,10 @@ export default function CourseNotes({
     const seq = ++openSeqRef.current
     setActiveId(id)
     setDraft(null)
+    setEditorDoc(null)
     setOpenError(null)
     setSaveStatus('idle')
+    setAutoFocusTitle(false)
     try {
       const res = await fetchWithAuth(`${API_URL}/notes/${id}`, { cache: 'no-store' })
       if (seq !== openSeqRef.current) return
@@ -391,9 +439,10 @@ export default function CourseNotes({
       if (!res.ok) throw new Error('Failed to load note')
       const note = await res.json()
       if (seq !== openSeqRef.current) return
-      const next = { id: note.id, title: note.title, content: note.content }
+      const next: Draft = { id: note.id, title: note.title, content: note.content, createdAt: note.created_at }
       draftRef.current = next
-      dirtyRef.current = false
+      resetSaveTracking()
+      setEditorDoc(noteDocFor(note.content_json, note.content))
       setDraft(next)
     } catch {
       if (seq === openSeqRef.current) setOpenError("Couldn't open that note.")
@@ -409,6 +458,7 @@ export default function CourseNotes({
     openSeqRef.current++
     setActiveId(null)
     setDraft(null)
+    setEditorDoc(null)
     setOpenError(null)
     setSaveStatus('idle')
   }
@@ -434,14 +484,14 @@ export default function CourseNotes({
       }
       const note = await res.json()
       posthog.capture('note_created', { course_id: courseId })
-      const next = { id: note.id, title: note.title, content: note.content }
+      const next: Draft = { id: note.id, title: note.title, content: note.content, createdAt: note.created_at }
       openSeqRef.current++
       draftRef.current = next
-      dirtyRef.current = false
-      focusTitleRef.current = true
+      resetSaveTracking()
       setNotes((prev) => [{ id: note.id, title: '', preview: '', updated_at: note.updated_at }, ...prev])
       setQuery('') // a search would hide the brand-new note
-      setMode('edit')
+      setEditorDoc(emptyDoc())
+      setAutoFocusTitle(true)
       setActiveId(note.id)
       setDraft(next)
       setOpenError(null)
@@ -468,6 +518,7 @@ export default function CourseNotes({
       openSeqRef.current++
       dropNote(current.id)
       setDraft(null)
+      setEditorDoc(null)
       setActiveId(null)
       setSaveStatus('idle')
       setConfirmDelete(false)
@@ -481,46 +532,11 @@ export default function CourseNotes({
     }
   }
 
-  // ── Formatting ──────────────────────────────────────────────────
-  const applyFormat = (kind: 'bold' | LineKind) => {
-    const el = textareaRef.current
+  const openStudy = () => {
+    syncFromEditor()
     const current = draftRef.current
-    if (!el || !current) return
-    el.focus({ preventScroll: true })
-    const result =
-      kind === 'bold'
-        ? toggleBold(current.content, el.selectionStart, el.selectionEnd)
-        : toggleLinePrefix(current.content, el.selectionStart, el.selectionEnd, kind)
-    if (result.text === current.content || result.text.length > CONTENT_MAX) return
-    pendingSelRef.current = { start: result.start, end: result.end }
-    handleEdit({ content: result.text })
+    if (current) setStudyNote({ title: current.title, content: current.content })
   }
-
-  const toggleTask = (line: number) => {
-    const current = draftRef.current
-    if (!current) return
-    const next = toggleChecklistLine(current.content, line)
-    if (next !== current.content) handleEdit({ content: next })
-  }
-
-  // Enter at the end of a bullet / checklist / numbered item continues the list (Enter on an empty
-  // item ends it). A native `beforeinput` listener is used because it fires reliably for
-  // on-screen keyboards, where `keydown` often reports a generic key code.
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el || mode !== 'edit') return
-    const onBeforeInput = (e: InputEvent) => {
-      if (e.inputType !== 'insertLineBreak' && e.inputType !== 'insertParagraph') return
-      if (el.selectionStart !== el.selectionEnd) return
-      const result = continueList(el.value, el.selectionStart)
-      if (!result || result.text.length > CONTENT_MAX) return
-      e.preventDefault()
-      pendingSelRef.current = { start: result.start, end: result.end }
-      handleEditRef.current({ content: result.text })
-    }
-    el.addEventListener('beforeinput', onBeforeInput)
-    return () => el.removeEventListener('beforeinput', onBeforeInput)
-  }, [draft?.id, mode])
 
   // ── Search (debounced, server-side so it covers full note bodies) ──
   useEffect(() => {
@@ -545,54 +561,22 @@ export default function CourseNotes({
     return () => clearTimeout(timer)
   }, [query, courseId, fetchWithAuth])
 
-  // Focus the title of a freshly created note.
-  useEffect(() => {
-    if (draft && focusTitleRef.current) {
-      focusTitleRef.current = false
-      titleInputRef.current?.focus()
-    }
-  }, [draft?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-grow the textarea so the page (not a nested box) scrolls — much friendlier on phones.
-  // Collapsing to "auto" can make the page jump, so put the scroll position back afterwards.
-  const resizeTextarea = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    const y = window.scrollY
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-    if (window.scrollY !== y) window.scrollTo(window.scrollX, y)
-  }, [])
-
-  useLayoutEffect(() => {
-    resizeTextarea()
-    const sel = pendingSelRef.current
-    const el = textareaRef.current
-    if (sel && el) {
-      pendingSelRef.current = null
-      el.setSelectionRange(sel.start, sel.end)
-    }
-  }, [draft?.content, draft?.id, mode, resizeTextarea])
-
-  useEffect(() => {
-    window.addEventListener('resize', resizeTextarea)
-    return () => window.removeEventListener('resize', resizeTextarea)
-  }, [resizeTextarea])
-
   // ── Rendering ───────────────────────────────────────────────────
   const statusLabel =
     saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save — retrying" : ''
+  const visibleNotes = searchResults ?? notes
+  const searching = query.trim().length > 0
 
   return (
-    <section className="mt-6 rounded-3xl bg-white shadow-sm lg:grid lg:grid-cols-[320px_1fr]">
+    <section className="mt-6 rounded-3xl bg-white shadow-sm lg:grid lg:grid-cols-[300px_1fr]">
       {/* ── Note list (hidden on mobile while a note is open) ── */}
-      <div className={`${activeId ? 'hidden lg:block' : 'block'} lg:border-r lg:border-slate-100`}>
-        <div className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-4">
-          <h2 className="text-lg font-semibold text-slate-900">Notes</h2>
+      <div className={`${activeId ? 'hidden lg:block' : 'block'} lg:rounded-l-3xl lg:border-r lg:border-slate-100`}>
+        <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-5 lg:px-4">
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900">Notes</h2>
           <button
             onClick={() => void createNote()}
             disabled={creating}
-            className="flex min-h-11 items-center gap-1.5 rounded-full bg-[#5B8DEF] px-4 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
+            className="flex min-h-11 items-center gap-1.5 rounded-full bg-[#5B8DEF] px-4 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:bg-[#4A7BDD] disabled:opacity-50 lg:min-h-9 lg:px-3.5"
           >
             <Plus size={16} />
             New note
@@ -600,7 +584,7 @@ export default function CourseNotes({
         </div>
 
         {(notes.length > 0 || query) && (
-          <div className="px-4 pb-3 sm:px-6 lg:px-4">
+          <div className="px-5 pb-3 lg:px-4">
             <div className="relative">
               <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               {/* text-base (16px): avoids the iOS focus-zoom */}
@@ -613,13 +597,13 @@ export default function CourseNotes({
                 maxLength={100}
                 placeholder="Search notes"
                 aria-label="Search notes"
-                className="min-h-11 w-full rounded-full border border-slate-200 bg-slate-50 pl-10 pr-11 text-base text-slate-800 placeholder:text-slate-400 focus:border-[#5B8DEF] focus:bg-white focus:outline-none"
+                className="min-h-11 w-full rounded-xl border border-transparent bg-slate-50 pl-10 pr-11 text-base text-slate-800 placeholder:text-slate-400 focus:border-slate-200 focus:bg-white focus:outline-none lg:min-h-10"
               />
               {query && (
                 <button
                   onClick={() => setQuery('')}
                   aria-label="Clear search"
-                  className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:text-slate-600"
+                  className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:text-slate-600 lg:h-10 lg:w-10"
                 >
                   <X size={16} />
                 </button>
@@ -629,15 +613,15 @@ export default function CourseNotes({
         )}
 
         {notice && (
-          <p role="alert" className="mx-4 mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-700 sm:mx-6 lg:mx-4">
+          <p role="alert" className="mx-5 mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-700 lg:mx-4">
             {notice}
           </p>
         )}
 
         {listLoading ? (
-          <p className="px-6 pb-8 text-sm text-slate-500 lg:px-4">Loading notes…</p>
+          <p className="px-5 pb-8 text-sm text-slate-500 lg:px-4">Loading notes…</p>
         ) : listError ? (
-          <div className="px-6 pb-8 lg:px-4">
+          <div className="px-5 pb-8 lg:px-4">
             <p className="text-sm text-slate-600">{listError}</p>
             <button
               onClick={() => {
@@ -649,44 +633,45 @@ export default function CourseNotes({
               Try again
             </button>
           </div>
-        ) : query.trim() && searchError ? (
-          <p className="px-6 pb-8 text-sm text-slate-600 lg:px-4">Search isn&apos;t working right now. Try again in a moment.</p>
-        ) : query.trim() && !searchResults ? (
-          <p className="px-6 pb-8 text-sm text-slate-500 lg:px-4">Searching…</p>
-        ) : query.trim() && searchResults && searchResults.length === 0 ? (
-          <p className="px-6 pb-8 text-sm text-slate-500 lg:px-4">No notes match &ldquo;{query.trim()}&rdquo;.</p>
+        ) : searching && searchError ? (
+          <p className="px-5 pb-8 text-sm text-slate-600 lg:px-4">Search isn&apos;t working right now. Try again in a moment.</p>
+        ) : searching && !searchResults ? (
+          <p className="px-5 pb-8 text-sm text-slate-500 lg:px-4">Searching…</p>
+        ) : searching && searchResults && searchResults.length === 0 ? (
+          <p className="px-5 pb-8 text-sm text-slate-500 lg:px-4">No notes match &ldquo;{query.trim()}&rdquo;.</p>
         ) : notes.length === 0 ? (
-          <div className="flex flex-col items-center px-6 pb-10 pt-4 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#E0EAFF] text-[#5B8DEF]">
+          <div className="flex flex-col items-center px-6 pb-12 pt-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
               <NotebookPen size={22} />
             </div>
             <p className="mt-4 text-sm font-semibold text-slate-800">No notes yet</p>
-            <p className="mt-1 max-w-[16rem] text-xs text-slate-500">
+            <p className="mt-1 max-w-[16rem] text-xs leading-relaxed text-slate-500">
               Take notes for this class right here. They save automatically.
             </p>
           </div>
         ) : (
-          <ul className="lg:max-h-[70vh] lg:overflow-y-auto">
-            {(searchResults ?? notes).map((n) => {
+          <ul className="pb-3 lg:max-h-[70vh] lg:overflow-y-auto">
+            {visibleNotes.map((n) => {
               const isActive = n.id === activeId
               const live = isActive && draft?.id === n.id && !searchResults
               const title = live ? draft.title : n.title
-              const preview = live ? makePreview(draft.content) : n.preview
               return (
-                <li key={n.id}>
+                <li key={n.id} className="px-2.5">
                   <button
                     onClick={() => void openNote(n.id)}
-                    className={`block min-h-16 w-full border-t border-slate-100 px-4 py-3 text-left transition-colors sm:px-6 lg:px-4 ${
-                      isActive ? 'bg-[#EEF2FF]' : 'hover:bg-slate-50'
+                    className={`block min-h-[4.25rem] w-full rounded-xl px-3 py-2.5 text-left transition-colors ${
+                      isActive ? 'bg-slate-100' : 'hover:bg-slate-50'
                     }`}
                   >
                     <span className="flex items-baseline justify-between gap-3">
-                      <span className={`truncate text-sm font-semibold ${title ? 'text-slate-900' : 'italic text-slate-400'}`}>
-                        {title ? <Highlight text={title} query={searchResults ? query : ''} /> : 'Untitled note'}
+                      <span className={`truncate text-[15px] font-medium ${title ? 'text-slate-900' : 'text-slate-400'}`}>
+                        {title ? <Highlight text={title} query={searchResults ? query : ''} /> : 'New note'}
                       </span>
                       <span className="shrink-0 text-xs text-slate-400">{formatWhen(n.updated_at)}</span>
                     </span>
-                    <span className="mt-0.5 block truncate text-xs text-slate-500">{preview ? <Highlight text={preview} query={searchResults ? query : ''} /> : 'No additional text'}</span>
+                    <span className="mt-0.5 block truncate text-[13px] text-slate-500">
+                      {n.preview ? <Highlight text={n.preview} query={searchResults ? query : ''} /> : 'No additional text'}
+                    </span>
                   </button>
                 </li>
               )
@@ -696,7 +681,7 @@ export default function CourseNotes({
       </div>
 
       {/* ── Editor (full-width on mobile; right-hand pane on desktop) ── */}
-      <div className={`${activeId ? 'block' : 'hidden lg:flex'} min-w-0 lg:min-h-[480px]`}>
+      <div className={`${activeId ? 'block' : 'hidden lg:flex'} min-w-0 lg:min-h-[520px]`}>
         {!activeId ? (
           <div className="m-auto px-6 text-center text-sm text-slate-400">Select a note, or create a new one.</div>
         ) : openError ? (
@@ -717,126 +702,39 @@ export default function CourseNotes({
               </button>
             </div>
           </div>
-        ) : !draft ? (
+        ) : !draft || !editorDoc ? (
           <div className="w-full px-6 py-8 text-sm text-slate-500">Loading note…</div>
         ) : (
-          <div className="w-full min-w-0">
-            {/* Sticky under the site header (h-16) so Back / status / actions / formatting stay reachable in a long note */}
-            <div className="sticky top-16 z-10 rounded-t-3xl border-b border-slate-100 bg-white">
-              <div className="flex items-center gap-1 px-2 py-1 sm:px-4">
-                <button
-                  onClick={() => void closeEditor()}
-                  aria-label="Back to notes"
-                  className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-slate-600 hover:text-slate-900 lg:hidden"
-                >
-                  <ArrowLeft size={18} />
-                  Notes
-                </button>
-                <span
-                  aria-live="polite"
-                  className={`min-w-0 flex-1 truncate px-1 text-right text-xs ${saveStatus === 'error' ? 'font-medium text-amber-600' : 'text-slate-400'}`}
-                >
-                  {statusLabel}
-                </span>
-                <button
-                  onClick={() => setMode(mode === 'edit' ? 'preview' : 'edit')}
-                  aria-label={mode === 'edit' ? 'Preview note' : 'Edit note'}
-                  aria-pressed={mode === 'preview'}
-                  className="flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 sm:px-3"
-                >
-                  {mode === 'edit' ? <Eye size={18} /> : <Pencil size={18} />}
-                  <span className="hidden sm:inline">{mode === 'edit' ? 'Preview' : 'Edit'}</span>
-                </button>
-                <button
-                  onClick={() => setStudyOpen(true)}
-                  aria-label="Make study tools from your notes"
-                  className="flex h-11 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-[#5B8DEF] transition-colors hover:bg-[#EEF2FF]"
-                >
-                  <Sparkles size={18} />
-                  Study
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  aria-label="Delete note"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-              {mode === 'edit' && (
-                // onMouseDown preventDefault keeps focus (and the on-screen keyboard) in the textarea when a button is tapped
-                <div role="toolbar" aria-label="Formatting" className="flex items-center gap-1 border-t border-slate-100 px-2 py-1 sm:px-4">
-                  {(
-                    [
-                      ['heading', 'Heading', Heading2],
-                      ['bold', 'Bold', Bold],
-                      ['bullet', 'Bulleted list', List],
-                      ['check', 'Checklist', ListChecks],
-                    ] as const
-                  ).map(([kind, label, Icon]) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => applyFormat(kind)}
-                      aria-label={label}
-                      title={label}
-                      className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200"
-                    >
-                      <Icon size={20} />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="px-4 pb-6 pt-3 sm:px-6">
-              <input
-                ref={titleInputRef}
-                value={draft.title}
-                onChange={(e) => handleEdit({ title: e.target.value })}
-                onBlur={() => void flushRef.current()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    textareaRef.current?.focus()
-                  }
-                }}
-                maxLength={TITLE_MAX}
-                placeholder="Title"
-                aria-label="Note title"
-                className="w-full bg-transparent py-2 text-xl font-semibold text-slate-900 placeholder:text-slate-300 focus:outline-none"
-              />
-              {mode === 'edit' ? (
-                // text-base (16px) on purpose: iOS Safari zooms the page on focus for anything smaller
-                <textarea
-                  ref={textareaRef}
-                  value={draft.content}
-                  onChange={(e) => handleEdit({ content: e.target.value })}
-                  onBlur={() => void flushRef.current()}
-                  maxLength={CONTENT_MAX}
-                  placeholder="Start typing your notes…"
-                  aria-label="Note body"
-                  className="mt-1 block min-h-[50dvh] w-full resize-none bg-transparent text-base leading-relaxed text-slate-800 placeholder:text-slate-300 focus:outline-none lg:min-h-[380px]"
-                />
-              ) : (
-                <div className="mt-1" data-testid="note-preview">
-                  <NotePreview content={draft.content} onToggleTask={toggleTask} />
-                </div>
-              )}
-            </div>
-          </div>
+          <NoteEditorPane
+            key={draft.id}
+            initialDoc={editorDoc}
+            title={draft.title}
+            onTitleChange={handleTitleChange}
+            onTitleBlur={() => void flushRef.current()}
+            titleInputRef={titleInputRef}
+            autoFocusTitle={autoFocusTitle}
+            onContentChange={handleContentChange}
+            onEditorBlur={() => void flushRef.current()}
+            apiRef={editorApiRef}
+            meta={formatMeta(draft.createdAt, courseName)}
+            statusLabel={statusLabel}
+            statusIsError={saveStatus === 'error'}
+            onBack={() => void closeEditor()}
+            onStudy={openStudy}
+            onDelete={() => setConfirmDelete(true)}
+            titleMaxLength={TITLE_MAX}
+          />
         )}
       </div>
 
-      {studyOpen && draft && (
+      {studyNote && (
         <NoteStudyDialog
           courseId={courseId}
           courseName={courseName}
-          note={{ title: draft.title, content: draft.content }}
+          note={studyNote}
           noteCount={notes.length}
           beforeGenerate={() => flushRef.current()}
-          onClose={() => setStudyOpen(false)}
+          onClose={() => setStudyNote(null)}
           onCreated={() => onStudyToolsCreated?.()}
         />
       )}
