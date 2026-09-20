@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X, NotebookPen } from 'lucide-react'
 import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../../hooks/useAuthFetch'
 import { useAuth } from '../../../lib/useAuth'
 import posthog from 'posthog-js'
 import NamingStyleModal from '../../../components/NamingStyleModal'
+import CourseNotes from '../../../components/CourseNotes'
 
 interface Deadline {
   id: string
@@ -137,7 +138,7 @@ export default function CourseDetailPage() {
   const [savingToCalendar, setSavingToCalendar] = useState<string | null>(null)
   const [calendarToast, setCalendarToast] = useState<string | null>(null)
   const [bulkSaving, setBulkSaving] = useState(false)
-  const [mainTab, setMainTab] = useState<'deadlines' | 'study' | 'info'>('deadlines')
+  const [mainTab, setMainTab] = useState<'deadlines' | 'study' | 'info' | 'notes'>('deadlines')
   const [deadlineTab, setDeadlineTab] = useState<'unsaved' | 'saved'>('unsaved')
   const [deadlineTabTouched, setDeadlineTabTouched] = useState(false)
   const [generateFlashcards, setGenerateFlashcards] = useState(true)
@@ -700,10 +701,10 @@ export default function CourseDetailPage() {
         </div>
 
         {/* Main Tabs */}
-        <div className="mt-8 flex items-center gap-2">
+        <div className="mt-8 flex flex-wrap items-center gap-2">
           <button
             onClick={() => setMainTab('deadlines')}
-            className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition-all duration-300 ${
+            className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:py-3 ${
               mainTab === 'deadlines'
                 ? 'bg-white text-slate-900 shadow-md'
                 : 'bg-transparent text-slate-500 hover:text-slate-700'
@@ -717,7 +718,7 @@ export default function CourseDetailPage() {
           </button>
           <button
             onClick={() => setMainTab('study')}
-            className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition-all duration-300 ${
+            className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:py-3 ${
               mainTab === 'study'
                 ? 'bg-white text-slate-900 shadow-md'
                 : 'bg-transparent text-slate-500 hover:text-slate-700'
@@ -731,7 +732,7 @@ export default function CourseDetailPage() {
           </button>
           <button
             onClick={() => setMainTab('info')}
-            className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition-all duration-300 ${
+            className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:py-3 ${
               mainTab === 'info'
                 ? 'bg-white text-slate-900 shadow-md'
                 : 'bg-transparent text-slate-500 hover:text-slate-700'
@@ -744,6 +745,17 @@ export default function CourseDetailPage() {
                 <Check size={10} className="inline" />
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setMainTab('notes')}
+            className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:py-3 ${
+              mainTab === 'notes'
+                ? 'bg-white text-slate-900 shadow-md'
+                : 'bg-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <NotebookPen size={16} />
+            Notes
           </button>
         </div>
 
@@ -1429,6 +1441,9 @@ export default function CourseDetailPage() {
               )}
             </div>
           </div>
+        ) : mainTab === 'notes' ? (
+          /* Notes Tab — mounted only while open so leaving the tab flushes any pending autosave */
+          courseId ? <CourseNotes courseId={courseId} /> : null
         ) : (
           /* Course Info Tab */
           <div className="mt-6">

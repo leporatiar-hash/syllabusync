@@ -520,6 +520,7 @@ class Course(Base):
     flashcard_sets = relationship("FlashcardSet", back_populates="course", cascade="all, delete-orphan")
     quizzes = relationship("Quiz", back_populates="course", cascade="all, delete-orphan")
     summaries = relationship("Summary", back_populates="course", cascade="all, delete-orphan")
+    notes = relationship("Note", back_populates="course", cascade="all, delete-orphan")
 
 
 class Deadline(Base):
@@ -582,6 +583,21 @@ class Summary(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     course = relationship("Course", back_populates="summaries")
+
+
+class Note(Base):
+    """A plain-text note the student writes for one of their courses (autosaved from the UI)."""
+    __tablename__ = "notes"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False)
+    course_id = Column(String, ForeignKey("courses.id"), nullable=False)
+    title = Column(String, nullable=False, default="")
+    content = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    course = relationship("Course", back_populates="notes")
 
 
 class User(Base):
@@ -858,6 +874,21 @@ class CreateDeadlineRequest(BaseModel):
     course_id: str | None = Field(None, description="ID of the course this deadline belongs to (required)")
 
 
+NOTE_TITLE_MAX_CHARS = 200
+NOTE_CONTENT_MAX_CHARS = 100_000
+NOTES_PER_COURSE_MAX = 200
+
+
+class CreateNoteRequest(BaseModel):
+    title: str = Field("", max_length=NOTE_TITLE_MAX_CHARS, description="Note title (optional)")
+    content: str = Field("", max_length=NOTE_CONTENT_MAX_CHARS, description="Plain-text note body (optional)")
+
+
+class UpdateNoteRequest(BaseModel):
+    title: str | None = Field(None, max_length=NOTE_TITLE_MAX_CHARS, description="New title; omit to leave unchanged")
+    content: str | None = Field(None, max_length=NOTE_CONTENT_MAX_CHARS, description="New plain-text body; omit to leave unchanged")
+
+
 class QuizSubmission(BaseModel):
     answers: dict[str, str] = Field(description="Map of question_id to selected answer letter: {'<question_id>': 'A'|'B'|'C'|'D'}")
 
@@ -939,6 +970,25 @@ class SummaryOut(BaseModel):
     course_id: str = Field(description="ID of the course this summary belongs to")
     course_name: str | None = Field(None, description="Name of the course")
     course_code: str | None = Field(None, description="Code of the course")
+
+
+class NoteOut(BaseModel):
+    """A plain-text note a student wrote for a course."""
+    id: str = Field(description="Unique note identifier (UUID)")
+    course_id: str = Field(description="ID of the course this note belongs to")
+    title: str = Field(description="Note title (may be empty)")
+    content: str = Field(description="Full plain-text note body")
+    created_at: str = Field(description="ISO 8601 timestamp when the note was created")
+    updated_at: str = Field(description="ISO 8601 timestamp of the last edit")
+
+
+class NoteSummaryOut(BaseModel):
+    """A note as shown in a course's note list (body truncated to a short preview)."""
+    id: str = Field(description="Unique note identifier (UUID)")
+    course_id: str = Field(description="ID of the course this note belongs to")
+    title: str = Field(description="Note title (may be empty)")
+    preview: str = Field(description="First ~120 characters of the body, whitespace collapsed")
+    updated_at: str = Field(description="ISO 8601 timestamp of the last edit")
 
 
 class QuizQuestionOut(BaseModel):
@@ -1781,6 +1831,7 @@ def ensure_indexes():
         "CREATE INDEX IF NOT EXISTS idx_flashcard_sets_user_id ON flashcard_sets(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_flashcards_user_id ON flashcards(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_summaries_user_id ON summaries(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_quizzes_user_id ON quizzes(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_quiz_questions_user_id ON quiz_questions(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_id ON calendar_entries(user_id)",
@@ -1790,6 +1841,7 @@ def ensure_indexes():
         "CREATE INDEX IF NOT EXISTS idx_deadlines_course_id ON deadlines(course_id)",
         "CREATE INDEX IF NOT EXISTS idx_flashcard_sets_course_id ON flashcard_sets(course_id)",
         "CREATE INDEX IF NOT EXISTS idx_summaries_course_id ON summaries(course_id)",
+        "CREATE INDEX IF NOT EXISTS idx_notes_course_id ON notes(course_id)",
         "CREATE INDEX IF NOT EXISTS idx_quizzes_course_id ON quizzes(course_id)",
         "CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id)",
         # user email uniqueness
@@ -1977,7 +2029,7 @@ def _get_current_user(
                 old_id = existing_by_email.id
                 # Migrate all related data to the new user_id
                 for tbl in [Course, Deadline, LMSConnection, FlashcardSet,
-                            Flashcard, Summary, CalendarEntry, Quiz, QuizQuestion]:
+                            Flashcard, Summary, Note, CalendarEntry, Quiz, QuizQuestion]:
                     db.query(tbl).filter(tbl.user_id == old_id).update(
                         {"user_id": user_id}, synchronize_session=False
                     )
@@ -2661,6 +2713,7 @@ def auth_delete_account(
     db.query(Quiz).filter(Quiz.user_id == uid).delete(synchronize_session=False)
 
     db.query(Summary).filter(Summary.user_id == uid).delete(synchronize_session=False)
+    db.query(Note).filter(Note.user_id == uid).delete(synchronize_session=False)
     db.query(Deadline).filter(Deadline.user_id == uid).delete(synchronize_session=False)
     db.query(Course).filter(Course.user_id == uid).delete(synchronize_session=False)
     db.query(UserProfile).filter(UserProfile.user_id == uid).delete(synchronize_session=False)
@@ -4246,6 +4299,131 @@ def get_summary(summary_id: str, current_user: User = Depends(get_current_user))
             "course_name": course.name if course else None,
             "course_code": course.code if course else None
         }
+    finally:
+        db.close()
+
+
+# Note endpoints
+def _note_out(note: Note) -> dict:
+    return {
+        "id": note.id,
+        "course_id": note.course_id,
+        "title": note.title or "",
+        "content": note.content or "",
+        "created_at": note.created_at.isoformat(),
+        "updated_at": (note.updated_at or note.created_at).isoformat(),
+    }
+
+
+@app.get("/courses/{course_id}/notes", tags=["notes"], summary="List the user's notes for a course", response_model=list[NoteSummaryOut])
+def list_course_notes(course_id: str, current_user: User = Depends(get_current_user)):
+    """Return all of the user's notes for a course, most recently edited first.
+
+    Bodies are truncated to a short `preview`; fetch a single note via GET /notes/{note_id}
+    for the full text. Returns 404 if the course does not exist or belongs to a different user.
+    """
+    db = SessionLocal()
+    try:
+        user_id = current_user.id
+        course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+        notes = (
+            db.query(Note)
+            .filter(Note.course_id == course_id, Note.user_id == user_id)
+            .order_by(Note.updated_at.desc())
+            .all()
+        )
+        return [
+            {
+                "id": n.id,
+                "course_id": n.course_id,
+                "title": n.title or "",
+                "preview": " ".join((n.content or "")[:400].split())[:120],
+                "updated_at": (n.updated_at or n.created_at).isoformat(),
+            }
+            for n in notes
+        ]
+    finally:
+        db.close()
+
+
+@app.post("/courses/{course_id}/notes", tags=["notes"], summary="Create a note for a course", response_model=NoteOut)
+def create_note(course_id: str, payload: CreateNoteRequest, current_user: User = Depends(get_current_user)):
+    """Create a plain-text note in a course. Title and content are both optional (default empty),
+    so the UI can create a blank note and then autosave into it via PATCH /notes/{note_id}.
+
+    Returns 404 if the course does not exist or belongs to a different user, and 400 once a
+    course holds 200 notes.
+    """
+    db = SessionLocal()
+    try:
+        user_id = current_user.id
+        course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+        existing = db.query(Note).filter(Note.course_id == course_id, Note.user_id == user_id).count()
+        if existing >= NOTES_PER_COURSE_MAX:
+            raise HTTPException(status_code=400, detail=f"A course can hold at most {NOTES_PER_COURSE_MAX} notes")
+
+        note = Note(
+            user_id=user_id,
+            course_id=course_id,
+            title=payload.title.strip(),
+            content=payload.content,
+        )
+        db.add(note)
+        db.commit()
+        db.refresh(note)
+        return _note_out(note)
+    finally:
+        db.close()
+
+
+@app.get("/notes/{note_id}", tags=["notes"], summary="Get a note", response_model=NoteOut)
+def get_note(note_id: str, current_user: User = Depends(get_current_user)):
+    """Return a single note with its full text. Returns 404 if it does not exist or belongs to a different user."""
+    db = SessionLocal()
+    try:
+        note = db.query(Note).filter(Note.id == note_id, Note.user_id == current_user.id).first()
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
+        return _note_out(note)
+    finally:
+        db.close()
+
+
+@app.patch("/notes/{note_id}", tags=["notes"], summary="Update a note's title or content", response_model=NoteOut)
+def update_note(note_id: str, payload: UpdateNoteRequest, current_user: User = Depends(get_current_user)):
+    """Update a note's title and/or content. Omitted fields are left unchanged; this is what the
+    UI's autosave calls. Last write wins."""
+    db = SessionLocal()
+    try:
+        note = db.query(Note).filter(Note.id == note_id, Note.user_id == current_user.id).first()
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
+        if payload.title is not None:
+            note.title = payload.title.strip()
+        if payload.content is not None:
+            note.content = payload.content
+        db.commit()
+        db.refresh(note)
+        return _note_out(note)
+    finally:
+        db.close()
+
+
+@app.delete("/notes/{note_id}", tags=["notes"], summary="Delete a note", response_model=MessageResponse)
+def delete_note(note_id: str, current_user: User = Depends(get_current_user)):
+    """Permanently delete a note. Returns 404 if it does not exist or belongs to a different user."""
+    db = SessionLocal()
+    try:
+        note = db.query(Note).filter(Note.id == note_id, Note.user_id == current_user.id).first()
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
+        db.delete(note)
+        db.commit()
+        return {"message": "Note deleted"}
     finally:
         db.close()
 
