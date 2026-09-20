@@ -89,12 +89,15 @@ export default function CourseNotes({
   courseId,
   courseName,
   onStudyToolsCreated,
+  onCountChange,
 }: {
   courseId: string
   /** Shown under the title, and used to name study sets built from "all notes in this class". */
   courseName?: string
   /** Called after study tools are created from a note, so the page can refresh its Study Tools list. */
   onStudyToolsCreated?: () => void
+  /** Reports how many notes the class has (once loaded, and after every add/delete), for the tab badge and the Deadlines tab's suggestions. */
+  onCountChange?: (count: number) => void
 }) {
   const { fetchWithAuth } = useAuthFetch()
 
@@ -172,6 +175,10 @@ export default function CourseNotes({
   useEffect(() => {
     void loadList()
   }, [loadList])
+
+  useEffect(() => {
+    if (!listLoading && !listError) onCountChange?.(notes.length)
+  }, [notes.length, listLoading, listError, onCountChange])
 
   // ── Autosave ────────────────────────────────────────────────────
   // Only one PATCH is ever in flight, so a slow older request can never land after (and

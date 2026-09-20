@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, BookMarked, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X, NotebookPen } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, FolderOpen, BookOpenCheck, ClipboardList, Clock, Calendar, Check, File, Layers, Upload, Sparkles, GraduationCap, Info, User, Scale, BarChart3, BookCopy, Pencil, Save, X, NotebookPen } from 'lucide-react'
 import { API_URL, useAuthFetch, friendlyUploadErrorMessage } from '../../../hooks/useAuthFetch'
 import { useAuth } from '../../../lib/useAuth'
 import posthog from 'posthog-js'
 import NamingStyleModal from '../../../components/NamingStyleModal'
+import DeadlineList from '../../../components/DeadlineList'
+import NextSteps from '../../../components/NextSteps'
+import { localToday } from '../../../lib/deadlineGroups'
 import dynamic from 'next/dynamic'
 
 // The rich-text editor is a sizeable dependency; only download it when someone opens the Notes tab.
@@ -90,6 +93,7 @@ interface CourseDetail {
   flashcard_sets?: FlashcardSet[]
   summaries?: Summary[]
   quizzes?: Quiz[]
+  note_count?: number
 }
 
 /** Shape passed into the confirmation modal */
@@ -145,8 +149,9 @@ export default function CourseDetailPage() {
   const [calendarToast, setCalendarToast] = useState<string | null>(null)
   const [bulkSaving, setBulkSaving] = useState(false)
   const [mainTab, setMainTab] = useState<'deadlines' | 'study' | 'info' | 'notes'>('deadlines')
-  const [deadlineTab, setDeadlineTab] = useState<'unsaved' | 'saved'>('unsaved')
-  const [deadlineTabTouched, setDeadlineTabTouched] = useState(false)
+  const [syllabusOpen, setSyllabusOpen] = useState(false) // the "replace or remove" panel, once a syllabus is already parsed
+  const [liveNoteCount, setLiveNoteCount] = useState<number | null>(null) // kept fresh by the Notes tab
+  const [courseError, setCourseError] = useState(false)
   const [generateFlashcards, setGenerateFlashcards] = useState(true)
   const [generateQuiz, setGenerateQuiz] = useState(true)
   const [generateSummary, setGenerateSummary] = useState(true)
@@ -219,11 +224,18 @@ export default function CourseDetailPage() {
   }
 
   // Computed values
-  const unsavedDeadlines = deadlines.filter(d => !d.saved_to_calendar)
-  const savedDeadlines = deadlines.filter(d => d.saved_to_calendar)
-  const unsavedCount = unsavedDeadlines.length
-  const savedCount = savedDeadlines.length
+  const unsavedCount = deadlines.filter(d => !d.saved_to_calendar).length
   const remainingCount = deadlines.filter(d => !d.completed).length
+  const hasDeadlines = deadlines.length > 0
+  const hasSyllabus = !!course?.course_info // a syllabus was parsed (courses built from Canvas/iCal have deadlines but no syllabus)
+  const courseLoaded = course !== null
+  const noteCount = liveNoteCount ?? course?.note_count ?? 0
+  const studyCount = (course?.flashcard_sets?.length || 0) + (course?.quizzes?.length || 0) + (course?.summaries?.length || 0)
+  // Once every deadline is on the calendar the real value is in the other tabs: point at whichever they haven't tried
+  const showNextSteps = hasDeadlines && unsavedCount === 0 && (noteCount === 0 || studyCount === 0)
+  // The big upload box only when there's no syllabus yet (or the student asked to replace it / it's mid-flight)
+  const uploaderOpen = courseLoaded && (!hasDeadlines || syllabusOpen || syllabusFile !== null || syllabusLoading || syllabusSuccess || syllabusError !== null)
+  const today = localToday()
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -241,8 +253,10 @@ export default function CourseDetailPage() {
       const data = await res.json()
       setCourse(data)
       setDeadlines(data.deadlines || [])
+      setCourseError(false)
     } catch (err) {
       console.error('Failed to load course:', err)
+      setCourseError(true)
     }
   }, [courseId])
 
@@ -423,7 +437,7 @@ export default function CourseDetailPage() {
       setSyllabusSuccess(true)
       posthog.capture('syllabus_uploaded', { course_id: courseId })
       setSyllabusFile(null)
-      setDeadlineTabTouched(false)
+      setSyllabusOpen(false)
       await loadCourse()
     } catch (err) {
       console.error('Failed to upload syllabus:', err)
@@ -680,28 +694,17 @@ export default function CourseDetailPage() {
           <span className="text-slate-700">{course?.name || 'Course'}</span>
         </nav>
 
-        <div className="mt-6 rounded-3xl bg-gradient-to-r from-[#E0EAFF] via-[#F3E8FF] to-[#E0F2FE] p-8 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+        <div className="mt-6 rounded-3xl bg-gradient-to-r from-[#E0EAFF] via-[#F3E8FF] to-[#E0F2FE] px-6 py-5 shadow-sm sm:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                 {course?.code || 'Course'}
               </p>
-              <h1 className="mt-2 text-3xl font-semibold text-slate-900">{course?.name || 'Course details'}</h1>
-              <p className="mt-2 text-sm text-slate-600">{course?.semester || 'Semester'}</p>
+              <h1 className="mt-1 text-2xl font-semibold text-slate-900 sm:text-3xl">{course?.name || 'Course details'}</h1>
+              <p className="mt-1 text-sm text-slate-600">{course?.semester || 'Semester'}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-white/70 px-5 py-3 text-sm text-slate-600 shadow-sm">
-                <span className="font-semibold text-slate-900">{remainingCount}</span> deadlines remaining
-              </div>
-              {deadlines.length > 0 && unsavedCount > 0 && (
-                <button
-                  onClick={saveAllToCalendar}
-                  disabled={bulkSaving}
-                  className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-[#5B8DEF] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
-                >
-                  {bulkSaving ? 'Saving...' : `Save All (${unsavedCount}) to Calendar`}
-                </button>
-              )}
+            <div className="rounded-2xl bg-white/70 px-4 py-2.5 text-sm text-slate-600 shadow-sm">
+              <span className="font-semibold text-slate-900">{remainingCount}</span> deadlines remaining
             </div>
           </div>
         </div>
@@ -732,8 +735,8 @@ export default function CourseDetailPage() {
           >
             <GraduationCap size={16} />
             Study Tools
-            {(course?.flashcard_sets?.length || 0) > 0 && (
-              <span className="ml-1 rounded-full bg-[#E0EAFF] px-2 py-0.5 text-xs text-[#5B8DEF]">{course?.flashcard_sets?.length}</span>
+            {studyCount > 0 && (
+              <span className="ml-1 rounded-full bg-[#E0EAFF] px-2 py-0.5 text-xs text-[#5B8DEF]">{studyCount}</span>
             )}
           </button>
           <button
@@ -762,180 +765,82 @@ export default function CourseDetailPage() {
           >
             <NotebookPen size={16} />
             Notes
+            {noteCount > 0 && (
+              <span className="ml-1 rounded-full bg-[#E0EAFF] px-2 py-0.5 text-xs text-[#5B8DEF]">{noteCount}</span>
+            )}
           </button>
         </div>
 
         {mainTab === 'deadlines' ? (
-          <div className="mt-6 grid gap-8 lg:grid-cols-[1.6fr_1fr]">
-            <section className="rounded-3xl bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">Deadline Timeline</h2>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="rounded-full bg-[#FFEDD5] px-3 py-1 font-semibold text-[#FB923C]">
-                    {unsavedCount} unsaved
-                  </span>
-                  <span className="rounded-full bg-[#DCFCE7] px-3 py-1 font-semibold text-[#4ADE80]">
-                    {savedCount} in calendar
-                  </span>
-                  {unsavedCount > 0 && (
+          <div className="mt-6 space-y-6">
+            {!courseLoaded ? (
+              <div className="rounded-3xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+                {courseError ? (
+                  <>
+                    <p>Couldn&apos;t load this course.</p>
                     <button
-                      onClick={saveAllToCalendar}
-                      disabled={bulkSaving}
-                      className="rounded-full bg-[#5B8DEF] px-3 py-1 font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
+                      onClick={() => { setCourseError(false); void loadCourse() }}
+                      className="mt-3 min-h-11 rounded-full border border-slate-200 px-4 text-sm text-slate-600 transition-all duration-300 hover:border-slate-300"
                     >
-                      {bulkSaving ? 'Saving...' : `Save All (${unsavedCount}) to Calendar`}
+                      Try again
                     </button>
-                  )}
-                </div>
+                  </>
+                ) : (
+                  'Loading…'
+                )}
               </div>
+            ) : (
+              <>
+                {showNextSteps && (
+                  <NextSteps
+                    deadlineCount={deadlines.length}
+                    showNotes={noteCount === 0}
+                    showStudy={studyCount === 0}
+                    onOpenNotes={() => setMainTab('notes')}
+                    onOpenStudy={() => setMainTab('study')}
+                  />
+                )}
 
-              {/* Deadline Sub-tabs */}
-              <div className="mt-4 flex rounded-full bg-slate-100 p-1">
-                <button
-                  onClick={() => {
-                    setDeadlineTabTouched(true)
-                    setDeadlineTab('unsaved')
-                  }}
-                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 ${
-                    deadlineTab === 'unsaved'
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  Unsaved ({unsavedCount})
-                </button>
-                <button
-                  onClick={() => {
-                    setDeadlineTabTouched(true)
-                    setDeadlineTab('saved')
-                  }}
-                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 ${
-                    deadlineTab === 'saved'
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  In Calendar ({savedCount})
-                </button>
-              </div>
+                {hasDeadlines && (
+                  <DeadlineList
+                    deadlines={deadlines}
+                    today={today}
+                    savingId={savingToCalendar}
+                    bulkSaving={bulkSaving}
+                    badgeClassFor={(type) => (typeStyles[type] || typeStyles.Deadline).badge}
+                    onToggleComplete={toggleComplete}
+                    onSave={saveToCalendar}
+                    onRemove={removeFromCalendar}
+                    onSaveAll={saveAllToCalendar}
+                  />
+                )}
 
-            <div className="mt-6 space-y-4 border-l-2 border-slate-200 pl-6">
-              {(deadlineTab === 'unsaved' ? unsavedDeadlines : savedDeadlines).map((deadline) => {
-                const style = typeStyles[deadline.type] || typeStyles.Deadline
-                return (
-                  <div key={deadline.id} className="relative">
-                    <div className="absolute -left-[29px] top-4 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-[#5B8DEF] text-[10px]">
-                      {style.icon}
-                    </div>
-                    <div
-                      className={`rounded-2xl border border-slate-100 bg-slate-50/60 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
-                        deadline.completed ? 'opacity-60' : ''
-                      }`}
-                    >
-                      <div className="flex items-start gap-4">
-                        <input
-                          type="checkbox"
-                          checked={deadline.completed || false}
-                          onChange={() => toggleComplete(deadline.id)}
-                          className="mt-1 h-5 w-5 rounded border-slate-300 text-[#5B8DEF] cursor-pointer"
-                        />
-                        <div className="flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${style.date}`}>
-                              {deadline.date}
-                            </span>
-                            {deadline.time && <span className="text-xs text-slate-500">{deadline.time}</span>}
-                            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${style.badge}`}>
-                              {deadline.type}
-                            </span>
-                          </div>
-                          <h3
-                            className={`mt-2 text-base font-semibold text-slate-900 ${
-                              deadline.completed ? 'line-through' : ''
-                            }`}
-                          >
-                            {deadline.title || 'Untitled deadline'}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {deadline.description || deadline.context || 'No description provided.'}
-                          </p>
-                          <div className="mt-3 flex items-center gap-2">
-                            {deadlineTab === 'unsaved' ? (
-                              <button
-                                onClick={() => saveToCalendar(deadline.id)}
-                                disabled={savingToCalendar === deadline.id}
-                                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF] hover:text-[#5B8DEF] disabled:opacity-50"
-                              >
-                                {savingToCalendar === deadline.id ? (
-                                  'Saving...'
-                                ) : (
-                                  <>
-                                    <Calendar size={12} /> Save to Calendar
-                                  </>
-                                )}
-                              </button>
-                            ) : (
-                              <>
-                                <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-3 py-1.5 text-xs font-semibold text-[#4ADE80]">
-                                  <Check size={12} /> In Calendar
-                                </span>
-                                <button
-                                  onClick={() => removeFromCalendar(deadline.id)}
-                                  disabled={savingToCalendar === deadline.id}
-                                  className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-400 transition-all duration-300 hover:border-red-300 hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
-                                >
-                                  {savingToCalendar === deadline.id ? 'Removing...' : 'Remove'}
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-              {(deadlineTab === 'unsaved' ? unsavedDeadlines : savedDeadlines).length === 0 && (
-                <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
-                  {deadlineTab === 'unsaved' ? (
-                    deadlines.length === 0 ? (
-                      <>
-                        <p>No deadlines yet.</p>
-                        <p className="mt-1 text-xs text-slate-400">Upload a syllabus to populate this timeline.</p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-[#4ADE80]">All deadlines saved!</p>
-                        <p className="mt-1 text-xs text-slate-400">Switch to &quot;In Calendar&quot; to view them.</p>
-                        <button
-                          onClick={() => {
-                            setDeadlineTabTouched(true)
-                            setDeadlineTab('saved')
-                          }}
-                          className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF] hover:text-[#5B8DEF]"
-                        >
-                          View In Calendar
-                        </button>
-                      </>
-                    )
-                  ) : (
-                    <>
-                      <p>No deadlines in calendar yet.</p>
-                      <p className="mt-1 text-xs text-slate-400">Save deadlines from the &quot;Unsaved&quot; tab.</p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </section>
-
-          <aside className="space-y-6">
+                {uploaderOpen ? (
+                  <div className={hasDeadlines ? '' : 'mx-auto max-w-xl'}>
             {/* Syllabus Upload */}
             <div className="rounded-3xl bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900">Upload syllabus</h3>
-              <p className="mt-2 text-sm text-slate-600">
-                Add a syllabus PDF or Word doc to extract deadlines automatically.
-              </p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    {hasSyllabus ? 'Replace or remove your syllabus' : 'Upload your syllabus'}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-600">
+                    {hasSyllabus
+                      ? 'Upload a corrected file to re-extract deadlines, or remove the syllabus along with the deadlines on this course.'
+                      : 'Add a syllabus PDF or Word doc and ClassMate will pull out every exam, assignment and due date.'}
+                  </p>
+                </div>
+                {hasDeadlines && !syllabusFile && !syllabusLoading && (
+                  <button
+                    type="button"
+                    onClick={() => setSyllabusOpen(false)}
+                    aria-label="Close"
+                    className="-mr-2 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
 
               <input
                 ref={syllabusInputRef}
@@ -1023,162 +928,52 @@ export default function CourseDetailPage() {
               )}
 
               {/* "Remove syllabus" — visible once deadlines have been extracted */}
-              {deadlines.length > 0 && !syllabusFile && (
+              {hasSyllabus && !syllabusFile && (
                 <button
                   type="button"
                   onClick={() => setConfirmTarget({
                     id: courseId || '',
                     type: 'syllabus',
-                    label: 'syllabus & all extracted deadlines',
-                    warning: 'This will permanently remove every deadline that was pulled from the syllabus. You can re-upload a corrected file afterwards.',
+                    label: 'syllabus & all deadlines on this course',
+                    warning: 'This permanently removes every deadline on this course, including any you added yourself or that synced from Canvas or iCal. Your notes, flashcards, quizzes and summaries are kept. You can re-upload a corrected syllabus afterwards.',
                   })}
-                  className="mt-4 w-full rounded-full border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-500 transition-colors hover:bg-red-50"
+                  className="mt-4 min-h-11 w-full rounded-full px-4 text-xs font-semibold text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
                 >
                   Remove syllabus & deadlines
                 </button>
               )}
             </div>
 
-            {/* Flashcard Upload */}
-            <div className="rounded-3xl bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900">Generate flashcards</h3>
-              <p className="mt-2 text-sm text-slate-600">
-                Upload notes or study materials to create a flashcard deck.
-              </p>
-
-              <input
-                ref={studyInputRef}
-                type="file"
-                accept=".pdf,.txt"
-                onChange={(e) => setStudyFile(e.target.files?.[0] || null)}
-                className="hidden"
-                id="study-upload"
-              />
-
-              {!studyFile ? (
-                <label
-                  htmlFor="study-upload"
-                  className={`mt-4 flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition-all duration-300 hover:border-[#5B8DEF] hover:bg-[#EEF2FF]/30 ${studyDragOver ? 'border-[#5B8DEF] bg-[#EEF2FF]/50 scale-[1.02]' : 'border-slate-200 bg-slate-50/50'}`}
-                  onDragEnter={onStudyDragEnter}
-                  onDragLeave={onStudyDragLeave}
-                  onDragOver={preventDefault}
-                  onDrop={(e) => handleStudyDrop(e, ['pdf', 'txt'])}
-                >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm">
-                    <svg viewBox="0 0 24 24" className="h-6 w-6 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.6">
-                      <path d="M12 5v8M8 9l4-4 4 4" />
-                      <rect x="4" y="4" width="16" height="16" rx="3" />
-                    </svg>
-                  </div>
-                  <p className="mt-4 text-sm font-medium text-slate-700">
-                    {studyDragOver ? 'Drop it here!' : 'Drop or click to upload study material'}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">PDF or TXT, max 10MB</p>
-                </label>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#E0EAFF] text-[#5B8DEF]">
-                      <BookMarked size={20} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">{studyFile.name}</p>
-                      <p className="text-xs text-slate-500">{formatFileSize(studyFile.size)}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setStudyFile(null)
-                        if (studyInputRef.current) studyInputRef.current.value = ''
-                      }}
-                      className="rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
-                    >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 6L6 18M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <button
-                onClick={handleFlashcardUpload}
-                disabled={!studyFile || flashcardLoading}
-                className="mt-4 w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {flashcardLoading ? 'Generating flashcards...' : 'Generate Flashcards'}
-              </button>
-
-              {flashcardLoading && (
-                <div className="mt-4 space-y-2">
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full animate-[loading_1.5s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA]" style={{ width: '70%' }} />
-                  </div>
-                  <p className="text-center text-xs text-slate-500">Generating flashcards with AI...</p>
-                </div>
-              )}
-
-              {flashcardSuccess && (
-                <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-[#ECFDF3] p-3 text-sm font-semibold text-[#4ADE80]">
-                  <Check size={16} />
-                  Flashcards generated!
-                </div>
-              )}
-
-              {flashcardError && (
-                <div className="mt-4 rounded-2xl bg-[#FEE2E2] p-3 text-center text-sm text-[#FB7185]">
-                  {flashcardError}
-                  <button onClick={() => setFlashcardError(null)} className="ml-2 underline">Dismiss</button>
-                </div>
-              )}
-            </div>
-
-            {/* Flashcard Decks */}
-            <div className="rounded-3xl bg-white p-6 shadow-sm">
-              <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Available decks</h4>
-              <div className="mt-4 grid gap-3">
-                {(course?.flashcard_sets || []).length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
-                    No flashcard sets yet.
                   </div>
                 ) : (
-                  course?.flashcard_sets?.map((set) => (
-                    <div key={set.id} className="group relative flex items-center rounded-2xl border border-transparent bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-[#5B8DEF]/50 hover:shadow-lg">
-                      <Link
-                        href={`/flashcards?set=${set.id}`}
-                        className="flex flex-1 items-center gap-3 px-4 py-4 min-w-0"
-                      >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#EEF2FF] text-[#5B8DEF]">
-                          <Layers size={20} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-slate-900">{set.name}</div>
-                          <div className="text-xs text-slate-500">{set.card_count} cards</div>
-                        </div>
-                        <svg viewBox="0 0 24 24" className="ml-auto h-4 w-4 shrink-0 text-slate-300 group-hover:text-[#5B8DEF] transition-colors" fill="none" stroke="currentColor" strokeWidth="1.8">
-                          <path d="M9 5l7 7-7 7" />
-                        </svg>
-                      </Link>
-                      {/* delete trigger — stops the Link click */}
+                  hasDeadlines && (
+                    <div className="flex items-center gap-3 rounded-2xl bg-white px-4 py-2 shadow-sm">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${hasSyllabus ? 'bg-[#DCFCE7] text-[#22A55A]' : 'bg-slate-100 text-slate-400'}`}>
+                        {hasSyllabus ? <Check size={15} strokeWidth={2.75} /> : <FileText size={15} />}
+                      </span>
+                      <p className="min-w-0 flex-1 text-sm text-slate-500">
+                        {hasSyllabus ? (
+                          <>
+                            <span className="font-medium text-slate-800">Syllabus parsed</span> · {deadlines.length} deadline{deadlines.length === 1 ? '' : 's'}
+                          </>
+                        ) : (
+                          <>
+                            <span className="font-medium text-slate-800">Have a syllabus?</span> Add it to pull in every exam and assignment.
+                          </>
+                        )}
+                      </p>
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault(); e.stopPropagation()
-                          setConfirmTarget({ id: set.id, type: 'flashcard_set', label: set.name, warning: 'This removes the deck and all its cards permanently.' })
-                        }}
-                        className="mr-2 rounded-full p-1.5 text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
-                        aria-label="Delete flashcard set"
+                        onClick={() => setSyllabusOpen(true)}
+                        className="min-h-11 shrink-0 rounded-full px-3 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
                       >
-                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
-                        </svg>
+                        {hasSyllabus ? 'Replace or remove' : 'Upload syllabus'}
                       </button>
                     </div>
-                  ))
+                  )
                 )}
-              </div>
-            </div>
-          </aside>
-        </div>
+              </>
+            )}
+          </div>
         ) : mainTab === 'study' ? (
           /* Study Tools Tab */
           <div className="mt-6 rounded-3xl bg-white p-8 shadow-sm">
@@ -1449,7 +1244,7 @@ export default function CourseDetailPage() {
           </div>
         ) : mainTab === 'notes' ? (
           /* Notes Tab — mounted only while open so leaving the tab flushes any pending autosave */
-          courseId ? <CourseNotes courseId={courseId} courseName={course?.code || course?.name} onStudyToolsCreated={loadCourse} /> : null
+          courseId ? <CourseNotes courseId={courseId} courseName={course?.code || course?.name} onStudyToolsCreated={loadCourse} onCountChange={setLiveNoteCount} /> : null
         ) : (
           /* Course Info Tab */
           <div className="mt-6">

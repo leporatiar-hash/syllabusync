@@ -3655,7 +3655,8 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
     - `summaries`: AI-generated study summaries
     - `quizzes`: AI-generated multiple-choice quizzes
 
-    Each deadline also includes a `saved_to_calendar` flag.
+    Also `note_count` (how many notes the student has written for this course; the notes themselves come from
+    GET /courses/{course_id}/notes). Each deadline also includes a `saved_to_calendar` flag.
     Returns 404 if the course does not exist or belongs to a different user.
     """
     db = SessionLocal()
@@ -3682,6 +3683,7 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
             "end_date": str(course.end_date) if course.end_date else None,
             "course_info": course.course_info,
             "color": course.color,
+            "note_count": db.query(Note).filter(Note.course_id == course_id, Note.user_id == user_id).count(),
             "deadlines": [
                 {
                     "id": d.id,

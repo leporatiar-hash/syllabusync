@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node lib/foundingPrompt.test.ts && node lib/valuePrompt.test.ts && node lib/noteMarkdown.test.ts && node lib/noteDoc.test.ts"
+    "test": "node lib/foundingPrompt.test.ts && node lib/valuePrompt.test.ts && node lib/noteMarkdown.test.ts && node lib/noteDoc.test.ts && node lib/deadlineGroups.test.ts"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.38.0",

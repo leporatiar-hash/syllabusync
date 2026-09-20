@@ -594,6 +594,20 @@ def test_note_migration():
     check("and the table works for new writes", client.post(f"/courses/{course}/notes", json={"content": "new", "content_json": {"type": "doc", "content": []}}, headers=h).status_code == 200)
 
 
+def test_course_detail_note_count():
+    ha, course_a, uid_a = make_user_and_course("uma")
+    hb, course_b, uid_b = make_user_and_course("vic")
+    check("a course with no notes reports note_count 0", client.get(f"/courses/{course_a}", headers=ha).json()["note_count"] == 0)
+    for _ in range(3):
+        client.post(f"/courses/{course_a}/notes", json={"content": "x"}, headers=ha)
+    add_note(uid_b, course_b, "vic's", "other user's note in another course")
+    check("note_count counts this course's notes", client.get(f"/courses/{course_a}", headers=ha).json()["note_count"] == 3)
+    check("...and never another course's or another user's", client.get(f"/courses/{course_b}", headers=hb).json()["note_count"] == 1)
+    first = client.get(f"/courses/{course_a}/notes", headers=ha).json()[0]["id"]
+    client.delete(f"/notes/{first}", headers=ha)
+    check("note_count follows deletes", client.get(f"/courses/{course_a}", headers=ha).json()["note_count"] == 2)
+
+
 if __name__ == "__main__":
     try:
         test_crud_happy_path()
@@ -608,6 +622,7 @@ if __name__ == "__main__":
         test_chat_notes_generation_helpers()
         test_note_document_field()
         test_note_migration()
+        test_course_detail_note_count()
         print("\nAll notes tests passed.")
     finally:
         try:
