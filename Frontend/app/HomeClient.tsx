@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar, Share2, Copy, Check, X, ExternalLink } from 'lucide-react'
+import { BookOpen, HelpCircle, FileText, Target, BookMarked, ClipboardList, Calendar, Share2, Copy, Check, X, ChevronRight, RefreshCw } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
 import { useSubscription } from '../hooks/useSubscription'
@@ -14,6 +14,7 @@ import FeatureDiscoveryPanel from '../components/FeatureDiscoveryPanel'
 import ValuePropPrompt from '../components/ValuePropPrompt'
 import { decideFoundingPrompt } from '../lib/foundingPrompt'
 import { shouldShowValuePrompt } from '../lib/valuePrompt'
+import { addDays, formatDeadlineDate, localToday } from '../lib/deadlineGroups'
 
 const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
 const ICalConnectModal = dynamic(() => import('../components/ICalConnectModal'), { ssr: false })
@@ -37,43 +38,6 @@ const typeStyles: Record<string, { bg: string; text: string; icon: ReactNode }> 
   Homework: { bg: 'bg-[#DCFCE7]', text: 'text-[#4ADE80]', icon: <BookMarked size={16} /> },
   Admin: { bg: 'bg-slate-100', text: 'text-slate-600', icon: <ClipboardList size={16} /> },
 }
-
-const features = [
-  {
-    title: 'Parse Syllabi',
-    description: 'Upload and extract deadlines in seconds with AI-powered parsing.',
-    href: '/courses',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M8 7h8M8 11h8M8 15h5" />
-        <rect x="5" y="3" width="14" height="18" rx="3" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Study Smart',
-    description: 'Generate flashcards from your materials and review efficiently.',
-    href: '/study-studio',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M4 7h12a3 3 0 0 1 3 3v7" />
-        <path d="M7 4h10a3 3 0 0 1 3 3v10" />
-        <rect x="4" y="7" width="12" height="12" rx="3" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Stay Organized',
-    description: 'See all deadlines at a glance with a calendar view.',
-    href: '/calendar',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <rect x="3" y="4" width="18" height="17" rx="3" />
-        <path d="M8 2v4M16 2v4M3 10h18" />
-      </svg>
-    ),
-  },
-]
 
 const gettingStartedItems = [
   {
@@ -99,9 +63,10 @@ const gettingStartedItems = [
   },
 ]
 
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr + 'T00:00:00')
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+// Types arrive in mixed case ("assignment", "Admin"); normalize so badges and styles are consistent.
+function normalizeType(type: string): string {
+  if (!type) return 'Admin'
+  return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase()
 }
 
 export default function HomeClient() {
@@ -119,6 +84,7 @@ export default function HomeClient() {
     dismissUpgradePrompt,
   } = useSubscription()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
+  const [dueThisWeek, setDueThisWeek] = useState(0)
   const [loading, setLoading] = useState(true)
   const [lmsConnections, setLmsConnections] = useState<any[]>([])
   const [lmsLoaded, setLmsLoaded] = useState(false)
@@ -170,12 +136,13 @@ export default function HomeClient() {
         const res = await fetchWithAuth(`${API_URL}/calendar-entries`, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
-          const today = new Date().toISOString().split('T')[0]
+          const today = localToday()
+          const weekEnd = addDays(today, 6)
           const upcoming = data
             .filter((d: Deadline) => d.date >= today)
             .sort((a: Deadline, b: Deadline) => a.date.localeCompare(b.date))
-            .slice(0, 5)
-          setDeadlines(upcoming)
+          setDueThisWeek(upcoming.filter((d: Deadline) => d.date <= weekEnd).length)
+          setDeadlines(upcoming.slice(0, 8))
         }
       } catch (err) {
         console.error('Failed to load deadlines:', err)
@@ -282,6 +249,22 @@ export default function HomeClient() {
 
   const referralLink = referralCode ? `https://tryclassmate.com/signup?ref=${referralCode}` : ''
 
+  const hasConnectedLms = lmsConnections.length > 0
+  const setupDone: Record<string, boolean> = {
+    connect_lms: hasConnectedLms,
+    add_courses: courses.length > 0,
+    upload_syllabus: courses.some((c) => c.course_info !== null && c.course_info !== undefined),
+  }
+  const setupCompleteCount = gettingStartedItems.filter((item) => setupDone[item.key]).length
+  const setupComplete = setupCompleteCount === gettingStartedItems.length
+
+  // Retire the checklist for good once every step is done (only after LMS state has loaded, so a
+  // slow /lms/connections response can't count as "not connected" or vice versa).
+  useEffect(() => {
+    if (showGettingStarted && lmsLoaded && setupComplete) dismissGettingStarted()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGettingStarted, lmsLoaded, setupComplete])
+
   const showFeaturePanel = !!(
     featureUsage &&
     !featureUsage.panel_hidden &&
@@ -355,242 +338,242 @@ export default function HomeClient() {
     )
   }
 
+
+  const today = localToday()
+  const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  const providers = lmsConnections.map((c) => (c.provider === 'canvas' ? 'Canvas' : 'iCal')).join(' & ')
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
-
-      {!isPro && (
-        <div className="mx-auto max-w-6xl px-4 pt-8">
-          {foundingPromptDecision.show ? (
-            <FoundingMemberPrompt reason={foundingPromptDecision.reason} onDismiss={dismissUpgradePrompt} />
-          ) : (
-            <UpgradePrompt variant="promo" />
-          )}
-        </div>
-      )}
-
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-16 md:flex-row md:items-start md:justify-between">
-        <div className="flex-1 space-y-4">
-          <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
-            Welcome back!
-          </h1>
-          <p className="mt-4 text-lg text-slate-600">
-            A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-4">
-            <Link
-              href="/courses"
-              className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-8 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-            >
-              My Courses
-            </Link>
-            <Link
-              href="/calendar"
-              className="rounded-full border border-white/70 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-            >
-              View Calendar
-            </Link>
-          </div>
-        </div>
-
-        {/* Upcoming Deadlines Panel */}
-        <div className="w-full max-w-md rounded-[28px] bg-white/70 p-6 shadow-xl backdrop-blur">
-          <div className="flex items-center justify-between text-sm text-slate-500">
-            <span className="font-semibold text-slate-700">Upcoming deadlines</span>
-            {deadlines.length > 0 && (
-              <Link href="/calendar" className="text-xs text-[#5B8DEF] hover:underline">
-                View all →
-              </Link>
+      <div className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        {!isPro && (
+          <div className="mb-8">
+            {foundingPromptDecision.show ? (
+              <FoundingMemberPrompt reason={foundingPromptDecision.reason} onDismiss={dismissUpgradePrompt} />
+            ) : (
+              <UpgradePrompt variant="promo" />
             )}
           </div>
+        )}
 
-          <div className="mt-4 space-y-3">
+        {/* Header */}
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-slate-500">{todayLabel}</p>
+            <h1 className="mt-1 text-3xl font-semibold text-slate-900 md:text-4xl">Welcome back</h1>
+            {!loading && (
+              <p className="mt-2 text-slate-600">
+                {dueThisWeek === 0
+                  ? 'Nothing due in the next 7 days.'
+                  : `You have ${dueThisWeek} ${dueThisWeek === 1 ? 'thing' : 'things'} due in the next 7 days.`}
+              </p>
+            )}
+          </div>
+          {lmsLoaded && hasConnectedLms && (
+            <Link
+              href="/settings"
+              className="inline-flex items-center gap-2 self-start rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-white sm:self-auto"
+              title="Manage connections"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              {providers} synced
+            </Link>
+          )}
+        </header>
+
+        {showValuePrompt && (
+          <div className="mt-6">
+            <ValuePropPrompt onSubmit={submitValuePrompt} onSkip={skipValuePrompt} />
+          </div>
+        )}
+
+        <div className="mt-8 grid gap-6 lg:grid-cols-3">
+          {/* Upcoming deadlines — the main thing students come here for */}
+          <section className="rounded-2xl border border-white bg-white p-6 shadow-sm lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900">Upcoming deadlines</h2>
+              {deadlines.length > 0 && (
+                <Link href="/calendar" className="text-sm font-medium text-[#5B8DEF] hover:underline">
+                  View calendar →
+                </Link>
+              )}
+            </div>
+
             {loading ? (
-              <div className="flex h-32 items-center justify-center text-sm text-slate-400">
-                Loading...
-              </div>
+              <div className="flex h-48 items-center justify-center text-sm text-slate-400">Loading...</div>
             ) : deadlines.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white/50 p-8 text-center">
+              <div className="mt-4 flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 p-10 text-center">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
                   <Calendar size={24} />
                 </div>
                 <p className="mt-3 text-sm font-semibold text-slate-700">No upcoming deadlines yet</p>
-                <p className="mt-1 text-xs text-slate-500">Upload a syllabus to get started!</p>
+                <p className="mt-1 text-xs text-slate-500">Upload a syllabus and we&apos;ll pull out every due date.</p>
                 <Link
                   href="/courses"
                   className="mt-4 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
                 >
-                  Add a Course
+                  Go to My Courses
                 </Link>
               </div>
             ) : (
-              deadlines.map((deadline) => {
-                const style = typeStyles[deadline.type] || typeStyles.Admin
-                return (
-                  <div
-                    key={deadline.id}
-                    className="flex items-center justify-between rounded-2xl border border-white/80 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={style.text}>{style.icon}</span>
-                      <div>
-                        <div className="font-semibold">{deadline.title}</div>
-                        <div className="text-xs text-slate-500">
-                          {deadline.course_code || deadline.course_name} • {formatDate(deadline.date)}
-                          {deadline.time && ` at ${deadline.time}`}
-                        </div>
+              <ul className="mt-3 divide-y divide-slate-100">
+                {deadlines.map((deadline) => {
+                  const type = normalizeType(deadline.type)
+                  const style = typeStyles[type] || typeStyles.Admin
+                  const dateLabel = formatDeadlineDate(deadline.date, today, 'en-US')
+                  const soon = dateLabel === 'Today' || dateLabel === 'Tomorrow'
+                  return (
+                    <li key={deadline.id} className="flex items-center gap-4 py-3">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${style.bg} ${style.text}`}>
+                        {style.icon}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-800" title={deadline.title}>
+                          {deadline.title}
+                        </p>
+                        <p className="truncate text-xs text-slate-500">
+                          {deadline.course_code || deadline.course_name}
+                          <span className="hidden sm:inline"> · {type}</span>
+                        </p>
                       </div>
-                    </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${style.bg} ${style.text}`}>
-                      {deadline.type}
-                    </span>
-                  </div>
-                )
-              })
+                      <div className="shrink-0 text-right">
+                        <p className={`text-sm ${soon ? 'font-semibold text-[#FB7185]' : 'font-medium text-slate-700'}`}>
+                          {dateLabel}
+                        </p>
+                        {deadline.time && <p className="text-xs text-slate-400">{deadline.time}</p>}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
             )}
-          </div>
-        </div>
-      </section>
+          </section>
 
-      {/* Get more out of your courses — feature discovery */}
-      {showFeaturePanel && (
-        <FeatureDiscoveryPanel latestCourseId={courses[0].id} onHide={hideFeaturePanel} />
-      )}
-
-      {/* Getting Started Checklist */}
-      {showGettingStarted && (
-        <section className="mx-auto max-w-6xl px-4 pb-6">
-          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">Getting Started</h3>
-                <p className="mt-0.5 text-sm text-slate-500">Set up ClassMate in a few quick steps.</p>
-              </div>
-              <button
-                onClick={dismissGettingStarted}
-                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Dismiss"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {(() => {
-              const hasConnectedLms = lmsConnections.length > 0
-              const hasAddedCourse = courses.length > 0
-              const hasSyllabus = courses.some((c) => c.course_info !== null && c.course_info !== undefined)
-              const stepDone: Record<string, boolean> = {
-                connect_oaks: hasConnectedLms,
-                add_courses: hasAddedCourse,
-                upload_syllabus: hasSyllabus,
-              }
-              if (hasConnectedLms && hasAddedCourse && hasSyllabus) {
-                dismissGettingStarted()
-                return null
-              }
-              return (
-                <ul className="mt-4 divide-y divide-slate-100">
+          {/* Sidebar */}
+          <aside className="space-y-6">
+            {showGettingStarted && lmsLoaded && !setupComplete && (
+              <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900">Finish setting up</h2>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {setupCompleteCount} of {gettingStartedItems.length} done
+                    </p>
+                  </div>
+                  <button
+                    onClick={dismissGettingStarted}
+                    className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    aria-label="Dismiss"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] transition-all"
+                    style={{ width: `${(setupCompleteCount / gettingStartedItems.length) * 100}%` }}
+                  />
+                </div>
+                <ul className="mt-3 -mx-2">
                   {gettingStartedItems.map((item) => {
-                    const done = stepDone[item.key]
+                    const done = setupDone[item.key]
+                    const icon = done ? (
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500">
+                        <Check size={12} strokeWidth={3} className="text-white" />
+                      </span>
+                    ) : (
+                      <span className="h-5 w-5 shrink-0 rounded-full border-2 border-slate-300" />
+                    )
+                    if (done) {
+                      return (
+                        <li key={item.key} className="flex items-center gap-3 px-2 py-2">
+                          {icon}
+                          <span className="text-sm text-slate-400 line-through">{item.label}</span>
+                        </li>
+                      )
+                    }
                     return (
-                      <li key={item.key} className="flex items-center justify-between gap-4 py-3">
-                        <div className="flex items-start gap-3">
-                          {done ? (
-                            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500">
-                              <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            </div>
-                          ) : (
-                            <div className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 border-slate-300" />
-                          )}
-                          <div>
-                            <p className={`text-sm font-medium ${done ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{item.label}</p>
-                            <p className="text-xs text-slate-500">{item.description}</p>
-                          </div>
-                        </div>
-                        {!done && (
-                          <Link
-                            href={item.href}
-                            className="shrink-0 flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
-                          >
-                            {item.cta}
-                            <ExternalLink size={11} />
-                          </Link>
-                        )}
+                      <li key={item.key}>
+                        <Link
+                          href={item.href}
+                          className="group flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-slate-50"
+                        >
+                          {icon}
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-slate-800">{item.label}</span>
+                            <span className="block text-xs text-slate-500">{item.description}</span>
+                          </span>
+                          <ChevronRight size={16} className="shrink-0 text-slate-300 group-hover:text-slate-500" />
+                        </Link>
                       </li>
                     )
                   })}
                 </ul>
-              )
-            })()}
-          </div>
-        </section>
-      )}
+              </div>
+            )}
 
-      {/* LMS Connect Banner — only shown when no connections yet */}
-      {lmsLoaded && lmsConnections.length === 0 && (
-        <section className="mx-auto max-w-6xl px-4">
-          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
-            <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
-                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
-                  </svg>
+            {lmsLoaded && !hasConnectedLms && (
+              <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
+                    <RefreshCw size={16} />
+                  </span>
+                  <h2 className="text-sm font-semibold text-slate-900">Sync your school calendar</h2>
                 </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Sync your school calendar</h3>
-                  <p className="text-sm text-slate-500">
-                    Connect your Canvas or iCal feed to automatically import all your assignments and due dates.
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Tip: Upload your syllabi first so deadlines get matched to your courses.
-                  </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Import assignments from Canvas or an iCal feed. Upload syllabi first so deadlines match your courses.
+                </p>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => setShowCanvasModal(true)}
+                    className="flex-1 rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                  >
+                    Connect Canvas
+                  </button>
+                  <button
+                    onClick={() => setShowICalModal(true)}
+                    className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    iCal feed
+                  </button>
                 </div>
               </div>
-              <div className="flex shrink-0 gap-3">
-                <button
-                  onClick={() => setShowCanvasModal(true)}
-                  className="rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-                >
-                  Connect Canvas
-                </button>
-                <button
-                  onClick={() => setShowICalModal(true)}
-                  className="rounded-full border border-white/70 bg-white/70 px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
-                >
-                  iCal Feed
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
+            )}
 
-      {/* LMS Connected Banner — shown when connections exist */}
-      {lmsLoaded && lmsConnections.length > 0 && (
-        <section className="mx-auto max-w-6xl px-4">
-          <div className="rounded-2xl border border-white bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green-50 text-green-500">
-                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Calendar synced</h3>
-                  <p className="text-sm text-slate-500">
-                    {lmsConnections.map(c => c.provider === 'canvas' ? 'Canvas' : 'iCal').join(' & ')} connected.
-                    Your deadlines are up to date.{' '}
-                    <Link href="/settings" className="font-medium text-[#5B8DEF] hover:underline">Manage connections</Link>
-                  </p>
+            {showFeaturePanel && (
+              <FeatureDiscoveryPanel latestCourseId={courses[0].id} onHide={hideFeaturePanel} />
+            )}
+
+            {referralCode && (
+              <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                    <Share2 size={16} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-sm font-semibold text-slate-900">Share with friends</h2>
+                    {referralCount > 0 && <p className="text-xs text-slate-500">{referralCount} joined</p>}
+                  </div>
+                  <button
+                    onClick={copyLink}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50"
+                    title="Copy link"
+                    aria-label="Copy link"
+                  >
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                  <button
+                    onClick={shareLink}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                  >
+                    Share
+                  </button>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-      )}
+            )}
+          </aside>
+        </div>
+      </div>
 
       {showCanvasModal && (
         <CanvasConnectModal
@@ -604,71 +587,6 @@ export default function HomeClient() {
           onSuccess={() => { setShowICalModal(false); loadLmsConnections() }}
         />
       )}
-
-      {/* Share ClassMate Card - Compact */}
-      {referralCode && (
-        <section className="mx-auto max-w-6xl px-4 pt-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                  <Share2 size={16} />
-                </div>
-                <div>
-                  <span className="text-sm font-medium text-slate-700">Share with friends</span>
-                  {referralCount > 0 && (
-                    <span className="ml-2 text-xs text-slate-500">
-                      {referralCount} joined
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <div className="hidden sm:flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500">
-                  <span className="max-w-[140px] truncate">{referralLink}</span>
-                </div>
-                <button
-                  onClick={copyLink}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50"
-                  title="Copy link"
-                >
-                  {copied ? <Check size={14} /> : <Copy size={14} />}
-                </button>
-                <button
-                  onClick={shareLink}
-                  className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
-                >
-                  Share
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {showValuePrompt && (
-        <section className="mx-auto max-w-6xl px-4 pt-6">
-          <ValuePropPrompt onSubmit={submitValuePrompt} onSkip={skipValuePrompt} />
-        </section>
-      )}
-
-      <section className="mx-auto max-w-6xl px-4 py-16">
-        <div className="grid gap-6 md:grid-cols-3">
-          {features.map((feature) => (
-            <Link
-              key={feature.title}
-              href={feature.href}
-              className="group rounded-2xl border border-white bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-            >
-              <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
-                {feature.icon}
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900">{feature.title}</h3>
-              <p className="mt-2 text-sm text-slate-600">{feature.description}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
     </main>
   )
 }
