@@ -72,12 +72,12 @@ function ChatContent() {
 
   if (authLoading || !user) return null
 
-  // Chat fills the full viewport below the sticky global header (h-16 = 64px)
+  // Chat fills the full viewport below the sticky global header (h-16 = 64px) and, on phones, above the tab bar
   // edge-to-edge, no page padding/card — Library keeps the normal padded page
   // layout since it's a scrollable grid, not an app surface.
   if (activeTab === 'chat') {
     return (
-      <div className="h-[calc(100vh-64px)]">
+      <div className="h-[calc(100dvh-64px-var(--tabbar-h))] md:h-[calc(100vh-64px)]">
         <ChatTab
           onViewLibrary={() => setActiveTab('library')}
           triggerProactive={!promptParam}

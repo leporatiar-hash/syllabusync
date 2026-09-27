@@ -3,6 +3,15 @@
 :root {
   --background: #fafafa;
   --foreground: #0f172a;
+  /* Height of the mobile bottom tab bar (components/MobileTabBar); 0 on desktop where it's hidden.
+     Full-viewport screens (chat, calendar pager) subtract it so nothing sits under the bar. */
+  --tabbar-h: calc(3.5rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --tabbar-h: 0px;
+  }
 }
 
 @theme inline {

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Nav from './Nav'
+import MobileTabBar from './MobileTabBar'
 import FeedbackButton from './FeedbackButton'
 import TalkToClassMateButton from './TalkToClassMateButton'
 import AuthDebug from './AuthDebug'
@@ -27,12 +28,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-white/60 bg-white/70 backdrop-blur">
+      {/* Solid on phones so scrolled content doesn't show through; frosted glass on desktop */}
+      <header className="sticky top-0 z-50 w-full border-b border-slate-200/70 bg-white md:border-white/60 md:bg-white/70 md:backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight shrink-0">
             <img src="/brand/logo.svg" alt="" className="h-8 w-8 shrink-0" />
-            {/* Hidden on mobile to prevent overlap with nav */}
-            <span className="text-[#7BB7FF] hidden md:inline">ClassMate</span>
+            <span className="text-[#7BB7FF]">ClassMate</span>
           </Link>
           <Nav />
         </div>
@@ -60,6 +61,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           </div>
         )}
       </footer>
+      <MobileTabBar />
     </>
   )
 }

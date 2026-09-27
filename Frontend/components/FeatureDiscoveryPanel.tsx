@@ -45,7 +45,7 @@ export default function FeatureDiscoveryPanel({ latestCourseId, onHide }: Props)
   ]
 
   return (
-    <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-white bg-white p-4 shadow-sm md:p-5">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-900">Try these</h2>
         <button

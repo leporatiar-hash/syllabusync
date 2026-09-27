@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useRef, useCallback, ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState, useRef, useCallback, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X, ChevronUp, ChevronDown } from 'lucide-react'
@@ -100,8 +100,14 @@ export default function CalendarPage() {
   const [selectedFullDate, setSelectedFullDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [monthRange, setMonthRange] = useState<{ start: number; end: number }>({ start: -3, end: 9 })
   const todayMonthRef = useRef<HTMLDivElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const hasScrolledToToday = useRef(false)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  // The pager element as state too, so effects re-run whenever a new pager mounts (the loading
+  // skeleton swaps it out), instead of staying bound to a detached one.
+  const [pagerEl, setPagerEl] = useState<HTMLDivElement | null>(null)
+  const attachPager = useCallback((el: HTMLDivElement | null) => {
+    scrollContainerRef.current = el
+    setPagerEl(el)
+  }, [])
   const topSentinelRef = useRef<HTMLDivElement>(null)
   const bottomSentinelRef = useRef<HTMLDivElement>(null)
 
@@ -238,17 +244,23 @@ export default function CalendarPage() {
     return filteredDeadlines.filter((d) => d.date === dateStr)
   }, [filteredDeadlines])
 
-  // Scroll to today's month on mount
-  useEffect(() => {
-    if (!hasScrolledToToday.current && todayMonthRef.current && scrollContainerRef.current) {
-      todayMonthRef.current.scrollIntoView({ block: 'start' })
-      hasScrolledToToday.current = true
-    }
-  })
+  // Scroll the pager (not the window — scrollIntoView would also scroll the page and tuck the
+  // month title under the sticky header) so today's month is the visible page.
+  const scrollPagerToToday = (behavior: ScrollBehavior = 'auto') => {
+    const container = scrollContainerRef.current
+    const month = todayMonthRef.current
+    if (container && month) container.scrollTo({ top: month.offsetTop, behavior })
+  }
+
+  // Open each newly mounted pager on today's month
+  useLayoutEffect(() => {
+    if (pagerEl) scrollPagerToToday()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagerEl])
 
   // IntersectionObserver to load more months
   useEffect(() => {
-    const container = scrollContainerRef.current
+    const container = pagerEl
     if (!container) return
 
     const observer = new IntersectionObserver(
@@ -269,7 +281,7 @@ export default function CalendarPage() {
     if (bottomSentinelRef.current) observer.observe(bottomSentinelRef.current)
 
     return () => observer.disconnect()
-  }, [monthRange])
+  }, [monthRange, pagerEl])
 
   const upcomingWeek = useMemo(() => {
     const today = new Date()
@@ -714,11 +726,11 @@ export default function CalendarPage() {
   }
 
   return (
-    <main className="min-h-screen px-2 md:px-4 pb-16 pt-4 md:pt-6">
+    <main className="min-h-screen px-2 md:px-4 pb-16 md:pt-6">
       <div className="mx-auto w-full max-w-[1600px]">
-        {/* Pro Promotion Banner */}
+        {/* Pro Promotion Banner (desktop — on phones the month pager fills the screen) */}
         {!isPro && (
-          <div className="mb-4">
+          <div className="mb-4 hidden md:block">
             <UpgradePrompt variant="promo" />
           </div>
         )}
@@ -805,11 +817,20 @@ export default function CalendarPage() {
         </div>
 
         {/* ── Mobile: iOS-style month pager (one month per screen, scroll-snap) ── */}
-        <div className="md:hidden flex flex-col" style={{ height: 'calc(100dvh - 64px)' }}>
+        <div className="md:hidden flex flex-col" style={{ height: 'calc(100dvh - 64px - var(--tabbar-h))' }}>
+          {/* Weekday header — stays put while months scroll beneath it */}
+          <div className="grid h-6 shrink-0 grid-cols-7 items-center border-b border-current/10 px-4">
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+              <div key={i} className="text-center text-[11px] font-semibold text-slate-400">
+                {day}
+              </div>
+            ))}
+          </div>
+
           {/* Scroll-snap container — each child is one full-screen month page */}
           <div
-            ref={scrollContainerRef}
-            className="flex-1 overflow-y-auto overscroll-contain"
+            ref={attachPager}
+            className="relative flex-1 overflow-y-auto overscroll-contain"
             style={{
               scrollSnapType: 'y mandatory',
               WebkitOverflowScrolling: 'touch',
@@ -830,7 +851,8 @@ export default function CalendarPage() {
                   ref={isCurrentMonth ? todayMonthRef : undefined}
                   className="flex flex-col px-4"
                   style={{
-                    height: 'calc(100dvh - 64px)',
+                    // Pager height minus the 24px (h-6) weekday header
+                    height: 'calc(100dvh - 64px - var(--tabbar-h) - 1.5rem)',
                     scrollSnapAlign: 'start',
                     scrollSnapStop: 'always',
                   }}
@@ -839,11 +861,8 @@ export default function CalendarPage() {
                   <div className="flex items-center justify-between pt-3 pb-2">
                     <button
                       onClick={() => {
-                        hasScrolledToToday.current = false
                         setSelectedFullDate(todayStr)
-                        setTimeout(() => {
-                          todayMonthRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-                        }, 50)
+                        setTimeout(() => scrollPagerToToday('smooth'), 50)
                       }}
                       className="rounded-full px-3 py-1 text-xs font-semibold text-[#5B8DEF] border border-[#5B8DEF]/30 active:bg-[#5B8DEF]/10 transition-colors"
                     >
@@ -871,16 +890,9 @@ export default function CalendarPage() {
                     </div>
                   </div>
 
-                  {/* Weekday headers */}
-                  <div className="grid grid-cols-7 mb-1">
-                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
-                      <div key={i} className="text-center text-[11px] font-semibold text-slate-400">
-                        {day}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Day grid — stretches to fill remaining height */}
+                  {/* Day grid — stretches to fill remaining height. Each day draws a hairline across its top,
+                      so the line above a week spans exactly the days that exist in it (like Apple's
+                      month view: the first and last partial weeks get shortened lines). */}
                   <div
                     className="grid grid-cols-7 flex-1"
                     style={{ gridTemplateRows: `repeat(${weekRows}, 1fr)` }}
@@ -918,7 +930,7 @@ export default function CalendarPage() {
                               setShowDaySheet(true)
                             }
                           }}
-                          className="flex flex-col items-center justify-center"
+                          className="flex flex-col items-center justify-start border-t border-current/10 pt-1"
                         >
                           <div
                             className={`flex h-9 w-9 items-center justify-center rounded-full text-[14px] transition-all duration-100 ${

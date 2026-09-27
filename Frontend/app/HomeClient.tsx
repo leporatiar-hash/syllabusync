@@ -387,9 +387,9 @@ export default function HomeClient() {
           </div>
         )}
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-3">
+        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Upcoming deadlines — the main thing students come here for */}
-          <section className="rounded-2xl border border-white bg-white p-6 shadow-sm lg:col-span-2">
+          <section className="min-w-0 rounded-2xl border border-white bg-white p-4 shadow-sm md:p-6 lg:col-span-2">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-slate-900">Upcoming deadlines</h2>
               {deadlines.length > 0 && (
@@ -423,12 +423,12 @@ export default function HomeClient() {
                   const dateLabel = formatDeadlineDate(deadline.date, today, 'en-US')
                   const soon = dateLabel === 'Today' || dateLabel === 'Tomorrow'
                   return (
-                    <li key={deadline.id} className="flex items-center gap-4 py-3">
+                    <li key={deadline.id} className="flex items-center gap-3 py-3 md:gap-4">
                       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${style.bg} ${style.text}`}>
                         {style.icon}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-slate-800" title={deadline.title}>
+                        <p className="text-sm font-medium leading-snug text-slate-800 break-words max-md:line-clamp-2 md:truncate" title={deadline.title}>
                           {deadline.title}
                         </p>
                         <p className="truncate text-xs text-slate-500">
@@ -436,7 +436,7 @@ export default function HomeClient() {
                           <span className="hidden sm:inline"> · {type}</span>
                         </p>
                       </div>
-                      <div className="shrink-0 text-right">
+                      <div className="shrink-0 whitespace-nowrap text-right">
                         <p className={`text-sm ${soon ? 'font-semibold text-[#FB7185]' : 'font-medium text-slate-700'}`}>
                           {dateLabel}
                         </p>
@@ -450,9 +450,9 @@ export default function HomeClient() {
           </section>
 
           {/* Sidebar */}
-          <aside className="space-y-6">
+          <aside className="min-w-0 space-y-6">
             {showGettingStarted && lmsLoaded && !setupComplete && (
-              <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-white bg-white p-4 shadow-sm md:p-5">
                 <div className="flex items-start justify-between">
                   <div>
                     <h2 className="text-sm font-semibold text-slate-900">Finish setting up</h2>
@@ -513,7 +513,7 @@ export default function HomeClient() {
             )}
 
             {lmsLoaded && !hasConnectedLms && (
-              <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-white bg-white p-4 shadow-sm md:p-5">
                 <div className="flex items-center gap-3">
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#EEF2FF] to-[#F0FDFF] text-[#5B8DEF]">
                     <RefreshCw size={16} />
@@ -545,7 +545,7 @@ export default function HomeClient() {
             )}
 
             {referralCode && (
-              <div className="rounded-2xl border border-white bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-white bg-white p-4 shadow-sm md:p-5">
                 <div className="flex items-center gap-3">
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
                     <Share2 size={16} />
