@@ -371,9 +371,12 @@ def _verify_native_token(token: str, token_type: str = "access") -> dict:
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./railway.db")
-# Handle Railway's postgres:// vs postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Handle Railway's postgres:// vs postgresql://, and name the driver explicitly: SQLAlchemy 2.1
+# changed the default for bare postgresql:// from psycopg2 to psycopg 3, which isn't installed.
+for _prefix in ("postgres://", "postgresql://"):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len(_prefix):]
+        break
 
 # Use String for UUID to support both SQLite and Postgres
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
