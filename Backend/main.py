@@ -13,7 +13,8 @@ from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, F
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.request import urlopen
 from urllib.error import URLError
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -544,6 +545,10 @@ class Deadline(Base):
     completed = Column(Boolean, default=False)
     source = Column(String, nullable=True, default="manual")  # "manual", "canvas", "ical"
     external_id = Column(String, nullable=True)  # dedup key for synced items
+    # Exact due moment (UTC) when the source gave a real time with a timezone (iCal); the frontend
+    # renders it in the viewer's local time. NULL for all-day items and anything without one —
+    # `date`/`time` above remain the display values for those.
+    due_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     course = relationship("Course", back_populates="deadlines")
@@ -972,6 +977,7 @@ class DeadlineOut(BaseModel):
     completed: bool = Field(description="Whether the user has marked this deadline as done")
     source: str | None = Field(None, description="'manual' (user-created) or 'lms' (synced from Canvas/iCal)")
     saved_to_calendar: bool | None = Field(None, description="True if the user has saved this deadline to their calendar")
+    due_at: str | None = Field(None, description="Exact due moment as ISO 8601 UTC, when known (synced iCal events with a time). Prefer it over date/time and render in the user's local timezone; null for all-day items.")
 
 
 class FlashcardOut(BaseModel):
@@ -1447,6 +1453,14 @@ def ensure_deadline_columns():
             logger.info(f"[Migration] Added '{label}' column to deadlines")
         except Exception:
             pass  # Column already exists
+
+    due_at_type = "TIMESTAMPTZ" if engine.dialect.name == "postgresql" else "DATETIME"
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE deadlines ADD COLUMN due_at {due_at_type}"))
+        logger.info("[Migration] Added 'due_at' column to deadlines")
+    except Exception:
+        pass  # Column already exists
 
     if engine.dialect.name == "postgresql":
         try:
@@ -3700,7 +3714,8 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
                     "frequency": d.frequency,
                     "day_of_week": d.day_of_week,
                     "completed": d.completed,
-                    "saved_to_calendar": d.id in saved_deadline_ids
+                    "saved_to_calendar": d.id in saved_deadline_ids,
+                    "due_at": _iso_utc(d.due_at),
                 }
                 for d in sorted(course.deadlines, key=lambda x: x.date or "9999")
             ],
@@ -3827,6 +3842,7 @@ def list_all_deadlines(
                 "source": getattr(d, 'source', 'manual') or 'manual',
                 "external_id": getattr(d, 'external_id', None),
                 "saved_to_calendar": d.id in saved_ids,
+                "due_at": _iso_utc(d.due_at),
             }
             for d in sorted(deadlines, key=lambda x: x.date or "9999")
         ]
@@ -3944,6 +3960,7 @@ def update_deadline(deadline_id: str, payload: UpdateDeadlineRequest, current_us
 
         if payload.date:
             deadline.date = payload.date
+            deadline.due_at = None  # the student's own date wins over the synced exact time
 
         if payload.course_id is not None:
             # Verify the course belongs to this user
@@ -4044,6 +4061,7 @@ def list_calendar_entries(current_user: User = Depends(get_current_user)):
                     "title": deadline.title,
                     "description": deadline.description,
                     "completed": deadline.completed,
+                    "due_at": _iso_utc(deadline.due_at),
                     "saved_at": entry.created_at.isoformat()
                 })
         return result
@@ -5634,6 +5652,69 @@ def _bulk_create_ical_courses(events, user_id: str, db):
     return course_by_uid, list(created.values())
 
 
+ICAL_STALE_AFTER = timedelta(days=14)
+
+
+def _iso_utc(dt: datetime | None) -> str | None:
+    """Serialize a stored due_at as ISO 8601 UTC. SQLite hands timestamps back naive; they were
+    written as UTC, so a naive value is treated as UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _ical_calendar_tz(cal):
+    """The feed's own timezone, used for the stored display date/time: X-WR-TIMEZONE if set, else
+    the first VTIMEZONE (D2L/OAKS ships only a VTIMEZONE, America/Toronto). None if unknown."""
+    names = [str(cal.get("X-WR-TIMEZONE", ""))]
+    names += [str(c.get("TZID", "")) for c in cal.walk("VTIMEZONE")]
+    for name in names:
+        if not name:
+            continue
+        try:
+            return ZoneInfo(name)
+        except Exception:
+            continue
+    return None
+
+
+def _ical_event_time(dt_val, cal_tz):
+    """Turn a DTSTART value into (date 'YYYY-MM-DD', time like '11:59 PM' or None, due_at UTC or None).
+
+    - DATE (all-day): kept exactly as written — no timezone math, so it can't shift days; no due_at.
+    - Timezone-aware DATE-TIME (UTC 'Z' or TZID=...): due_at is the exact UTC moment; date/time are
+      that moment in the feed's timezone (falls back to UTC).
+    - Floating DATE-TIME (no zone): read as feed-local time when the feed has a zone; otherwise kept
+      as written with no due_at.
+    Returns None for anything else."""
+    if isinstance(dt_val, datetime):
+        if dt_val.tzinfo is None:
+            if cal_tz is None:
+                return dt_val.strftime("%Y-%m-%d"), dt_val.strftime("%I:%M %p").lstrip("0"), None
+            dt_val = dt_val.replace(tzinfo=cal_tz)
+        due_at = dt_val.astimezone(timezone.utc)
+        local = due_at.astimezone(cal_tz or timezone.utc)
+        return local.strftime("%Y-%m-%d"), local.strftime("%I:%M %p").lstrip("0"), due_at
+    if isinstance(dt_val, date):
+        return dt_val.strftime("%Y-%m-%d"), None, None
+    return None
+
+
+def _ical_is_stale(dt_val, now: datetime) -> bool:
+    """True when DTSTART is more than ICAL_STALE_AFTER in the past. Feeds carry years of history
+    (copied course shells keep old events), which would otherwise clutter the calendar and create
+    courses for past terms."""
+    if isinstance(dt_val, datetime):
+        if dt_val.tzinfo is None:
+            dt_val = dt_val.replace(tzinfo=timezone.utc)
+        return dt_val < now - ICAL_STALE_AFTER
+    if isinstance(dt_val, date):
+        return dt_val < (now - ICAL_STALE_AFTER).date()
+    return True
+
+
 def sync_ical(connection, user_id: str, db):
     """Sync events from an iCal feed into deadlines.
 
@@ -5655,7 +5736,14 @@ def sync_ical(connection, user_id: str, db):
                 return synced, errors
 
             cal = ICalCalendar.from_ical(resp.text)
-            events = [c for c in cal.walk() if c.name == "VEVENT"]
+            cal_tz = _ical_calendar_tz(cal)
+            now = datetime.now(timezone.utc)
+            # Only events with a DTSTART in the last ICAL_STALE_AFTER or later. Done before course
+            # grouping so old terms can't create courses.
+            events = [
+                c for c in cal.walk()
+                if c.name == "VEVENT" and c.get("DTSTART") is not None and not _ical_is_stale(c.get("DTSTART").dt, now)
+            ]
 
             # uid -> course_id when this sync created the user's courses; None means "match instead"
             course_by_uid = None
@@ -5685,20 +5773,11 @@ def sync_ical(connection, user_id: str, db):
                     all_text = f"{summary} {description} {location} {categories} {uid}"
                     matched_course_id = _match_course(all_text, "", user_courses)
 
-                # Parse DTSTART
-                dtstart = component.get("DTSTART")
-                if not dtstart:
+                # Parse DTSTART (always present here — filtered above)
+                parsed = _ical_event_time(component.get("DTSTART").dt, cal_tz)
+                if parsed is None:
                     continue
-
-                dt_val = dtstart.dt
-                if isinstance(dt_val, datetime):
-                    deadline_date = dt_val.strftime("%Y-%m-%d")
-                    deadline_time = dt_val.strftime("%I:%M %p").lstrip("0")
-                elif isinstance(dt_val, date):
-                    deadline_date = dt_val.strftime("%Y-%m-%d")
-                    deadline_time = None
-                else:
-                    continue
+                deadline_date, deadline_time, due_at = parsed
 
                 # Upsert
                 existing = db.query(Deadline).filter(
@@ -5710,6 +5789,7 @@ def sync_ical(connection, user_id: str, db):
                     existing.title = summary
                     existing.date = deadline_date
                     existing.time = deadline_time
+                    existing.due_at = due_at
                     existing.description = description
                     # Auto-match course if not already assigned
                     if not existing.course_id and matched_course_id:
@@ -5720,6 +5800,7 @@ def sync_ical(connection, user_id: str, db):
                         course_id=matched_course_id,
                         date=deadline_date,
                         time=deadline_time,
+                        due_at=due_at,
                         type="assignment",
                         title=summary,
                         description=description,

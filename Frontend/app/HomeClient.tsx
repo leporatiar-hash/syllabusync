@@ -15,6 +15,7 @@ import ValuePropPrompt from '../components/ValuePropPrompt'
 import { decideFoundingPrompt } from '../lib/foundingPrompt'
 import { shouldShowValuePrompt } from '../lib/valuePrompt'
 import { addDays, formatDeadlineDate, localToday } from '../lib/deadlineGroups'
+import { localizeDeadline } from '../lib/deadlineTime'
 
 const CanvasConnectModal = dynamic(() => import('../components/CanvasConnectModal'), { ssr: false })
 const ICalConnectModal = dynamic(() => import('../components/ICalConnectModal'), { ssr: false })
@@ -139,6 +140,7 @@ export default function HomeClient() {
           const today = localToday()
           const weekEnd = addDays(today, 6)
           const upcoming = data
+            .map(localizeDeadline)
             .filter((d: Deadline) => d.date >= today)
             .sort((a: Deadline, b: Deadline) => a.date.localeCompare(b.date))
           setDueThisWeek(upcoming.filter((d: Deadline) => d.date <= weekEnd).length)

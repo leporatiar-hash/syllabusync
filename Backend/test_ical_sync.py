@@ -18,9 +18,17 @@ Covers:
   - syncing twice (and connect + sync): no duplicate courses or deadlines
   - race guard: if courses appear before the bulk insert, it creates nothing
   - LOCATION identity extraction and name cleaning
+  - times: UTC 'Z', TZID-qualified and DATE-only DTSTARTs -> exact UTC due_at + feed-local
+    display date/time (12:15 PM ET exam, 11:59 PM ET deadline); all-day dates never shift
+  - stale events (DTSTART > 14 days ago) are skipped before course grouping, so last term's
+    classes don't become courses
+
+Event dates are relative to the real current time so the fixture never goes stale.
 """
 import os
 import tempfile
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 # Env vars must be set before importing main -- it reads them at import time.
 _DB_FD, _DB_PATH = tempfile.mkstemp(suffix=".db")
@@ -38,9 +46,23 @@ import main  # noqa: E402
 client = TestClient(main.app)
 
 FEED_URL = "https://lms.example.edu/d2l/le/calendar/feed/user/feed.ics?token=test"
+ET = ZoneInfo("America/New_York")
+NOW = datetime.now(timezone.utc)
 
 
-def _event(uid, summary, location, dtstart="20261001T035900Z", description=None):
+def utc_stamp(days: int, hour: int = 3, minute: int = 59) -> str:
+    """A UTC 'Z' DTSTART line `days` from now."""
+    d = (NOW + timedelta(days=days)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return "DTSTART:" + d.strftime("%Y%m%dT%H%M%SZ")
+
+
+def et_to_utc_stamp(local: datetime) -> str:
+    """UTC 'Z' DTSTART line for a wall-clock Eastern time (how OAKS writes most events)."""
+    return "DTSTART:" + local.replace(tzinfo=ET).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _event(uid, summary, location, dtstart=None, description=None):
+    dtstart = dtstart or utc_stamp(3)
     lines = [
         "BEGIN:VEVENT",
         "DTSTAMP:20260928T030227Z",
@@ -51,8 +73,7 @@ def _event(uid, summary, location, dtstart="20261001T035900Z", description=None)
         lines.append(f"DESCRIPTION:{description}")
     lines += [
         "CLASS:PUBLIC",
-        f"DTSTART:{dtstart}",
-        f"DTEND:{dtstart}",
+        dtstart,  # full property line, e.g. "DTSTART:20261001T035900Z" or "DTSTART;VALUE=DATE:20261001"
         f"UID:1000-{uid}@lms.example.edu",
         "SEQUENCE:0",
         "LAST-MODIFIED:20260914T162027Z",
@@ -67,7 +88,7 @@ FIXTURE_EVENTS = [
            "LOCATION:2026 Fall Investment Analysis (FINC-400-02)",
            description="Quizzes:\\nExam 2 - https://lms.example.edu/d2l/lms/quizzing/quizzing.d2l?ou=4001&qi=1"),
     _event("2002", "Homework 3 - Due",
-           "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20261008T035900Z"),
+           "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=utc_stamp(10)),
     # FINC 418 — Zoom-wrapped LOCATION, folded exactly like D2L folds it, with stale SUMMARYs
     # naming older offerings and a different course code (FINC-316)
     _event("2003", "2022 Fall Adv Valuation & Corp Finc Anal (FINC-418-01)",
@@ -81,12 +102,23 @@ FIXTURE_EVENTS = [
     _event("2006", "Museum Response Paper - Due",
            "LOCATION:2026 Fall Asian Art and Architecture (ARTH-103-01)"),
     # Institution-wide and non-course events: must never become courses
-    _event("2007", "Planned IT Outage", "LOCATION:College of Charleston", dtstart="20100912T040000Z"),
+    _event("2007", "Planned IT Outage", "LOCATION:College of Charleston"),
     _event("2008", "Career Fair (BLDG 204)", "LOCATION:Room 204"),
+    # Years-old event (real OAKS feeds include these): skipped entirely
+    _event("2009", "Planned IT Outage", "LOCATION:College of Charleston", dtstart="DTSTART:20100912T040000Z"),
+]
+
+VTIMEZONE_TORONTO = [  # exactly what D2L/OAKS ships
+    "BEGIN:VTIMEZONE", "TZID:America/Toronto",
+    "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0400", "TZOFFSETTO:-0400", "TZNAME:EDT",
+    "DTSTART:20110313T030000", "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU", "END:DAYLIGHT",
+    "BEGIN:STANDARD", "TZOFFSETFROM:-0500", "TZOFFSETTO:-0500", "TZNAME:EST",
+    "DTSTART:20101107T010000", "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU", "END:STANDARD",
+    "END:VTIMEZONE",
 ]
 
 
-def build_feed(events=FIXTURE_EVENTS) -> str:
+def build_feed(events=FIXTURE_EVENTS, with_tz=True) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "PRODID:-//D2L//NONSGML v1.0//EN",
@@ -94,6 +126,8 @@ def build_feed(events=FIXTURE_EVENTS) -> str:
         "METHOD:PUBLISH",
         "X-WR-CALNAME:All Courses - Example College",
     ]
+    if with_tz:
+        lines += VTIMEZONE_TORONTO
     for ev in events:
         lines += ev
     lines.append("END:VCALENDAR")
@@ -149,7 +183,8 @@ def make_user(label: str, course_codes=()):
         db.close()
 
 
-def run_sync(user_id: str):
+def run_sync(user_id: str, feed: str | None = None):
+    _FakeClient.feed = feed or build_feed()
     db = main.SessionLocal()
     try:
         conn = db.query(main.LMSConnection).filter_by(user_id=user_id, provider="ical").first()
@@ -197,7 +232,8 @@ def test_zero_courses_bulk_create():
     courses, assigned, n = snapshot(user_id)
 
     check("sync reported no errors", errors == [], str(errors))
-    check("all 8 events synced", synced == 8 and n == 8, f"synced={synced} stored={n}")
+    check("all 8 current events synced, years-old one skipped", synced == 8 and n == 8 and "2009" not in assigned,
+          f"synced={synced} stored={n}")
     check("exactly the 3 real classes created", sorted(courses) == ["ARTH 103", "FINC 400", "FINC 418"], str(sorted(courses)))
     check("no junk course from a stale SUMMARY", "FINC 316" not in courses)
     check("names cleaned of term + section", courses["FINC 400"].name == "Investment Analysis"
@@ -245,6 +281,7 @@ def test_connect_endpoint_then_background_sync():
     """Connect (which runs the initial sync) followed by a background-style sync of the same
     connection must not double-create anything."""
     user_id, headers = make_user("connect")
+    _FakeClient.feed = build_feed()
     resp = client.post("/lms/connect/ical", json={"ical_url": FEED_URL}, headers=headers)
     check("connect endpoint succeeds", resp.status_code == 200, f"{resp.status_code} {resp.text[:200]}")
     check("connect endpoint synced all events", resp.json()["initial_sync"]["synced_count"] == 8, resp.text[:200])
@@ -269,6 +306,104 @@ def test_race_guard():
     check("race: nothing created", sorted(courses) == ["ARTH 103"], str(sorted(courses)))
 
 
+def _deadlines_by_uid(user_id: str):
+    db = main.SessionLocal()
+    try:
+        rows = db.query(main.Deadline).filter_by(user_id=user_id, source="ical").all()
+        return {d.external_id.split("-")[1].split("@")[0]: d for d in rows}
+    finally:
+        db.close()
+
+
+def test_timezones():
+    # Fixed wall-clock Eastern times on a day ~10 days out (always "current", never stale)
+    day = (NOW + timedelta(days=10)).astimezone(ET).date()
+    exam_et = datetime(day.year, day.month, day.day, 12, 15)
+    due_et = datetime(day.year, day.month, day.day, 23, 59)
+    exam_utc = exam_et.replace(tzinfo=ET).astimezone(timezone.utc)
+    due_utc = due_et.replace(tzinfo=ET).astimezone(timezone.utc)
+    loc = "LOCATION:2026 Fall Investment Analysis (FINC-400-02)"
+    ymd = day.strftime("%Y%m%d")
+    events = [
+        _event("3001", "Exam 2", loc, dtstart=et_to_utc_stamp(exam_et)),            # UTC 'Z'
+        _event("3002", "Homework 4 - Due", loc, dtstart=et_to_utc_stamp(due_et)),   # UTC 'Z', next UTC day
+        _event("3003", "Exam 2 (TZID)", loc, dtstart=f"DTSTART;TZID=America/Toronto:{ymd}T121500"),
+        _event("3004", "Homework 4 (TZID)", loc, dtstart=f"DTSTART;TZID=America/Toronto:{ymd}T235900"),
+        _event("3005", "Reading Day", loc, dtstart=f"DTSTART;VALUE=DATE:{ymd}"),     # all-day
+    ]
+    user_id, headers = make_user("tz")
+    run_sync(user_id, build_feed(events))
+    d = _deadlines_by_uid(user_id)
+    iso_day = day.isoformat()
+
+    check("12:15 PM ET exam (UTC Z): date/time in ET", (d["3001"].date, d["3001"].time) == (iso_day, "12:15 PM"),
+          f"{d['3001'].date} {d['3001'].time}")
+    check("12:15 PM ET exam (UTC Z): due_at exact UTC", main._iso_utc(d["3001"].due_at) == exam_utc.isoformat(),
+          f"{main._iso_utc(d['3001'].due_at)} vs {exam_utc.isoformat()}")
+    check("11:59 PM ET deadline (UTC Z) stays on its ET day", (d["3002"].date, d["3002"].time) == (iso_day, "11:59 PM"),
+          f"{d['3002'].date} {d['3002'].time}")
+    check("11:59 PM ET deadline: due_at is next UTC day", main._iso_utc(d["3002"].due_at) == due_utc.isoformat()
+          and due_utc.date() > day, main._iso_utc(d["3002"].due_at))
+    check("TZID exam matches the UTC Z exam", (d["3003"].date, d["3003"].time, main._iso_utc(d["3003"].due_at))
+          == (iso_day, "12:15 PM", exam_utc.isoformat()))
+    check("TZID deadline matches the UTC Z deadline", (d["3004"].date, d["3004"].time, main._iso_utc(d["3004"].due_at))
+          == (iso_day, "11:59 PM", due_utc.isoformat()))
+    check("DATE-only: exact day, no time, no due_at", (d["3005"].date, d["3005"].time, d["3005"].due_at) == (iso_day, None, None),
+          f"{d['3005'].date} {d['3005'].time} {d['3005'].due_at}")
+
+    resp = client.get("/deadlines", headers=headers)
+    by_title = {x["title"]: x for x in resp.json()}
+    check("GET /deadlines returns due_at as ISO UTC", by_title["Homework 4 - Due"]["due_at"] == due_utc.isoformat()
+          and by_title["Reading Day"]["due_at"] is None, str(by_title.get("Homework 4 - Due")))
+
+    # Feed with no timezone info at all: floating time kept as written, no due_at
+    user2, _ = make_user("tz-floating")
+    run_sync(user2, build_feed([_event("3006", "Quiz", loc, dtstart=f"DTSTART:{ymd}T090000")], with_tz=False))
+    q = _deadlines_by_uid(user2)["3006"]
+    check("floating time without a feed zone: kept as written", (q.date, q.time, q.due_at) == (iso_day, "9:00 AM", None),
+          f"{q.date} {q.time} {q.due_at}")
+
+    # Editing the date by hand drops the synced exact time so the edit is what's shown
+    new_day = (day + timedelta(days=1)).isoformat()
+    resp = client.patch(f"/deadlines/{d['3002'].id}", json={"date": new_day}, headers=headers)
+    edited = _deadlines_by_uid(user_id)["3002"]
+    check("manual date edit clears due_at", resp.status_code == 200 and edited.date == new_day and edited.due_at is None,
+          f"{resp.status_code} {edited.date} {edited.due_at}")
+
+
+def test_stale_events_skip_old_terms():
+    """Zero-course user whose feed still carries last term's classes: only current-term courses
+    get created. Staleness is judged by DTSTART, not the term text in LOCATION."""
+    events = [
+        # Current term, upcoming
+        _event("4001", "Problem Set 1", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=utc_stamp(5)),
+        _event("4002", "Midterm", "LOCATION:2026 Fall Asian Art and Architecture (ARTH-103-01)", dtstart=utc_stamp(20)),
+        # Current term but only 10 days ago: inside the 14-day window, kept
+        _event("4003", "Quiz 1", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=utc_stamp(-10)),
+        # Current-term course, but this event's DTSTART is last year (copied shell): skipped
+        _event("4004", "Exam 2 (old copy)", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=utc_stamp(-360)),
+        # Last term: every event is months old -> no course
+        _event("4005", "Final Exam", "LOCATION:2026 Spring Principles of Microeconomics (ECON-201-01)", dtstart=utc_stamp(-130)),
+        _event("4006", "Problem Set 9", "LOCATION:2026 Spring Principles of Microeconomics (ECON-201-01)", dtstart=utc_stamp(-150)),
+        _event("4007", "Lab Report 6", "LOCATION:2026 Spring General Chemistry II (CHEM-112-03)", dtstart=utc_stamp(-140)),
+        # Just outside the window
+        _event("4008", "Quiz 0", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=utc_stamp(-20)),
+        # All-day event 15 days ago: stale too
+        _event("4009", "Add/Drop Deadline", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)",
+               dtstart="DTSTART;VALUE=DATE:" + (NOW - timedelta(days=15)).strftime("%Y%m%d")),
+    ]
+    user_id, _ = make_user("stale")
+    synced, errors = run_sync(user_id, build_feed(events))
+    courses, assigned, n = snapshot(user_id)
+
+    check("stale: only current-term courses created", sorted(courses) == ["ARTH 103", "FINC 400"], str(sorted(courses)))
+    check("stale: last term's classes not created", "ECON 201" not in courses and "CHEM 112" not in courses)
+    check("stale: only recent events stored", sorted(assigned) == ["4001", "4002", "4003"] and synced == 3,
+          f"stored={sorted(assigned)} synced={synced}")
+    check("stale: kept events assigned", assigned["4001"] == assigned["4003"] == "FINC 400" and assigned["4002"] == "ARTH 103",
+          str(assigned))
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
@@ -278,6 +413,8 @@ if __name__ == "__main__":
         test_sync_twice_no_duplicates()
         test_connect_endpoint_then_background_sync()
         test_race_guard()
+        test_timezones()
+        test_stale_events_skip_old_terms()
         print("\nAll iCal sync tests passed.")
     finally:
         try:

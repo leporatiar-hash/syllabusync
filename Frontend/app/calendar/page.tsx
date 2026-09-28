@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, HelpCircle, FileText, Mic, BookMarked, Target, BookOpenCheck, ClipboardList, Clock, PartyPopper, Trash2, Search, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
+import { localizeDeadline } from '../../lib/deadlineTime'
 import { useAuth } from '../../lib/useAuth'
 import { useSubscription } from '../../hooks/useSubscription'
 import UpgradePrompt from '../../components/UpgradePrompt'
@@ -133,7 +134,7 @@ export default function CalendarPage() {
 
         if (deadlinesRes.ok) {
           const data = await deadlinesRes.json()
-          setDeadlines(data)
+          setDeadlines(data.map(localizeDeadline))
         }
         if (coursesRes.ok) {
           const data = await coursesRes.json()

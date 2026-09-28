@@ -11,6 +11,7 @@ import NamingStyleModal from '../../../components/NamingStyleModal'
 import DeadlineList from '../../../components/DeadlineList'
 import NextSteps from '../../../components/NextSteps'
 import { localToday } from '../../../lib/deadlineGroups'
+import { localizeDeadline } from '../../../lib/deadlineTime'
 import dynamic from 'next/dynamic'
 
 // The rich-text editor is a sizeable dependency; only download it when someone opens the Notes tab.
@@ -252,7 +253,7 @@ export default function CourseDetailPage() {
       }
       const data = await res.json()
       setCourse(data)
-      setDeadlines(data.deadlines || [])
+      setDeadlines((data.deadlines || []).map(localizeDeadline))
       setCourseError(false)
     } catch (err) {
       console.error('Failed to load course:', err)
@@ -519,7 +520,7 @@ export default function CourseDetailPage() {
       if (refreshed.ok) {
         const data = await refreshed.json()
         setCourse(data)
-        setDeadlines(data.deadlines || [])
+        setDeadlines((data.deadlines || []).map(localizeDeadline))
       }
     } catch (err) {
       console.error('Failed to generate flashcards:', err)
