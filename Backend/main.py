@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, validator
+from collections import Counter
 from typing import Any, Optional
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, AuthenticationError as OAIAuthError, RateLimitError as OAIRateLimitError, APIStatusError as OAIAPIStatusError
@@ -5517,13 +5518,134 @@ def sync_canvas(connection, user_id: str, db):
     return synced, errors
 
 
+# Default course colors, in the same order as the hash-based `palette` in
+# Frontend/lib/courseColors.ts — keep the two lists in sync.
+COURSE_COLOR_PALETTE = [
+    "#5B8DEF",  # Cornflower blue
+    "#F87171",  # Coral
+    "#4ADE80",  # Sage green
+    "#A78BFA",  # Lavender
+    "#FBBF24",  # Amber
+    "#2DD4BF",  # Teal
+    "#F472B6",  # Rose pink
+    "#6366F1",  # Slate blue
+    "#FB923C",  # Tangerine
+    "#22D3EE",  # Cyan
+]
+
+# D2L/OAKS puts the class in LOCATION as "2026 Fall Investment Analysis (FINC-400-02)", or wrapped
+# for Zoom meetings: "Zoom Online Meeting (2026 Fall Adv Valuation & Corp Finc Anal (FINC-418-01))".
+# SUMMARY is not reliable: events copied between offerings keep old titles naming other terms and
+# even other courses, and institution-wide events use LOCATION "College of Charleston".
+_ICAL_HYPHEN_CODE_RE = re.compile(r"\b([A-Za-z]{2,4})-(\d{3,4})(?:-[A-Za-z0-9]{1,4})?\b")
+_ICAL_PLAIN_CODE_RE = re.compile(r"\b([A-Z]{2,4}) ?(\d{3,4})\b")  # fallback: uppercase dept only
+_ICAL_NON_COURSE_WORDS = {"ROOM", "RM", "BLDG", "HALL", "STE", "SUITE", "FL", "FLR", "UNIT", "APT"}
+_ICAL_TERM = r"(?:Fall|Spring|Summer(?: I{1,2}| \d)?|Winter|Maymester|Intersession)"
+_ICAL_TERM_PREFIX_RE = re.compile(rf"^(?:\d{{4}} )?{_ICAL_TERM}(?: \d{{4}})? ", re.I)
+_ICAL_TERM_SUFFIX_RE = re.compile(rf" (?:\d{{4}} )?{_ICAL_TERM}(?: \d{{4}})?$", re.I)
+
+
+def _clean_ical_course_name(text: str) -> str:
+    """'2026 Fall Investment Analysis' -> 'Investment Analysis'; also drops a trailing 'Fall 2026'."""
+    name = " ".join(text.replace("(", " ").replace(")", " ").split())
+    name = _ICAL_TERM_SUFFIX_RE.sub("", _ICAL_TERM_PREFIX_RE.sub("", name))
+    return name.strip(" -–:,")
+
+
+def _ical_course_identity(location: str) -> tuple[str, str] | None:
+    """Return (code, name) for the class an iCal event belongs to, read from its LOCATION,
+    or None for events with no real course code (institution-wide events, clubs, rooms).
+    The code drops the section ("FINC-418-01" -> "FINC 418"); the name falls back to the code."""
+    loc = " ".join(location.split())
+    match = None
+    for m in _ICAL_HYPHEN_CODE_RE.finditer(loc):
+        if m.group(1).upper() not in _ICAL_NON_COURSE_WORDS:
+            match = m  # keep the last one: with Zoom wrappers it's the innermost
+    if match is None:
+        for m in _ICAL_PLAIN_CODE_RE.finditer(loc):
+            if m.group(1) not in _ICAL_NON_COURSE_WORDS:
+                code = f"{m.group(1)} {m.group(2)}"
+                return code, code
+        return None
+
+    code = f"{match.group(1).upper()} {match.group(2)}"
+    before, after = loc[:match.start()], loc[match.end():]
+    # Keep only the text at the code's own nesting level: drop the paren wrapping just the
+    # code, and any outer wrapper like "Zoom Online Meeting (".
+    open_parens = []
+    for i, ch in enumerate(before):
+        if ch == "(":
+            open_parens.append(i)
+        elif ch == ")" and open_parens:
+            open_parens.pop()
+    if open_parens and not before[open_parens[-1] + 1:].strip():
+        before = before[:open_parens.pop()]
+    if open_parens:
+        before = before[open_parens[-1] + 1:]
+    name = _clean_ical_course_name(f"{before} {after.split(')')[0]}")
+    return code, name or code
+
+
+def _bulk_create_ical_courses(events, user_id: str, db):
+    """For a user with no courses yet: create one course per class found in the feed (each with a
+    distinct palette color) and map every event UID to its course.
+
+    Returns (uid -> course_id, courses), or None if the user turned out to have courses by the time
+    we got the lock (a concurrent connect sync / background sync got there first); the caller then
+    falls back to normal matching. Adds to the session without committing — the caller's commit
+    writes the courses and deadlines together."""
+    groups: dict[str, Counter] = {}  # code -> name votes, in first-seen order
+    uid_code: dict[str, str] = {}
+    for component in events:
+        uid = str(component.get("UID", ""))
+        identity = _ical_course_identity(str(component.get("LOCATION", "")))
+        if not uid or not identity:
+            continue
+        code, name = identity
+        groups.setdefault(code, Counter())[name] += 1
+        uid_code[uid] = code
+
+    # Serialize per user so two overlapping syncs can't both see zero courses and double-create.
+    # Transaction-scoped: released when the caller commits. SQLite serializes writers itself.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"ical-bulk-courses:{user_id}"})
+    existing = db.query(Course).filter(Course.user_id == user_id).all()
+    if existing:
+        return None
+
+    created: dict[str, Course] = {}
+    for i, (code, names) in enumerate(groups.items()):
+        try:
+            check_tier_limit(db, user_id, "course")
+        except HTTPException:
+            break  # at the course limit: the rest of the events stay unassigned
+        course = Course(
+            user_id=user_id,
+            name=names.most_common(1)[0][0],
+            code=code,
+            color=COURSE_COLOR_PALETTE[i % len(COURSE_COLOR_PALETTE)],
+        )
+        db.add(course)
+        created[code] = course
+    db.flush()  # assign ids
+    if created:
+        logger.info(f"[LMS] Created {len(created)} courses from iCal for new user: {', '.join(created)}")
+    course_by_uid = {uid: created[code].id for uid, code in uid_code.items() if code in created}
+    return course_by_uid, list(created.values())
+
+
 def sync_ical(connection, user_id: str, db):
-    """Sync events from an iCal feed into deadlines, matching against existing courses."""
+    """Sync events from an iCal feed into deadlines.
+
+    Users who already have courses: events are matched against those courses; unmatched events
+    stay unassigned (course_id NULL) — iCal never adds courses for them. Users with no courses yet:
+    one course is created per class found in the feed, and events are assigned to them."""
     synced = 0
     errors = []
 
     # Load user's existing courses for matching
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
+    had_courses = bool(user_courses)
 
     try:
         with httpx.Client(timeout=30.0) as http_client:
@@ -5533,12 +5655,19 @@ def sync_ical(connection, user_id: str, db):
                 return synced, errors
 
             cal = ICalCalendar.from_ical(resp.text)
+            events = [c for c in cal.walk() if c.name == "VEVENT"]
+
+            # uid -> course_id when this sync created the user's courses; None means "match instead"
+            course_by_uid = None
+            if not had_courses:
+                bulk = _bulk_create_ical_courses(events, user_id, db)
+                if bulk is None:  # courses appeared concurrently — match against them instead
+                    user_courses = db.query(Course).filter(Course.user_id == user_id).all()
+                else:
+                    course_by_uid, user_courses = bulk
 
             # Sync events into deadlines, matching to existing courses
-            for component in cal.walk():
-                if component.name != "VEVENT":
-                    continue
-
+            for component in events:
                 uid = str(component.get("UID", ""))
                 if not uid:
                     continue
@@ -5549,23 +5678,12 @@ def sync_ical(connection, user_id: str, db):
                 location = str(component.get("LOCATION", ""))
                 categories = str(component.get("CATEGORIES", ""))
 
-                # Try to match against user's existing courses
-                all_text = f"{summary} {description} {location} {categories} {uid}"
-                matched_course_id = _match_course(all_text, "", user_courses)
-
-                # Auto-create a course if the event's own title carries a recognizable course
-                # code with no existing match. Only trust SUMMARY (the event title) for this —
-                # location/description text is noisier (e.g. "Room 204" would look like a code).
-                if not matched_course_id:
-                    summary_codes = _extract_course_codes(summary)
-                    if summary_codes:
-                        clean_code = summary_codes[0].upper()
-                        new_course = Course(user_id=user_id, name=clean_code, code=clean_code)
-                        db.add(new_course)
-                        db.flush()  # Get the generated ID
-                        matched_course_id = new_course.id
-                        user_courses.append(new_course)  # So subsequent events can match it
-                        logger.info(f"[LMS] Auto-created course from iCal: {clean_code}")
+                if course_by_uid is not None:
+                    matched_course_id = course_by_uid.get(uid)
+                else:
+                    # Try to match against user's existing courses
+                    all_text = f"{summary} {description} {location} {categories} {uid}"
+                    matched_course_id = _match_course(all_text, "", user_courses)
 
                 # Parse DTSTART
                 dtstart = component.get("DTSTART")
