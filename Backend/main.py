@@ -19,6 +19,7 @@ from urllib.error import URLError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from limits import parse as parse_rate_limit
 import bcrypt as _bcrypt
 import pdfplumber
 from docx import Document
@@ -114,6 +115,22 @@ app = FastAPI(
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def client_ip(request: Request) -> str:
+    """The caller's real IP. Behind Railway, request.client.host is one of the edge proxy's internal
+    100.64.x.x addresses (they rotate per connection), so it can't tell users apart; Railway's edge
+    puts the real address in X-Real-IP. Falls back to the socket address locally / in tests."""
+    return request.headers.get("x-real-ip") or get_remote_address(request)
+
+
+def enforce_account_rate_limit(scope: str, email: str, limit: str) -> None:
+    """Per-account limit for auth endpoints, keyed on the (normalized) email in the request body.
+    Runs alongside the per-IP decorator limit: this one stops guessing at a single account, the IP
+    one stops a single caller spraying many accounts. Keyed per account rather than per IP alone
+    so a whole campus behind one NAT address doesn't share one small bucket."""
+    if not limiter.limiter.hit(parse_rate_limit(limit), scope, email.strip().lower()):
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a minute and try again.")
 
 # Parse ALLOWED_ORIGINS - strip whitespace and quotes from each origin
 # Railway/Vercel env vars sometimes include literal quotes that need to be removed
@@ -2571,7 +2588,8 @@ async def startup_event():
 
 
 @app.post("/auth/register", tags=["auth"], summary="Register a new account")
-def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
+@limiter.limit("10/minute", key_func=client_ip)
+def auth_register(request: Request, payload: AuthRegisterRequest, db=Depends(get_db)):
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Native auth not configured")
     if len(payload.password) < 6:
@@ -2619,9 +2637,11 @@ def auth_register(payload: AuthRegisterRequest, db=Depends(get_db)):
 
 
 @app.post("/auth/login", tags=["auth"], summary="Login with email and password")
-def auth_login(payload: AuthLoginRequest, db=Depends(get_db)):
+@limiter.limit("30/minute", key_func=client_ip)
+def auth_login(request: Request, payload: AuthLoginRequest, db=Depends(get_db)):
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Native auth not configured")
+    enforce_account_rate_limit("auth-login", payload.email, "10/minute")
     user = db.query(User).filter(User.email == payload.email.lower()).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -2650,9 +2670,11 @@ def auth_refresh(payload: AuthRefreshRequest, db=Depends(get_db)):
 
 
 @app.post("/auth/forgot-password", tags=["auth"], summary="Send password reset email")
-def auth_forgot_password(payload: AuthForgotPasswordRequest, db=Depends(get_db)):
+@limiter.limit("30/minute", key_func=client_ip)
+def auth_forgot_password(request: Request, payload: AuthForgotPasswordRequest, db=Depends(get_db)):
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Native auth not configured")
+    enforce_account_rate_limit("auth-forgot-password", payload.email, "5/minute")
     user = db.query(User).filter(User.email == payload.email.lower()).first()
     # Always return 200 to prevent email enumeration
     if not user:
@@ -2804,6 +2826,17 @@ def health():
 def api_health():
     """API health check endpoint (alias)."""
     return health()
+
+
+@app.get("/app/config", tags=["public"], summary="Mobile app version requirements")
+def app_config():
+    """Read by the mobile app at launch. A build older than min_supported_version must force an
+    update; one older than latest_version may show an optional prompt. Change the values with the
+    env vars (no code change) when a release drops support for old builds."""
+    return {
+        "min_supported_version": os.getenv("MOBILE_MIN_SUPPORTED_VERSION", "1.0.0"),
+        "latest_version": os.getenv("MOBILE_LATEST_VERSION", "1.0.0"),
+    }
 
 
 @app.get("/stats", tags=["public"], summary="Public platform stats")
