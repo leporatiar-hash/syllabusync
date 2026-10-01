@@ -37,6 +37,7 @@ import time
 import asyncio
 import logging
 import stripe as stripe_lib
+import hmac
 import resend
 import httpx
 from icalendar import Calendar as ICalCalendar
@@ -668,6 +669,12 @@ class UserProfile(Base):
     chat_messages_reset_at = Column(DateTime, nullable=True)
     # Founding-member upgrade prompt (shown on /home after first successful course sync)
     upgrade_prompt_dismissed_at = Column(DateTime, nullable=True)
+    # App Store (in-app purchase via RevenueCat). Kept separate from the Stripe columns so an
+    # IAP expiration can never downgrade a Stripe subscriber, or vice versa.
+    iap_expires_at = Column(DateTime, nullable=True)       # Pro while this is in the future
+    iap_product_id = Column(String, nullable=True)
+    iap_store = Column(String, nullable=True)              # "APP_STORE", "PLAY_STORE", ...
+    iap_event_at = Column(DateTime, nullable=True)         # timestamp of the last applied event, to drop stale out-of-order ones
     # "Get more out of your courses" feature-discovery panel on /home
     feature_panel_hidden = Column(Boolean, nullable=False, default=False)
     # One-question value-prop feedback ask (shown once, ever)
@@ -764,6 +771,16 @@ class StripeWebhookEvent(Base):
     __tablename__ = "stripe_webhook_events"
 
     id = Column(String, primary_key=True)  # Stripe event id, e.g. "evt_..."
+    event_type = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class RevenueCatWebhookEvent(Base):
+    """Ledger of processed RevenueCat webhook event ids, for idempotency (same pattern as
+    StripeWebhookEvent — RevenueCat retries deliveries that don't get a 200)."""
+    __tablename__ = "revenuecat_webhook_events"
+
+    id = Column(String, primary_key=True)  # RevenueCat event id
     event_type = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -1080,6 +1097,8 @@ class SubscriptionOut(BaseModel):
     chat_messages_used: int = Field(description="Chat messages sent this week")
     chat_messages_max: int | None = Field(None, description="Weekly chat message limit (higher on Pro; chat itself is never Pro-only)")
     upgrade_prompt_dismissed_at: str | None = Field(None, description="ISO 8601 timestamp of the last time the user dismissed the founding-member upgrade prompt; null if never dismissed")
+    billing_source: str | None = Field(None, description="Where Pro access comes from: 'stripe', 'app_store', 'founding', or null if not paying")
+    iap_expires_at: str | None = Field(None, description="ISO 8601 timestamp when App Store Pro access lapses unless renewed; null if none")
 
 
 class UserMeResponse(BaseModel):
@@ -1573,7 +1592,30 @@ def _effective_tier(profile) -> str:
         return "pro"
     if _founding_member_active(profile):
         return "pro"
+    if _iap_active(profile):
+        return "pro"
     return profile.subscription_tier if profile else "free"
+
+
+def _iap_active(profile) -> bool:
+    """Whether an App Store / Play Store purchase (synced from RevenueCat) currently grants Pro."""
+    expires_at = getattr(profile, "iap_expires_at", None) if profile else None
+    return bool(expires_at and expires_at > datetime.utcnow())
+
+
+def _billing_source(profile) -> str | None:
+    """Where the user's Pro access comes from, so each client can point them to the right place
+    to manage it (App Store settings vs the Stripe portal). Stripe wins when both are active
+    because it's the one the user can't manage from their phone's subscription settings."""
+    if not profile:
+        return None
+    if profile.subscription_tier == "pro" and profile.stripe_subscription_id:
+        return "stripe"
+    if _iap_active(profile):
+        return "app_store" if profile.iap_store == "APP_STORE" else (profile.iap_store or "app_store").lower()
+    if _founding_member_active(profile):
+        return "founding"
+    return None
 
 
 def ensure_subscription_columns():
@@ -1737,6 +1779,23 @@ def ensure_note_columns():
             conn.execute(text("ALTER TABLE notes ADD COLUMN IF NOT EXISTS content_json TEXT"))
 
 
+def ensure_iap_columns():
+    """Add the RevenueCat / in-app-purchase columns to user_profiles. All nullable, so existing
+    rows and the web app are unaffected. Each ALTER in its own transaction (see above)."""
+    for col_name, col_def in [
+        ("iap_expires_at", "TIMESTAMP"),
+        ("iap_product_id", "VARCHAR"),
+        ("iap_store", "VARCHAR"),
+        ("iap_event_at", "TIMESTAMP"),
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col_name} {col_def}"))
+            logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+
+
 def ensure_founding_member_expiry_column():
     """Add founding_member_expires_at to user_profiles: founding access is a 365-day
     grant from purchase, not permanent. Backfills any pre-existing founding_member=True
@@ -1878,6 +1937,7 @@ ensure_upgrade_prompt_column()
 ensure_feature_panel_column()
 ensure_value_prompt_columns()
 ensure_founding_member_expiry_column()
+ensure_iap_columns()
 ensure_naming_style_column()
 ensure_note_columns()
 Base.metadata.create_all(bind=engine)
@@ -3299,6 +3359,12 @@ def get_subscription(current_user: User = Depends(get_current_user)):
                 if profile and profile.upgrade_prompt_dismissed_at
                 else None
             ),
+            "billing_source": _billing_source(profile),
+            "iap_expires_at": (
+                profile.iap_expires_at.isoformat()
+                if profile and profile.iap_expires_at
+                else None
+            ),
         }
     finally:
         db.close()
@@ -3469,6 +3535,8 @@ def create_checkout_session(
 
         if payload.plan == "founding" and _founding_member_active(profile):
             raise HTTPException(status_code=400, detail="You're already a founding member")
+        if payload.plan != "founding" and _iap_active(profile):
+            raise HTTPException(status_code=400, detail="You already have Pro through the App Store. Manage it in your iPhone's Settings → Subscriptions.")
 
         price_id = _resolve_plan_price_id(payload.plan)
 
@@ -3646,6 +3714,112 @@ async def stripe_webhook(request: Request):
                 db.commit()
                 logger.info(f"[Stripe] User {profile.user_id} subscription status: {status}")
 
+        return {"received": True}
+    finally:
+        db.close()
+
+
+def _profile_for_revenuecat_event(db, event: dict):
+    """The app calls Purchases.logIn(<our user id>) before any purchase, so app_user_id is our
+    User.id. Fall back to the original id and aliases in case a purchase was made under an
+    anonymous RevenueCat id that was later aliased to the real user."""
+    candidates = [event.get("app_user_id"), event.get("original_app_user_id"), *(event.get("aliases") or [])]
+    for uid in candidates:
+        if uid and not str(uid).startswith("$RCAnonymousID"):
+            profile = db.query(UserProfile).filter(UserProfile.user_id == uid).first()
+            if profile:
+                return profile
+    return None
+
+
+def _ms_to_dt(ms):
+    return datetime.utcfromtimestamp(ms / 1000) if ms else None
+
+
+@app.post("/revenuecat/webhook", tags=["billing"], summary="Handle RevenueCat (App Store IAP) webhook events")
+async def revenuecat_webhook(request: Request):
+    """Sync App Store subscriptions into user_profiles.iap_* (no user auth — RevenueCat calls this
+    directly). Authenticated by the shared secret configured as the webhook's Authorization header
+    in the RevenueCat dashboard (REVENUECAT_WEBHOOK_AUTH).
+
+    Every purchase-lifecycle event carries expiration_at_ms, so we just mirror it: Pro is
+    `iap_expires_at > now` (see _iap_active). A CANCELLATION (auto-renew off) keeps access until
+    that expiry; an EXPIRATION or refund moves it into the past. Events older than the last one
+    applied are ignored so retried/out-of-order deliveries can't resurrect an expired grant."""
+    expected = os.getenv("REVENUECAT_WEBHOOK_AUTH")
+    if not expected:
+        raise HTTPException(status_code=500, detail="RevenueCat webhook not configured")
+    provided = request.headers.get("authorization") or ""
+    if provided.lower().startswith("bearer "):
+        provided = provided[7:]
+    if not hmac.compare_digest(provided.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Invalid authorization")
+
+    try:
+        body = await request.json()
+        event = body["event"]
+        event_id = event["id"]
+        event_type = event["type"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+
+    db = SessionLocal()
+    try:
+        try:
+            db.add(RevenueCatWebhookEvent(id=event_id, event_type=event_type))
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.info(f"[RevenueCat] Duplicate webhook event {event_id} ({event_type}), skipping")
+            return {"received": True, "duplicate": True}
+
+        if event_type == "TEST":
+            return {"received": True}
+
+        event_at = _ms_to_dt(event.get("event_timestamp_ms")) or datetime.utcnow()
+
+        if event_type == "TRANSFER":
+            # Purchases restored onto a different account: move the grant.
+            from_ids = event.get("transferred_from") or []
+            to_ids = event.get("transferred_to") or []
+            sources = [p for p in (db.query(UserProfile).filter(UserProfile.user_id == u).first() for u in from_ids) if p]
+            grant = max((p for p in sources if p.iap_expires_at), key=lambda p: p.iap_expires_at, default=None)
+            for uid in to_ids:
+                dest = db.query(UserProfile).filter(UserProfile.user_id == uid).first()
+                if dest and grant:
+                    dest.iap_expires_at = grant.iap_expires_at
+                    dest.iap_product_id = grant.iap_product_id
+                    dest.iap_store = grant.iap_store
+                    dest.iap_event_at = event_at
+            for p in sources:
+                p.iap_expires_at = None
+                p.iap_event_at = event_at
+            db.commit()
+            logger.info(f"[RevenueCat] Transferred IAP from {from_ids} to {to_ids}")
+            return {"received": True}
+
+        if "expiration_at_ms" not in event:
+            # BILLING_ISSUE, SUBSCRIBER_ALIAS, INVOICE_ISSUANCE, etc. — nothing to sync.
+            return {"received": True}
+
+        profile = _profile_for_revenuecat_event(db, event)
+        if not profile:
+            logger.warning(f"[RevenueCat] {event_type} event {event_id}: no profile for app_user_id={event.get('app_user_id')}")
+            return {"received": True}
+
+        if profile.iap_event_at and event_at < profile.iap_event_at:
+            logger.info(f"[RevenueCat] Stale {event_type} event {event_id} for {profile.user_id}, ignoring")
+            return {"received": True}
+
+        expires_at = _ms_to_dt(event.get("expiration_at_ms"))
+        if event_type == "NON_RENEWING_PURCHASE" and not expires_at:
+            expires_at = datetime.utcnow() + timedelta(days=365)
+        profile.iap_expires_at = expires_at
+        profile.iap_product_id = event.get("product_id") or profile.iap_product_id
+        profile.iap_store = event.get("store") or profile.iap_store
+        profile.iap_event_at = event_at
+        db.commit()
+        logger.info(f"[RevenueCat] {event_type} for {profile.user_id}: iap_expires_at={expires_at}")
         return {"received": True}
     finally:
         db.close()
