@@ -58,3 +58,39 @@ export type ChatMessage = {
 };
 
 export type Conversation = { id: string; title: string | null; created_at: string };
+
+export type CourseDeadline = {
+  id: string;
+  date: string | null;
+  time: string | null;
+  type: string | null;
+  title: string | null;
+  description: string | null;
+  recurring: boolean | null;
+  completed: boolean;
+  saved_to_calendar: boolean;
+};
+
+export type CourseInfo = {
+  instructor?: { name?: string; email?: string; office?: string; office_hours?: string; phone?: string };
+  logistics?: { meeting_times?: string; location?: string; attendance_policy?: string; late_work_policy?: string };
+  grade_breakdown?: { component: string; weight: string }[];
+  policies?: { participation?: string; academic_integrity?: string; extra_credit?: string; prerequisites?: string };
+  materials?: { required_textbooks?: string[] | string; recommended_readings?: string[] | string; course_portal?: string; ta_info?: string };
+};
+
+export type CourseDetail = {
+  id: string;
+  name: string;
+  code: string | null;
+  semester: string | null;
+  color: string | null;
+  course_info: CourseInfo | null;
+  note_count: number;
+  deadlines: CourseDeadline[];
+  flashcard_sets: { id: string; name: string; card_count: number; created_at: string }[];
+  summaries: { id: string; title: string; content: string; created_at: string }[];
+  quizzes: { id: string; name: string; question_count: number; created_at: string }[];
+};
+
+export type Note = { id: string; course_id: string; title: string; content: string; content_json: unknown; created_at: string; updated_at: string };
