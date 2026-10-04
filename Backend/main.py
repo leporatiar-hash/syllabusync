@@ -13,7 +13,8 @@ from sqlalchemy import create_engine, Column, String, Boolean, Date, DateTime, F
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.request import urlopen
 from urllib.error import URLError
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -675,6 +676,10 @@ class UserProfile(Base):
     iap_product_id = Column(String, nullable=True)
     iap_store = Column(String, nullable=True)              # "APP_STORE", "PLAY_STORE", ...
     iap_event_at = Column(DateTime, nullable=True)         # timestamp of the last applied event, to drop stale out-of-order ones
+    # Push notification preferences (mobile app). NULL = on, so existing rows default to enabled.
+    notify_deadlines = Column(Boolean, nullable=True)      # 3 days before + day before every deadline
+    notify_exams = Column(Boolean, nullable=True)          # extra heads-up 7 days before exams
+    notify_weekly = Column(Boolean, nullable=True)         # Sunday-evening brief of the week ahead
     # "Get more out of your courses" feature-discovery panel on /home
     feature_panel_hidden = Column(Boolean, nullable=False, default=False)
     # One-question value-prop feedback ask (shown once, ever)
@@ -773,6 +778,30 @@ class StripeWebhookEvent(Base):
     id = Column(String, primary_key=True)  # Stripe event id, e.g. "evt_..."
     event_type = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PushToken(Base):
+    """An Expo push token for one of the user's devices, with that device's timezone so
+    reminders go out in the evening local time."""
+    __tablename__ = "push_tokens"
+
+    token = Column(String, primary_key=True)  # "ExponentPushToken[...]"
+    user_id = Column(String, nullable=False, index=True)
+    platform = Column(String, nullable=True)
+    timezone = Column(String, nullable=True)  # IANA name, e.g. "America/New_York"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PushNotificationSent(Base):
+    """Ledger so each reminder goes out once: one row per (user, deadline, kind), or
+    (user, "weekly", ISO week) for the Sunday brief."""
+    __tablename__ = "push_notifications_sent"
+
+    id = Column(String, primary_key=True)  # f"{user_id}:{deadline_id}:{kind}"
+    user_id = Column(String, nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    sent_at = Column(DateTime, default=datetime.utcnow)
 
 
 class RevenueCatWebhookEvent(Base):
@@ -1796,6 +1825,17 @@ def ensure_iap_columns():
             pass  # Column already exists
 
 
+def ensure_notification_pref_columns():
+    """Add push-notification preference columns to user_profiles (nullable; NULL = enabled)."""
+    for col_name in ("notify_deadlines", "notify_exams", "notify_weekly"):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col_name} BOOLEAN"))
+            logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+
+
 def ensure_founding_member_expiry_column():
     """Add founding_member_expires_at to user_profiles: founding access is a 365-day
     grant from purchase, not permanent. Backfills any pre-existing founding_member=True
@@ -1938,6 +1978,7 @@ ensure_feature_panel_column()
 ensure_value_prompt_columns()
 ensure_founding_member_expiry_column()
 ensure_iap_columns()
+ensure_notification_pref_columns()
 ensure_naming_style_column()
 ensure_note_columns()
 Base.metadata.create_all(bind=engine)
@@ -2055,6 +2096,209 @@ async def _nudge_background_loop():
     while True:
         await _run_nudge_check()
         await asyncio.sleep(86400)
+
+
+# ============================================================
+# Push notifications (mobile app deadline reminders)
+# ============================================================
+
+PUSH_CHECK_INTERVAL_SECONDS = 15 * 60
+PUSH_SEND_HOUR = 18          # reminders go out from 6pm local...
+PUSH_SEND_UNTIL_HOUR = 22    # ...and are skipped after 10pm (e.g. backend was down), rather than sent late at night
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+EXAM_KEYWORDS = ("exam", "midterm", "final", "test")
+
+
+def _is_exam(d) -> bool:
+    if (d.type or "").strip().lower() == "exam":
+        return True
+    title = (d.title or "").lower()
+    return any(re.search(rf"\b{k}\b", title) for k in EXAM_KEYWORDS)
+
+
+def _deadline_label(d) -> str:
+    course = d.course.code or d.course.name if d.course else None
+    return f"{d.title or 'Untitled'}" + (f" ({course})" if course else "")
+
+
+def _local_now(tz_name: str | None, now_utc: datetime) -> datetime:
+    try:
+        tz = ZoneInfo(tz_name) if tz_name else ZoneInfo("America/New_York")
+    except Exception:
+        tz = ZoneInfo("America/New_York")  # most users are at CofC
+    return now_utc.replace(tzinfo=timezone.utc).astimezone(tz)
+
+
+def _expo_push_send(messages: list[dict]) -> list[dict]:
+    """POST to Expo's push service in chunks of 100. Returns one ticket per message."""
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if os.getenv("EXPO_ACCESS_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.getenv('EXPO_ACCESS_TOKEN')}"
+    tickets: list[dict] = []
+    with httpx.Client(timeout=30.0) as client:
+        for i in range(0, len(messages), 100):
+            chunk = messages[i:i + 100]
+            try:
+                r = client.post(EXPO_PUSH_URL, json=chunk, headers=headers)
+                data = r.json().get("data", []) if r.status_code == 200 else []
+            except Exception as e:
+                logger.warning(f"[Push] Expo send failed: {e}")
+                data = []
+            tickets.extend(data if len(data) == len(chunk) else [{"status": "error"}] * len(chunk))
+    return tickets
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, dict, list[str]]]:
+    """Return [(kind, {title, body, data}, ledger_ids)] not yet sent for this user today."""
+    today = local_now.date()
+    horizon = (today + timedelta(days=7)).isoformat()
+    deadlines = (
+        db.query(Deadline)
+        .filter(
+            Deadline.user_id == profile.user_id,
+            Deadline.date >= today.isoformat(),
+            Deadline.date <= horizon,
+            or_(Deadline.completed == False, Deadline.completed.is_(None)),  # noqa: E712
+            or_(Deadline.recurring == False, Deadline.recurring.is_(None)),  # noqa: E712  (skip weekly class meetings)
+        )
+        .all()
+    )
+    already = {
+        r[0] for r in db.query(PushNotificationSent.id).filter(PushNotificationSent.user_id == profile.user_id).all()
+    }
+    out = []
+
+    def pending(kind, items):
+        return [d for d in items if f"{profile.user_id}:{d.id}:{kind}" not in already]
+
+    def by_offset(n):
+        target = (today + timedelta(days=n)).isoformat()
+        return [d for d in deadlines if d.date == target]
+
+    if profile.notify_deadlines is not False:
+        for kind, offset, when in (("day_before", 1, "tomorrow"), ("three_days", 3, "in 3 days")):
+            items = pending(kind, by_offset(offset))
+            if not items:
+                continue
+            items.sort(key=lambda d: (not _is_exam(d), d.time or ""))
+            if len(items) == 1:
+                d = items[0]
+                t = format_time_12h(d.time) if d.time else None
+                title = f"Due {when}: {d.title or 'Untitled'}"
+                body = (d.course.code or d.course.name) if d.course else "To do"
+                body += f" · {t}" if t else ""
+            else:
+                title = f"{_plural(len(items), 'deadline')} due {when}"
+                body = ", ".join(_deadline_label(d) for d in items[:3]) + (f", +{len(items) - 3} more" if len(items) > 3 else "")
+            out.append((kind, {"title": title, "body": body, "data": {"screen": "home", "date": items[0].date}},
+                        [f"{profile.user_id}:{d.id}:{kind}" for d in items]))
+
+    if profile.notify_exams is not False:
+        items = pending("exam_week", [d for d in by_offset(7) if _is_exam(d)])
+        if items:
+            d = items[0]
+            title = f"{d.title or 'Exam'} is a week away" if len(items) == 1 else f"{_plural(len(items), 'exam')} next week"
+            body = (
+                f"{(d.course.code or d.course.name) if d.course else ''} · {parse_ymd_label(d.date)}. Want a study plan? Ask ClassMate."
+                if len(items) == 1 else ", ".join(_deadline_label(x) for x in items[:3])
+            ).lstrip(" ·")
+            out.append(("exam_week", {"title": title, "body": body, "data": {"screen": "chat"}},
+                        [f"{profile.user_id}:{x.id}:exam_week" for x in items]))
+
+    if profile.notify_weekly is not False and local_now.weekday() == 6:  # Sunday
+        iso = today.isocalendar()
+        ledger_id = f"{profile.user_id}:weekly:{iso[0]}-W{iso[1]:02d}"
+        week = [d for d in deadlines if today.isoformat() < d.date <= horizon]
+        if ledger_id not in already and week:
+            exams = [d for d in week if _is_exam(d)]
+            busiest = Counter(d.date for d in week).most_common(1)[0][0]
+            body = f"Busiest day: {parse_date_obj(busiest).strftime('%A')}."
+            if exams:
+                body = f"Includes {_plural(len(exams), 'exam')}. " + body
+            out.append(("weekly", {"title": f"Your week: {_plural(len(week), 'deadline')}", "body": body,
+                                   "data": {"screen": "calendar"}}, [ledger_id]))
+    return out
+
+
+def format_time_12h(t: str) -> str:
+    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*([ap]m)?\s*$", t or "", re.I)
+    if not m:
+        return t
+    h, mins, suffix = int(m.group(1)), m.group(2), m.group(3)
+    if suffix:
+        return f"{h}:{mins} {suffix.upper()}"
+    return f"{h % 12 or 12}:{mins} {'PM' if h >= 12 else 'AM'}"
+
+
+def parse_date_obj(ymd: str) -> date:
+    return datetime.strptime(ymd, "%Y-%m-%d").date()
+
+
+def parse_ymd_label(ymd: str) -> str:
+    d = parse_date_obj(ymd)
+    return f"{d.strftime('%a, %b')} {d.day}"
+
+
+def _run_push_reminders(now_utc: datetime | None = None) -> int:
+    """One pass: for every user with a registered device whose local time is in the evening
+    send window, send any reminders not yet sent. Returns the number of notifications sent."""
+    now_utc = now_utc or datetime.utcnow()
+    db = SessionLocal()
+    sent = 0
+    try:
+        tokens = db.query(PushToken).all()
+        by_user: dict[str, list] = {}
+        for t in tokens:
+            by_user.setdefault(t.user_id, []).append(t)
+        for user_id, user_tokens in by_user.items():
+            try:
+                local = _local_now(user_tokens[0].timezone, now_utc)
+                if not (PUSH_SEND_HOUR <= local.hour < PUSH_SEND_UNTIL_HOUR):
+                    continue
+                profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+                if not profile:
+                    continue
+                reminders = _build_user_reminders(db, profile, local)
+                for kind, msg, ledger_ids in reminders:
+                    messages = [{"to": t.token, "sound": "default", **msg} for t in user_tokens]
+                    tickets = _expo_push_send(messages)
+                    delivered = False
+                    for t, ticket in zip(user_tokens, tickets):
+                        if ticket.get("status") == "ok":
+                            delivered = True
+                        elif (ticket.get("details") or {}).get("error") == "DeviceNotRegistered":
+                            db.delete(t)  # app uninstalled / token revoked
+                    if delivered:
+                        for lid in ledger_ids:
+                            db.merge(PushNotificationSent(id=lid, user_id=user_id, kind=kind))
+                        sent += 1
+                    db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"[Push] Reminder pass failed for user {user_id}: {e}")
+        if sent:
+            logger.info(f"[Push] Sent {sent} reminder notifications")
+    except Exception as e:
+        logger.error(f"[Push] Reminder pass error: {e}")
+    finally:
+        db.close()
+    return sent
+
+
+async def _push_background_loop():
+    """Checks every 15 minutes; each user is only messaged inside their local 6-10pm window,
+    and the ledger guarantees one notification per deadline per kind."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            await asyncio.to_thread(_run_push_reminders)
+        except Exception as e:
+            logger.error(f"[Push] Loop error: {e}")
+        await asyncio.sleep(PUSH_CHECK_INTERVAL_SECONDS)
 
 
 LMS_SYNC_INTERVAL_SECONDS = 3 * 60 * 60  # 3 hours
@@ -2642,6 +2886,10 @@ async def startup_event():
     asyncio.create_task(_lms_background_loop())
     logger.info("[Startup] LMS background sync loop started")
 
+    # Mobile push reminders (no-op until devices register tokens)
+    asyncio.create_task(_push_background_loop())
+    logger.info("[Startup] Push reminder loop started")
+
     logger.info("=" * 50)
     logger.info("[Startup] ClassMate Backend API ready!")
     logger.info("=" * 50)
@@ -2825,6 +3073,8 @@ def auth_delete_account(
     db.query(ChatConversation).filter(ChatConversation.user_id == uid).delete(synchronize_session=False)
 
     db.query(NudgeFlag).filter(NudgeFlag.user_id == uid).delete(synchronize_session=False)
+    db.query(PushToken).filter(PushToken.user_id == uid).delete(synchronize_session=False)
+    db.query(PushNotificationSent).filter(PushNotificationSent.user_id == uid).delete(synchronize_session=False)
     db.query(CalendarEntry).filter(CalendarEntry.user_id == uid).delete(synchronize_session=False)
     db.query(LMSConnection).filter(LMSConnection.user_id == uid).delete(synchronize_session=False)
 
@@ -3366,6 +3616,83 @@ def get_subscription(current_user: User = Depends(get_current_user)):
                 else None
             ),
         }
+    finally:
+        db.close()
+
+
+class PushTokenRequest(BaseModel):
+    token: str = Field(description="Expo push token, e.g. 'ExponentPushToken[...]'")
+    platform: str | None = Field(None, description="'ios' or 'android'")
+    timezone: str | None = Field(None, description="Device IANA timezone, e.g. 'America/New_York'")
+
+
+class NotificationSettings(BaseModel):
+    deadlines: bool = Field(True, description="3 days before and the day before each deadline")
+    exams: bool = Field(True, description="Heads-up 7 days before exams")
+    weekly: bool = Field(True, description="Sunday-evening brief of the week ahead")
+
+
+@app.post("/me/push-token", tags=["user"], summary="Register this device for push notifications")
+def register_push_token(payload: PushTokenRequest, current_user: User = Depends(get_current_user)):
+    if not payload.token.startswith(("ExponentPushToken[", "ExpoPushToken[")):
+        raise HTTPException(status_code=400, detail="Invalid push token")
+    db = SessionLocal()
+    try:
+        tz = payload.timezone
+        if tz:
+            try:
+                ZoneInfo(tz)
+            except Exception:
+                tz = None
+        row = db.query(PushToken).filter(PushToken.token == payload.token).first()
+        if row:
+            row.user_id = current_user.id  # same device, possibly a different account now
+            row.platform = payload.platform
+            row.timezone = tz or row.timezone
+            row.updated_at = datetime.utcnow()
+        else:
+            db.add(PushToken(token=payload.token, user_id=current_user.id, platform=payload.platform, timezone=tz))
+        db.commit()
+        return {"registered": True}
+    finally:
+        db.close()
+
+
+@app.delete("/me/push-token", tags=["user"], summary="Unregister this device (call on sign-out)")
+def unregister_push_token(payload: PushTokenRequest, current_user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        db.query(PushToken).filter(PushToken.token == payload.token, PushToken.user_id == current_user.id).delete(synchronize_session=False)
+        db.commit()
+        return {"registered": False}
+    finally:
+        db.close()
+
+
+@app.get("/me/notification-settings", tags=["user"], summary="Get push notification preferences", response_model=NotificationSettings)
+def get_notification_settings(current_user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        p = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        return {
+            "deadlines": p.notify_deadlines is not False if p else True,
+            "exams": p.notify_exams is not False if p else True,
+            "weekly": p.notify_weekly is not False if p else True,
+        }
+    finally:
+        db.close()
+
+
+@app.put("/me/notification-settings", tags=["user"], summary="Update push notification preferences", response_model=NotificationSettings)
+def update_notification_settings(payload: NotificationSettings, current_user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        p = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        if not p:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        p.notify_deadlines, p.notify_exams, p.notify_weekly = payload.deadlines, payload.exams, payload.weekly
+        db.commit()
+        return payload
     finally:
         db.close()
 
