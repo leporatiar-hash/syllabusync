@@ -1,10 +1,11 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
-import { Linking, useColorScheme, View } from 'react-native';
+import { Linking, View } from 'react-native';
 
 import { Button, Text } from '@/components/ui';
-import { Brand, Spacing } from '@/constants/theme';
+import { Brand, C, Spacing } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { checkForcedUpdate } from '@/lib/version';
 
@@ -12,6 +13,7 @@ SplashScreen.preventAutoHideAsync();
 
 function RootNavigator() {
   const { ready, me } = useAuth();
+  const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   const [mustUpdate, setMustUpdate] = useState(false);
 
   useEffect(() => {
@@ -19,10 +21,10 @@ function RootNavigator() {
   }, []);
 
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync();
-  }, [ready]);
+    if (ready && fontsLoaded) SplashScreen.hideAsync();
+  }, [ready, fontsLoaded]);
 
-  if (!ready) return null;
+  if (!ready || !fontsLoaded) return null;
   if (mustUpdate) return <ForceUpdate />;
 
   const signedIn = !!me;
@@ -30,6 +32,7 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="settings" />
         <Stack.Screen name="reminders" options={{ presentation: 'modal', gestureEnabled: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
@@ -53,10 +56,8 @@ function ForceUpdate() {
 }
 
 export default function RootLayout() {
-  const scheme = useColorScheme();
-  const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
   return (
-    <ThemeProvider value={{ ...base, colors: { ...base.colors, primary: Brand } }}>
+    <ThemeProvider value={{ ...DefaultTheme, colors: { ...DefaultTheme.colors, primary: Brand, background: C.pageBg } }}>
       <AuthProvider>
         <RootNavigator />
       </AuthProvider>

@@ -1,5 +1,5 @@
-// Deadlines store dates as local YYYY-MM-DD strings; never parse them with new Date('YYYY-MM-DD')
-// (that's UTC midnight, which shows as the previous day in US timezones).
+// Deadline dates are local "YYYY-MM-DD" strings. Mirrors Frontend/lib/deadlineGroups.ts so the app
+// groups and labels deadlines exactly like the website.
 
 export function parseYmd(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -11,37 +11,62 @@ export function toYmd(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+export const localToday = () => toYmd(new Date());
+
 export function addDays(d: Date, n: number): Date {
   const r = new Date(d);
   r.setDate(r.getDate() + n);
   return r;
 }
 
+export function addDaysYmd(ymd: string, n: number): string {
+  return toYmd(addDays(parseYmd(ymd), n));
+}
+
 export function daysUntil(ymd: string, today = new Date()): number {
-  const a = parseYmd(toYmd(today)).getTime();
-  return Math.round((parseYmd(ymd).getTime() - a) / 86_400_000);
+  return Math.round((parseYmd(ymd).getTime() - parseYmd(toYmd(today)).getTime()) / 86_400_000);
 }
 
-export function relativeDay(ymd: string): string {
-  const n = daysUntil(ymd);
-  if (n === 0) return 'Today';
-  if (n === 1) return 'Tomorrow';
-  if (n === -1) return 'Yesterday';
-  const d = parseYmd(ymd);
-  if (n > 1 && n < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** "Today" / "Tomorrow" / "Tue, Oct 6" (year added when not this year). Same as the web. */
+export function formatDeadlineDate(iso: string | null | undefined, today = localToday()): string {
+  if (!iso || !ISO.test(iso)) return 'No date';
+  if (iso === today) return 'Today';
+  if (iso === addDaysYmd(today, 1)) return 'Tomorrow';
+  const d = parseYmd(iso);
+  const sameYear = d.getFullYear() === parseYmd(today).getFullYear();
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
 }
 
-/** "23:59" or "11:59pm" -> "11:59 PM". Returns null for empty input. */
+/** Kept for older call sites. */
+export const relativeDay = (ymd: string) => formatDeadlineDate(ymd);
+
+export function groupDeadlines<T extends { date?: string | null }>(items: T[], today = localToday()) {
+  const weekEnd = addDaysYmd(today, 6);
+  const earlier: T[] = [], week: T[] = [], later: T[] = [], undated: T[] = [];
+  for (const it of items) {
+    const d = it.date ?? '';
+    if (!ISO.test(d)) undated.push(it);
+    else if (d < today) earlier.push(it);
+    else if (d <= weekEnd) week.push(it);
+    else later.push(it);
+  }
+  const by = (a: T, b: T) => (a.date! < b.date! ? -1 : a.date! > b.date! ? 1 : 0);
+  earlier.sort((a, b) => by(b, a));
+  week.sort(by);
+  later.sort(by);
+  return { earlier, week, later: [...later, ...undated] };
+}
+
+/** "23:59" or "11:59pm" -> "11:59 PM". Web shows times as stored; this is for push-style labels. */
 export function formatTime(t: string | null): string | null {
   if (!t) return null;
   const m = t.trim().match(/^(\d{1,2}):(\d{2})\s*([ap]m)?$/i);
   if (!m) return t;
   let h = Number(m[1]);
-  const min = m[2];
-  const suffix = m[3]?.toLowerCase();
-  if (suffix) return `${h}:${min} ${suffix.toUpperCase()}`;
+  if (m[3]) return `${h}:${m[2]} ${m[3].toUpperCase()}`;
   const ampm = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
-  return `${h}:${min} ${ampm}`;
+  return `${h}:${m[2]} ${ampm}`;
 }
