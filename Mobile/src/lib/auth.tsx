@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { api, publicPost, setSessionExpiredHandler } from './api';
+import { registerForPush, unregisterPush } from './notifications';
 import { identifyPurchaser, resetPurchaser } from './purchases';
 import { clearTokens, loadTokens, saveTokens } from './tokens';
 import type { Me } from './types';
@@ -10,6 +11,9 @@ type TokenResponse = { access_token: string; refresh_token: string };
 type AuthState = {
   ready: boolean;
   me: Me | null;
+  /** True right after creating an account, until the post-signup paywall has been shown. */
+  justSignedUp: boolean;
+  clearJustSignedUp: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, referralSource?: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -21,14 +25,17 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
+  const [justSignedUp, setJustSignedUp] = useState(false);
 
   const loadMe = useCallback(async () => {
     const data = await api<Me>('/me');
     setMe(data);
     identifyPurchaser(data.user_id);
+    registerForPush(false); // refresh token/timezone if already allowed; never prompts here
   }, []);
 
   const signOut = useCallback(async () => {
+    await unregisterPush();
     await clearTokens();
     await resetPurchaser();
     setMe(null);
@@ -67,14 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         referral_source: referralSource || null,
       });
       await saveTokens(t.access_token, t.refresh_token);
+      setJustSignedUp(true);
       await loadMe();
     },
     [loadMe],
   );
 
+  const clearJustSignedUp = useCallback(() => setJustSignedUp(false), []);
+
   const value = useMemo(
-    () => ({ ready, me, signIn, signUp, signOut, refreshMe: loadMe }),
-    [ready, me, signIn, signUp, signOut, loadMe],
+    () => ({ ready, me, justSignedUp, clearJustSignedUp, signIn, signUp, signOut, refreshMe: loadMe }),
+    [ready, me, justSignedUp, clearJustSignedUp, signIn, signUp, signOut, loadMe],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

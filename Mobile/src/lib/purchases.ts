@@ -37,10 +37,16 @@ export async function resetPurchaser() {
   }
 }
 
-/** Shows the RevenueCat paywall (designed in the RevenueCat dashboard). Returns true on purchase/restore. */
+/**
+ * Shows the RevenueCat paywall (designed in the RevenueCat dashboard), always with a close button
+ * so it can be skipped. No-op for users who already have Pro. Returns true on purchase/restore.
+ */
 export async function presentPaywall(): Promise<boolean> {
   if (!configured) return false;
-  const result = await RevenueCatUI.presentPaywallIfNeeded({ requiredEntitlementIdentifier: PRO_ENTITLEMENT });
+  const result = await RevenueCatUI.presentPaywallIfNeeded({
+    requiredEntitlementIdentifier: PRO_ENTITLEMENT,
+    displayCloseButton: true,
+  });
   return result === PAYWALL_RESULT.PURCHASED || result === PAYWALL_RESULT.RESTORED;
 }
 

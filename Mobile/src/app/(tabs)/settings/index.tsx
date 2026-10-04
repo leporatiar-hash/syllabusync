@@ -1,6 +1,7 @@
 import * as WebBrowser from 'expo-web-browser';
-import { useState } from 'react';
-import { Alert, RefreshControl, ScrollView, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { Alert, Linking, RefreshControl, ScrollView, Switch, View } from 'react-native';
 
 import { Button, Card, Icon, Row, SectionHeader, Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
@@ -9,6 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { APP_VERSION, WEB_URL } from '@/lib/config';
+import { notificationPermission, registerForPush, type NotificationSettings } from '@/lib/notifications';
 import { openManageSubscriptions, presentPaywall, purchasesEnabled, restorePurchases } from '@/lib/purchases';
 import type { Subscription } from '@/lib/types';
 
@@ -27,6 +29,25 @@ export default function Settings() {
   const { me, signOut, refreshMe } = useAuth();
   const { data: sub, setData: setSub, refreshing, refresh } = useApi<Subscription>('/me/subscription');
   const [busy, setBusy] = useState<'upgrade' | 'restore' | 'delete' | null>(null);
+  const { data: prefs, setData: setPrefs } = useApi<NotificationSettings>('/me/notification-settings');
+  const [permission, setPermission] = useState<string>('undetermined');
+
+  useFocusEffect(
+    useCallback(() => {
+      notificationPermission().then(setPermission);
+    }, []),
+  );
+
+  const togglePref = async (key: keyof NotificationSettings, value: boolean) => {
+    if (!prefs) return;
+    const next = { ...prefs, [key]: value };
+    setPrefs(next);
+    try {
+      await api('/me/notification-settings', { method: 'PUT', body: JSON.stringify(next) });
+    } catch {
+      setPrefs(prefs);
+    }
+  };
 
   const reloadSub = async () => {
     const s = await api<Subscription>('/me/subscription');
@@ -137,6 +158,37 @@ export default function Settings() {
           </Row>
         </Card>
       ) : null}
+
+      <SectionHeader title="Reminders" />
+      <Card>
+        {permission !== 'granted' ? (
+          <Row
+            onPress={async () => {
+              if (permission === 'denied') return Linking.openSettings();
+              await registerForPush(true);
+              setPermission(await notificationPermission());
+            }}>
+            <Icon name="bell.slash" size={20} color={t.danger} />
+            <View style={{ flex: 1 }}>
+              <Text>Notifications are off</Text>
+              <Text variant="caption">{permission === 'denied' ? 'Tap to turn them on in iOS Settings' : 'Tap to turn them on'}</Text>
+            </View>
+          </Row>
+        ) : null}
+        {([
+          ['deadlines', 'Deadlines', '3 days and 1 day before each one'],
+          ['exams', 'Exams', 'A week before every exam'],
+          ['weekly', 'Weekly brief', 'Sunday evening'],
+        ] as const).map(([key, label, detail], i) => (
+          <Row key={key} last={i === 2}>
+            <View style={{ flex: 1 }}>
+              <Text>{label}</Text>
+              <Text variant="caption">{detail}</Text>
+            </View>
+            <Switch value={prefs?.[key] ?? true} disabled={!prefs} onValueChange={(v) => togglePref(key, v)} trackColor={{ true: t.tint }} />
+          </Row>
+        ))}
+      </Card>
 
       <SectionHeader title="More on the web" />
       <Card>
