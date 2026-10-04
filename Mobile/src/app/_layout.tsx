@@ -4,7 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { Linking, View } from 'react-native';
 
-import { Button, Text } from '@/components/ui';
+import { GradientButton, T } from '@/components/web';
 import { Brand, C, Spacing } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { checkForcedUpdate } from '@/lib/version';
@@ -37,8 +37,8 @@ function RootNavigator() {
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" />
-        <Stack.Screen name="signup" options={{ headerShown: true, title: 'Create account', headerBackTitle: 'Back' }} />
-        <Stack.Screen name="forgot-password" options={{ headerShown: true, title: 'Reset password', presentation: 'modal' }} />
+        <Stack.Screen name="signup" />
+        <Stack.Screen name="forgot-password" />
       </Stack.Protected>
     </Stack>
   );
@@ -46,11 +46,11 @@ function RootNavigator() {
 
 function ForceUpdate() {
   return (
-    <View style={{ flex: 1, justifyContent: 'center', padding: Spacing.five, gap: Spacing.four }}>
-      <Text variant="title">Update required</Text>
-      <Text variant="secondary">This version of ClassMate is no longer supported. Please update to keep using the app.</Text>
+    <View style={{ flex: 1, justifyContent: 'center', padding: Spacing.five, gap: Spacing.four, backgroundColor: C.pageBg }}>
+      <T size={26} weight="semibold" color={C.slate900}>Update required</T>
+      <T size={15} color={C.slate500}>This version of ClassMate is no longer supported. Please update to keep using the app.</T>
       {/* TODO(app store): replace with the real App Store id once the listing exists */}
-      <Button title="Open App Store" onPress={() => Linking.openURL('itms-apps://apps.apple.com/app/classmate')} />
+      <GradientButton title="Open App Store" size="lg" onPress={() => Linking.openURL('itms-apps://apps.apple.com/app/classmate')} />
     </View>
   );
 }

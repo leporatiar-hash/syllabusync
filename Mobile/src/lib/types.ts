@@ -6,6 +6,8 @@ export type Me = {
     email: string;
     full_name: string | null;
     school_name: string | null;
+    school_type?: string | null;
+    academic_year?: string | null;
     major: string | null;
     naming_style: string;
   } | null;
@@ -48,6 +50,7 @@ export type Deadline = {
   description: string | null;
   completed: boolean;
   source: string | null;
+  recurring?: boolean | null;
 };
 
 export type ChatMessage = {

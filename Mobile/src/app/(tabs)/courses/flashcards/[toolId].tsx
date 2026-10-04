@@ -18,7 +18,7 @@ export default function Flashcards() {
   const { data, setData } = useApi<FlashSet>(`/flashcard-sets/${toolId}`);
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const cards = data?.flashcards ?? [];
+  const cards = useMemo(() => data?.flashcards ?? [], [data]);
   const card = cards[i];
   const known = useMemo(() => cards.filter((c) => c.grade === 'known').length, [cards]);
 

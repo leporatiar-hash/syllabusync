@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -48,15 +48,13 @@ export function CourseFormModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (visible) {
-      setV({ name: initial?.name ?? '', code: initial?.code ?? '', semester: initial?.semester ?? '', color: initial?.color ?? null });
-      setError(null);
-    }
-  }, [visible, initial]);
+  const reset = () => {
+    setV({ name: initial?.name ?? '', code: initial?.code ?? '', semester: initial?.semester ?? '', color: initial?.color ?? null });
+    setError(null);
+  };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose} onShow={reset}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: C.white }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8 }}>
           <T size={20} weight="semibold" color={C.slate900}>{title}</T>

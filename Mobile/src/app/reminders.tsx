@@ -4,20 +4,20 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Card, Icon, Text } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { Bell, CalendarDays, Clock, GraduationCap } from 'lucide-react-native';
+
+import { Card, GradientButton, IconSquare, OutlineButton, T } from '@/components/web';
+import { C, Spacing } from '@/constants/theme';
 import { registerForPush, REMINDERS_ASKED_KEY } from '@/lib/notifications';
 
 const ITEMS = [
-  { icon: 'clock', title: '3 days and 1 day before', body: 'Every assignment, quiz, and project.' },
-  { icon: 'graduationcap', title: 'A week before exams', body: 'Enough time to actually study.' },
-  { icon: 'calendar', title: 'Sunday night brief', body: 'Your week at a glance.' },
-] as const;
+  { icon: Clock, title: '3 days and 1 day before', body: 'Every assignment, quiz, and project.' },
+  { icon: GraduationCap, title: 'A week before exams', body: 'Enough time to actually study.' },
+  { icon: CalendarDays, title: 'Sunday night brief', body: 'Your week at a glance.' },
+];
 
 /** Explains reminders before the iOS permission prompt (which can only be shown once). */
 export default function Reminders() {
-  const t = useTheme();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
 
@@ -27,28 +27,27 @@ export default function Reminders() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.background, padding: Spacing.five, paddingBottom: insets.bottom + Spacing.four, gap: Spacing.four }}>
+    <View style={{ flex: 1, backgroundColor: C.pageBg, padding: Spacing.five, paddingBottom: insets.bottom + Spacing.four, gap: Spacing.four }}>
       <View style={{ alignItems: 'center', gap: Spacing.three, marginTop: Spacing.five }}>
-        <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: t.tint, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="bell.badge.fill" size={36} color="#fff" />
-        </View>
-        <Text variant="title" style={{ textAlign: 'center' }}>Never miss a deadline</Text>
-        <Text variant="secondary" style={{ textAlign: 'center' }}>ClassMate reminds you in the evening, before things are due.</Text>
+        <IconSquare icon={Bell} bg={C.brand} fg="#fff" size={72} radius={20} />
+        <T size={26} weight="semibold" color={C.slate900} style={{ textAlign: 'center', lineHeight: 32 }}>Never miss a deadline</T>
+        <T size={15} color={C.slate500} style={{ textAlign: 'center' }}>ClassMate reminds you in the evening, before things are due.</T>
       </View>
-      <Card style={{ padding: Spacing.four, gap: Spacing.four }}>
+      <Card radius={24} padding={20} style={{ gap: Spacing.four }}>
         {ITEMS.map((it) => (
           <View key={it.title} style={{ flexDirection: 'row', gap: Spacing.three, alignItems: 'center' }}>
-            <Icon name={it.icon} size={22} color={t.tint} />
+            <IconSquare icon={it.icon} bg="#EEF2FF" fg={C.brand} size={36} radius={10} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontWeight: '600' }}>{it.title}</Text>
-              <Text variant="caption">{it.body}</Text>
+              <T size={14} weight="semibold" color={C.slate900}>{it.title}</T>
+              <T size={12} color={C.slate500}>{it.body}</T>
             </View>
           </View>
         ))}
       </Card>
       <View style={{ flex: 1 }} />
-      <Button
+      <GradientButton
         title="Turn on reminders"
+        size="lg"
         loading={busy}
         onPress={async () => {
           setBusy(true);
@@ -56,8 +55,8 @@ export default function Reminders() {
           await done();
         }}
       />
-      <Button title="Not now" variant="secondary" onPress={done} />
-      <Text variant="caption" style={{ textAlign: 'center' }}>You can change this anytime in Settings.</Text>
+      <OutlineButton title="Not now" onPress={done} />
+      <T size={12} color={C.slate400} style={{ textAlign: 'center' }}>You can change this anytime in Settings.</T>
     </View>
   );
 }

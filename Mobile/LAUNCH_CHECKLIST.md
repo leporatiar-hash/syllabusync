@@ -1,7 +1,10 @@
 # ClassMate iOS: launch checklist
 
-Status as of 2026-10-02: the app runs end to end in the iOS Simulator against a local backend
-(login, Home, Calendar, Courses, course detail, streaming Chat, Settings, deadline completion).
+Status as of 2026-10-04: the app is restyled to match tryclassmate.com (same header, bottom tabs, Inter font,
+colors, course gradients, type badges) and covers the web's main features: Home dashboard, Courses (add/edit/
+delete, syllabus upload), course detail (Timeline, Study Tools with flashcards/quiz/summary, Course Info, Notes),
+Calendar (month list, day sheet, quick-add tasks), Chat (streaming), Profile & Settings, plus deadline push
+reminders and a skippable paywall right after signup. Verified in the iOS Simulator against a local backend.
 The RevenueCat backend webhook is written and tested (`Backend/test_revenuecat.py`), but it is
 **committed only on the `mobile-backend-prep` branch and not deployed**.
 
@@ -49,6 +52,8 @@ Match the web prices so nobody is penalized for which store they used:
       Optional: `MOBILE_MIN_SUPPORTED_VERSION` / `MOBILE_LATEST_VERSION` (both default to 1.0.0).
 - [ ] Merge `mobile-backend-prep` → `main`. The schema change is additive only (4 nullable columns on
       `user_profiles`, a new `revenuecat_webhook_events` table). No Stripe or auth behavior changes.
+- [ ] Push reminders need nothing extra on Railway (they go through Expo's push service). Optional:
+      `EXPO_ACCESS_TOKEN` if you turn on "enhanced push security" in Expo.
 - [ ] Verify: `GET /app/config` returns 200; `POST /revenuecat/webhook` without auth returns 401; RevenueCat's
       "Send test event" returns 200.
 
@@ -57,7 +62,8 @@ Match the web prices so nobody is penalized for which store they used:
 ```bash
 cd Mobile
 npx eas-cli@latest login
-npx eas-cli@latest init                 # links the EAS project, writes extra.eas.projectId into app.json
+npx eas-cli@latest init                 # links the EAS project, writes extra.eas.projectId into app.json (push tokens need this)
+npx eas-cli@latest credentials -p ios   # let EAS create the APNs push key when asked
 npx eas-cli@latest build -p ios --profile production
 npx eas-cli@latest submit -p ios --latest
 ```
@@ -80,9 +86,8 @@ npx eas-cli@latest submit -p ios --latest
 
 ## 7. Review risks (known)
 
-- **4.2 Minimum functionality**: The app is native (tabs, calendar, chat, haptics) but read-mostly; adding courses
-  and syllabi happens on the web. Adding deadline reminders (local notifications) and syllabus upload before
-  submission would make this much safer. See "Next" below.
+- **4.2 Minimum functionality**: much lower risk now. The app has push reminders, syllabus upload, study tools,
+  notes, and chat natively.
 - **3.1.1 / 3.1.3**: The "More on the web" links open tryclassmate.com pages that show Stripe upgrade buttons.
   On the US storefront, linking out is allowed. To be conservative, either hide upgrade CTAs on the web when
   opened from the app (e.g. `?from=ios`) or drop those links for the review build.
@@ -91,10 +96,11 @@ npx eas-cli@latest submit -p ios --latest
 
 ## Next (not built yet)
 
-1. Local deadline reminders with `expo-notifications` (no server or APNs work needed for local ones).
-2. Upload a syllabus from the phone (`expo-document-picker` → `POST /courses/{id}/syllabus`) and add a course.
+1. Connect Canvas/iCal natively (still opens the web settings page).
+2. Profile photo upload, rich-text toolbar in notes (notes use markdown-style shortcuts that round-trip to the web editor).
 3. Replace the placeholder App Store URL in the force-update screen (`src/app/_layout.tsx`) once the listing exists.
-4. Push notifications (server-sent) and Android.
+4. Test a real push on a device: Simulator/Expo Go can't receive remote pushes; use the TestFlight build.
+5. Android.
 
 ## Local development
 
