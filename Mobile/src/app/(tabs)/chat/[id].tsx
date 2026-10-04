@@ -8,7 +8,9 @@ import { SimpleMarkdown } from '@/components/simple-markdown';
 import { LogoMark, T } from '@/components/web';
 import { C } from '@/constants/theme';
 import { api } from '@/lib/api';
-import { streamChatMessage } from '@/lib/chat-stream';
+import { ChatError, streamChatMessage } from '@/lib/chat-stream';
+import { track } from '@/lib/analytics';
+import { usePaywall } from '@/components/paywall';
 import type { ChatMessage, Conversation } from '@/lib/types';
 
 const PROMPTS = ['What’s due this week?', 'Make me a study plan for my next exam', 'Which class should I focus on today?', 'Quiz me on my notes'];
@@ -22,6 +24,7 @@ export default function ChatThread() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const { openPaywall } = usePaywall();
 
   useEffect(() => {
     if (id !== 'new') api<ChatMessage[]>(`/chat/conversations/${id}/messages`).then(setMessages).catch(() => {});
@@ -45,9 +48,16 @@ export default function ChatThread() {
         router.setParams({ id: convId });
       }
       await streamChatMessage(convId, content, (soFar) => setMessages((m) => m.map((x) => (x.id === botId ? { ...x, content: soFar } : x))));
+      track('chat_message');
     } catch (e) {
-      setMessages((m) => m.filter((x) => x.id !== botId));
-      setError(e instanceof Error ? e.message : 'Message failed to send');
+      setMessages((m) => m.filter((x) => x.id !== botId && x.id !== userMsg.id));
+      const msg = e instanceof Error ? e.message : 'Message failed to send';
+      setError(msg);
+      if (e instanceof ChatError && e.status === 403) {
+        track('limit_hit', { kind: 'chat' });
+        setInput(content);
+        openPaywall('limit', msg);
+      }
     } finally {
       setSending(false);
     }

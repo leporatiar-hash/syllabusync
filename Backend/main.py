@@ -676,6 +676,7 @@ class UserProfile(Base):
     iap_product_id = Column(String, nullable=True)
     iap_store = Column(String, nullable=True)              # "APP_STORE", "PLAY_STORE", ...
     iap_event_at = Column(DateTime, nullable=True)         # timestamp of the last applied event, to drop stale out-of-order ones
+    iap_period_type = Column(String, nullable=True)        # RevenueCat period_type: "TRIAL", "INTRO", or "NORMAL"
     # Push notification preferences (mobile app). NULL = on, so existing rows default to enabled.
     notify_deadlines = Column(Boolean, nullable=True)      # 3 days before + day before every deadline
     notify_exams = Column(Boolean, nullable=True)          # extra heads-up 7 days before exams
@@ -1128,6 +1129,7 @@ class SubscriptionOut(BaseModel):
     upgrade_prompt_dismissed_at: str | None = Field(None, description="ISO 8601 timestamp of the last time the user dismissed the founding-member upgrade prompt; null if never dismissed")
     billing_source: str | None = Field(None, description="Where Pro access comes from: 'stripe', 'app_store', 'founding', or null if not paying")
     iap_expires_at: str | None = Field(None, description="ISO 8601 timestamp when App Store Pro access lapses unless renewed; null if none")
+    is_trial: bool = Field(False, description="True while the App Store subscription is in its free-trial period (iap_expires_at is when the trial ends and billing starts)")
 
 
 class UserMeResponse(BaseModel):
@@ -1816,6 +1818,7 @@ def ensure_iap_columns():
         ("iap_product_id", "VARCHAR"),
         ("iap_store", "VARCHAR"),
         ("iap_event_at", "TIMESTAMP"),
+        ("iap_period_type", "VARCHAR"),
     ]:
         try:
             with engine.begin() as conn:
@@ -3615,6 +3618,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
                 if profile and profile.iap_expires_at
                 else None
             ),
+            "is_trial": bool(profile and _iap_active(profile) and profile.iap_period_type == "TRIAL"),
         }
     finally:
         db.close()
@@ -4144,6 +4148,7 @@ async def revenuecat_webhook(request: Request):
         profile.iap_expires_at = expires_at
         profile.iap_product_id = event.get("product_id") or profile.iap_product_id
         profile.iap_store = event.get("store") or profile.iap_store
+        profile.iap_period_type = event.get("period_type") or profile.iap_period_type
         profile.iap_event_at = event_at
         db.commit()
         logger.info(f"[RevenueCat] {event_type} for {profile.user_id}: iap_expires_at={expires_at}")

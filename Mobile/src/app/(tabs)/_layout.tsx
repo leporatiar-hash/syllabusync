@@ -8,13 +8,13 @@ import { AppHeader, WebTabBar } from '@/components/app-chrome';
 import { C } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
 import { notificationPermission, REMINDERS_ASKED_KEY } from '@/lib/notifications';
-import { presentPaywall, purchasesEnabled } from '@/lib/purchases';
 
 const SCREEN_ROUTES = { home: '/', calendar: '/calendar', courses: '/courses', chat: '/chat', settings: '/settings' } as const;
 
-/** First run after sign-in: post-signup paywall (skippable), then the reminders explainer once. */
+/** Right after signup: the onboarding flow (which ends with reminders + paywall). Otherwise, ask
+ *  existing users about reminders once. */
 function useFirstRunPrompts() {
-  const { justSignedUp, clearJustSignedUp, refreshMe } = useAuth();
+  const { justSignedUp, clearJustSignedUp } = useAuth();
   const ran = useRef(false);
   useEffect(() => {
     if (ran.current) return;
@@ -22,16 +22,13 @@ function useFirstRunPrompts() {
     (async () => {
       if (justSignedUp) {
         clearJustSignedUp();
-        if (purchasesEnabled) {
-          try {
-            if (await presentPaywall()) await refreshMe();
-          } catch {}
-        }
+        router.replace('/onboarding/school');
+        return;
       }
       const asked = await SecureStore.getItemAsync(REMINDERS_ASKED_KEY);
       if (!asked && (await notificationPermission()) === 'undetermined') router.push('/reminders');
     })();
-  }, [justSignedUp, clearJustSignedUp, refreshMe]);
+  }, [justSignedUp, clearJustSignedUp]);
 }
 
 /** Tapping a reminder opens the tab it's about (data.screen set by the backend). */

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { identify, resetAnalytics, track } from './analytics';
 import { api, publicPost, setSessionExpiredHandler } from './api';
 import { registerForPush, unregisterPush } from './notifications';
 import { identifyPurchaser, resetPurchaser } from './purchases';
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadMe = useCallback(async () => {
     const data = await api<Me>('/me');
     setMe(data);
+    identify(data.user_id, data.profile?.email);
     identifyPurchaser(data.user_id);
     registerForPush(false); // refresh token/timezone if already allowed; never prompts here
   }, []);
@@ -38,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await unregisterPush();
     await clearTokens();
     await resetPurchaser();
+    resetAnalytics();
     setMe(null);
   }, []);
 
@@ -76,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await saveTokens(t.access_token, t.refresh_token);
       setJustSignedUp(true);
       await loadMe();
+      track('signup', { referral_source: referralSource ?? null });
     },
     [loadMe],
   );

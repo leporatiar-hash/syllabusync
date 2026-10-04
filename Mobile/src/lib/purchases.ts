@@ -1,10 +1,12 @@
 import { Platform } from 'react-native';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
-import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
 
 import { PRO_ENTITLEMENT, REVENUECAT_IOS_KEY } from './config';
 
 let configured = false;
+
+/** Whether RevenueCat has been configured for the signed-in user (products can be fetched). */
+export const purchasesConfigured = () => configured;
 
 /** True once a RevenueCat key is set for this build. Without one, upgrade UI is hidden. */
 export const purchasesEnabled = Platform.OS === 'ios' && !!REVENUECAT_IOS_KEY;
@@ -35,19 +37,6 @@ export async function resetPurchaser() {
   } catch {
     // logOut throws if the current user is already anonymous; nothing to do.
   }
-}
-
-/**
- * Shows the RevenueCat paywall (designed in the RevenueCat dashboard), always with a close button
- * so it can be skipped. No-op for users who already have Pro. Returns true on purchase/restore.
- */
-export async function presentPaywall(): Promise<boolean> {
-  if (!configured) return false;
-  const result = await RevenueCatUI.presentPaywallIfNeeded({
-    requiredEntitlementIdentifier: PRO_ENTITLEMENT,
-    displayCloseButton: true,
-  });
-  return result === PAYWALL_RESULT.PURCHASED || result === PAYWALL_RESULT.RESTORED;
 }
 
 export async function restorePurchases(): Promise<boolean> {

@@ -14,7 +14,8 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { APP_VERSION, WEB_URL } from '@/lib/config';
 import { notificationPermission, registerForPush, type NotificationSettings } from '@/lib/notifications';
-import { openManageSubscriptions, presentPaywall, purchasesEnabled, restorePurchases } from '@/lib/purchases';
+import { usePaywall } from '@/components/paywall';
+import { openManageSubscriptions, purchasesEnabled, restorePurchases } from '@/lib/purchases';
 import type { Subscription } from '@/lib/types';
 
 // Same options as Frontend/app/settings/page.tsx.
@@ -42,6 +43,7 @@ function Select({ label, value, options, onChange }: { label: string; value: str
 /** The web's "Profile & Settings" page, plus the phone-only pieces: App Store plan, reminders, legal. */
 export default function Settings() {
   const { me, signOut, refreshMe } = useAuth();
+  const { openPaywall } = usePaywall();
   const sub = useApi<Subscription>('/me/subscription');
   const prefs = useApi<NotificationSettings>('/me/notification-settings');
   const [permission, setPermission] = useState('undetermined');
@@ -94,11 +96,7 @@ export default function Settings() {
   const upgrade = async () => {
     setBusy('upgrade');
     try {
-      if (await presentPaywall()) {
-        const ok = await waitForPro();
-        await refreshMe();
-        if (!ok) Alert.alert('Purchase received', 'Pro will unlock in a moment. Pull down to refresh if it doesn’t.');
-      }
+      if (await openPaywall('upgrade')) sub.setData(await api<Subscription>('/me/subscription'));
     } catch (e) {
       Alert.alert('Purchase failed', e instanceof Error ? e.message : 'Please try again.');
     } finally {
@@ -142,7 +140,9 @@ export default function Settings() {
 
   const s = sub.data;
   const isPro = s?.is_pro ?? me?.subscription.is_pro;
-  const planDetail = !s ? '' : s.billing_source === 'app_store'
+  const planDetail = !s ? '' : s.billing_source === 'app_store' && s.is_trial && s.iap_expires_at
+    ? `Free trial · ends ${new Date(s.iap_expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, then billed through the App Store`
+    : s.billing_source === 'app_store'
     ? `Billed through the App Store${s.iap_expires_at ? ` · renews ${new Date(s.iap_expires_at).toLocaleDateString()}` : ''}`
     : s.billing_source === 'stripe' ? 'Billed on tryclassmate.com'
     : s.billing_source === 'founding' ? 'Founding member'
@@ -194,10 +194,10 @@ export default function Settings() {
           <Card radius={24} padding={20} style={{ gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Star size={20} color={isPro ? '#F59E0B' : C.slate400} fill={isPro ? '#F59E0B' : 'transparent'} />
-              <T size={16} weight="semibold" color={C.slate900}>{isPro ? 'ClassMate Pro' : 'Free plan'}</T>
+              <T size={16} weight="semibold" color={C.slate900}>{isPro ? (s?.is_trial ? 'ClassMate Pro (trial)' : 'ClassMate Pro') : 'Free plan'}</T>
             </View>
             {planDetail ? <T size={13} color={C.slate500}>{planDetail}</T> : null}
-            {!isPro && purchasesEnabled ? <GradientButton title="Upgrade to Pro" loading={busy === 'upgrade'} onPress={upgrade} /> : null}
+            {!isPro && (purchasesEnabled || __DEV__) ? <GradientButton title="Upgrade to Pro" loading={busy === 'upgrade'} onPress={upgrade} /> : null}
             {isPro && s?.billing_source === 'app_store' ? <OutlineButton title="Manage subscription" onPress={openManageSubscriptions} /> : null}
             {purchasesEnabled && s?.billing_source !== 'stripe' ? (
               <Pressable onPress={busy ? undefined : restore}><T size={14} weight="medium" color={C.brand}>{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</T></Pressable>

@@ -4,6 +4,12 @@ import { apiRaw, errorMessage } from './api';
 import { API_URL } from './config';
 import { getAccessToken } from './tokens';
 
+export class ChatError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
 /**
  * POST a message to /chat/conversations/{id}/messages and stream the SSE reply
  * (`data: {"type": "chunk" | "done" | "error", ...}`), calling onChunk with the text so far.
@@ -22,7 +28,7 @@ export async function streamChatMessage(conversationId: string, content: string,
     await apiRaw('/me'); // triggers the shared token refresh
     res = await post();
   }
-  if (!res.ok || !res.body) throw new Error(await errorMessage(res as unknown as Response));
+  if (!res.ok || !res.body) throw new ChatError(await errorMessage(res as unknown as Response), res.status);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

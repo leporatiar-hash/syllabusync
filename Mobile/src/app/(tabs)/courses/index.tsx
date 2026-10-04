@@ -9,6 +9,7 @@ import { DashedBox, Eyebrow, GradientButton, IconSquare, PageBackground, Spinner
 import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { api } from '@/lib/api';
+import { track } from '@/lib/analytics';
 import { pickAndUploadSyllabus } from '@/lib/upload';
 import type { Course } from '@/lib/types';
 
@@ -34,7 +35,9 @@ export default function Courses() {
       if (!res.ok) return Alert.alert('Upload failed', res.error);
       await reload();
       const course = res.data?.course;
-      if (course?.id) router.push({ pathname: '/courses/[id]', params: { id: course.id } });
+      if (!course) return Alert.alert('Couldn’t read that file', res.data?.debug?.message ?? 'Try a PDF with selectable text.');
+      track('syllabus_uploaded', { deadlines: res.data?.deadlines?.length ?? 0, source: 'courses' });
+      router.push({ pathname: '/courses/[id]', params: { id: course.id } });
     } finally {
       setUploading(false);
     }

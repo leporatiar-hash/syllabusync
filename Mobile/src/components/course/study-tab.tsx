@@ -7,7 +7,8 @@ import { Alert, Pressable, View } from 'react-native';
 import { Card, DashedBox, GradientButton, IconSquare, T } from '@/components/web';
 import { C } from '@/constants/theme';
 import { apiRaw, errorMessage } from '@/lib/api';
-import { presentPaywall, purchasesEnabled } from '@/lib/purchases';
+import { usePaywall } from '@/components/paywall';
+import { track } from '@/lib/analytics';
 import type { CourseDetail } from '@/lib/types';
 
 type Kind = 'flashcards' | 'quiz' | 'summary';
@@ -26,6 +27,7 @@ export function StudyTab({ course, onGenerated }: { course: CourseDetail; onGene
   const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [selected, setSelected] = useState<Record<Kind, boolean>>({ flashcards: true, quiz: true, summary: true });
   const [busy, setBusy] = useState<Kind | null>(null);
+  const { openPaywall } = usePaywall();
 
   const pick = async () => {
     const res = await DocumentPicker.getDocumentAsync({
@@ -48,11 +50,9 @@ export function StudyTab({ course, onGenerated }: { course: CourseDetail; onGene
       if (!r.ok) {
         setBusy(null);
         const msg = await errorMessage(r);
-        if (r.status === 403 && purchasesEnabled) {
-          Alert.alert('You’ve hit the free limit', msg, [
-            { text: 'Not now', style: 'cancel' },
-            { text: 'See Pro', onPress: () => presentPaywall().then((ok) => ok && onGenerated()) },
-          ]);
+        if (r.status === 403) {
+          track('limit_hit', { kind: 'ai_generation' });
+          if (await openPaywall('limit', msg)) onGenerated();
         } else Alert.alert('Couldn’t generate', msg);
         onGenerated();
         return;

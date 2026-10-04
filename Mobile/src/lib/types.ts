@@ -21,6 +21,7 @@ export type Subscription = {
   is_founding_member: boolean;
   billing_source: 'stripe' | 'app_store' | 'founding' | string | null;
   iap_expires_at: string | null;
+  is_trial?: boolean;
   period_end?: string | null;
   ai_generations_used: number;
   ai_generations_max: number | null;

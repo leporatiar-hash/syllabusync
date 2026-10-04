@@ -159,6 +159,21 @@ def test_ignorable_events_return_200():
     assert _post({"nope": 1}).status_code == 400
 
 
+def test_trial_flag():
+    uid, h = _new_user()
+    t0 = _now_ms()
+    _post(_event("INITIAL_PURCHASE", uid, expiration_ms=t0 + 14 * DAY_MS, event_ms=t0 - 2000, period_type="TRIAL"))
+    s = _sub(h)
+    assert s["is_pro"] and s["is_trial"], s
+    # Trial converts: first RENEWAL is a NORMAL period
+    _post(_event("RENEWAL", uid, expiration_ms=t0 + 44 * DAY_MS, event_ms=t0 - 1000, period_type="NORMAL"))
+    s = _sub(h)
+    assert s["is_pro"] and not s["is_trial"], s
+    # Free user: never a trial
+    uid2, h2 = _new_user()
+    assert _sub(h2)["is_trial"] is False
+
+
 def test_stripe_checkout_refused_while_iap_active():
     uid, h = _new_user()
     _post(_event("INITIAL_PURCHASE", uid, expiration_ms=_now_ms() + 30 * DAY_MS))

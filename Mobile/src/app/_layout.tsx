@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { Linking, View } from 'react-native';
 
+import { PaywallProvider } from '@/components/paywall';
 import { GradientButton, T } from '@/components/web';
 import { Brand, C, Spacing } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth';
@@ -34,6 +35,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="reminders" options={{ presentation: 'modal', gestureEnabled: false }} />
+        <Stack.Screen name="onboarding" options={{ gestureEnabled: false, animation: 'fade' }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" />
@@ -59,7 +61,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={{ ...DefaultTheme, colors: { ...DefaultTheme.colors, primary: Brand, background: C.pageBg } }}>
       <AuthProvider>
-        <RootNavigator />
+        <PaywallProvider>
+          <RootNavigator />
+        </PaywallProvider>
       </AuthProvider>
     </ThemeProvider>
   );

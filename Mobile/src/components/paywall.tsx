@@ -1,0 +1,235 @@
+import { LinearGradient } from 'expo-linear-gradient';
+import * as WebBrowser from 'expo-web-browser';
+import { Check, X } from 'lucide-react-native';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from 'react-native';
+import Purchases, { INTRO_ELIGIBILITY_STATUS, PACKAGE_TYPE, type PurchasesPackage } from 'react-native-purchases';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { LogoMark, T } from '@/components/web';
+import { C, shadowSm } from '@/constants/theme';
+import { track } from '@/lib/analytics';
+import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { WEB_URL } from '@/lib/config';
+import { purchasesConfigured, purchasesEnabled, restorePurchases } from '@/lib/purchases';
+import type { Subscription } from '@/lib/types';
+
+/**
+ * Pro unlocks AI only; reminders, calendar and LMS sync are free for everyone (decided 2026-10-04).
+ * Numbers mirror Backend/main.py: FREE_AI_GENERATION_LIMIT=50/month, FREE_CHAT_MESSAGE_LIMIT=20/week,
+ * PRO_CHAT_MESSAGE_LIMIT=50/week. Keep this copy in sync if those change: Apple rejects paywalls that oversell.
+ */
+const BENEFITS = [
+  'Unlimited flashcards, quizzes & summaries',
+  '2.5× more AI chat: 50 messages a week',
+  'Study tools from any upload: PDFs, slides, notes',
+];
+const FREE_LINE = 'Free plan: 50 AI generations a month. Reminders, calendar & course sync are always free.';
+
+// Shown only when the store can't return products (Expo Go / before App Store Connect is set up).
+const FALLBACK = { annual: '$59.99', monthly: '$9.99', trialDays: 14 };
+
+export type PaywallReason = 'onboarding' | 'limit' | 'upgrade' | 'home_banner';
+
+type PaywallCtx = { openPaywall: (reason: PaywallReason, message?: string) => Promise<boolean> };
+const Ctx = createContext<PaywallCtx>({ openPaywall: async () => false });
+export const usePaywall = () => useContext(Ctx);
+
+const HEADLINES: Record<PaywallReason, string> = {
+  onboarding: 'Let ClassMate study with you',
+  limit: 'Keep studying with Pro',
+  upgrade: 'ClassMate Pro',
+  home_banner: 'ClassMate Pro',
+};
+
+function trialLabel(pkg: PurchasesPackage | undefined, eligible: boolean) {
+  const intro = pkg?.product.introPrice;
+  if (!eligible || !intro || intro.price !== 0) return null;
+  const n = intro.periodNumberOfUnits * intro.cycles;
+  const unit = intro.periodUnit.toLowerCase();
+  if (unit === 'week') return n === 1 ? '1-week' : `${n}-week`;
+  if (unit === 'day') return n % 7 === 0 ? `${n / 7}-week` : `${n}-day`;
+  if (unit === 'month') return n === 1 ? '1-month' : `${n}-month`;
+  return null;
+}
+
+function PlanCard({ selected, onPress, title, price, sub, badge }: { selected: boolean; onPress: () => void; title: string; price: string; sub: string; badge?: string }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected }} style={[{ borderRadius: 16, borderWidth: 2, borderColor: selected ? C.brand : C.slate200, backgroundColor: selected ? '#F5F8FF' : C.white, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }, selected ? shadowSm : null]}>
+      <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: selected ? C.brand : C.slate300, alignItems: 'center', justifyContent: 'center' }}>
+        {selected ? <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: C.brand }} /> : null}
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <T size={16} weight="semibold" color={C.slate900}>{title}</T>
+          {badge ? <View style={{ backgroundColor: C.greenBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 }}><T size={11} weight="semibold" color={C.green}>{badge}</T></View> : null}
+        </View>
+        <T size={13} color={C.slate500}>{sub}</T>
+      </View>
+      <T size={16} weight="semibold" color={C.slate900}>{price}</T>
+    </Pressable>
+  );
+}
+
+export function PaywallProvider({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+  const { refreshMe } = useAuth();
+  const [state, setState] = useState<{ reason: PaywallReason; message?: string } | null>(null);
+  const resolver = useRef<((v: boolean) => void) | null>(null);
+  const [packages, setPackages] = useState<{ annual?: PurchasesPackage; monthly?: PurchasesPackage }>({});
+  const [eligible, setEligible] = useState(true);
+  const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
+  const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
+
+  // Load products once the paywall opens (cheap after the first call; RevenueCat caches offerings).
+  useEffect(() => {
+    if (!state || !purchasesConfigured()) return;
+    (async () => {
+      try {
+        const offerings = await Purchases.getOfferings();
+        const pkgs = offerings.current?.availablePackages ?? [];
+        const annual = pkgs.find((p) => p.packageType === PACKAGE_TYPE.ANNUAL);
+        const monthly = pkgs.find((p) => p.packageType === PACKAGE_TYPE.MONTHLY);
+        setPackages({ annual, monthly });
+        if (annual) {
+          const res = await Purchases.checkTrialOrIntroductoryPriceEligibility([annual.product.identifier]);
+          setEligible(res[annual.product.identifier]?.status !== INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_INELIGIBLE);
+        }
+      } catch {}
+    })();
+  }, [state]);
+
+  const close = useCallback((purchased: boolean) => {
+    if (!purchased && state) track('paywall_dismissed', { reason: state.reason });
+    setState(null);
+    resolver.current?.(purchased);
+    resolver.current = null;
+  }, [state]);
+
+  const openPaywall = useCallback((reason: PaywallReason, message?: string) => {
+    // Only open where purchasing can work (or in dev, to preview the design).
+    if (!purchasesEnabled && !__DEV__) return Promise.resolve(false);
+    track('paywall_viewed', { reason });
+    setPlan('annual');
+    setState({ reason, message });
+    return new Promise<boolean>((resolve) => (resolver.current = resolve));
+  }, []);
+
+  /** The backend learns about purchases from the RevenueCat webhook, a moment after StoreKit confirms. */
+  const waitForPro = async () => {
+    for (let i = 0; i < 10; i++) {
+      try {
+        const s = await api<Subscription>('/me/subscription');
+        if (s.is_pro) return true;
+      } catch {}
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return false;
+  };
+
+  const buy = async () => {
+    const pkg = plan === 'annual' ? packages.annual : packages.monthly;
+    track('paywall_cta_clicked', { reason: state?.reason ?? null, plan });
+    if (!pkg) {
+      Alert.alert('Not available yet', 'Purchases will work once the App Store listing is live.');
+      return;
+    }
+    setBusy('buy');
+    try {
+      await Purchases.purchasePackage(pkg);
+      track('subscription_purchased', { plan, trial: !!trialLabel(packages.annual, eligible) && plan === 'annual' });
+      await waitForPro();
+      await refreshMe();
+      close(true);
+    } catch (e) {
+      if (!(e as { userCancelled?: boolean })?.userCancelled) Alert.alert('Purchase failed', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const restore = async () => {
+    setBusy('restore');
+    try {
+      const found = await restorePurchases();
+      if (found) {
+        track('purchase_restored');
+        await waitForPro();
+        await refreshMe();
+        close(true);
+      } else Alert.alert('Nothing to restore', 'No ClassMate subscription was found for this Apple ID.');
+    } catch (e) {
+      Alert.alert('Restore failed', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const annualPrice = packages.annual?.product.priceString ?? FALLBACK.annual;
+  const monthlyPrice = packages.monthly?.product.priceString ?? FALLBACK.monthly;
+  const annualPerMonth = packages.annual?.product.pricePerMonthString ?? '$5.00';
+  const savings = packages.annual && packages.monthly
+    ? Math.round((1 - packages.annual.product.price / (packages.monthly.product.price * 12)) * 100)
+    : 50;
+  const trial = packages.annual ? trialLabel(packages.annual, eligible) : eligible ? `${FALLBACK.trialDays / 7}-week` : null;
+  const showTrial = plan === 'annual' && !!trial;
+  const cta = showTrial ? `Start ${trial} free trial` : `Subscribe for ${plan === 'annual' ? `${annualPrice}/year` : `${monthlyPrice}/month`}`;
+  const fineprint = showTrial
+    ? `Free for ${trial!.replace('-', ' ')}${trial!.endsWith('week') ? 's' : ''}, then ${annualPrice}/year. Cancel anytime in Settings before the trial ends and you won’t be charged.`
+    : `${plan === 'annual' ? `${annualPrice}/year` : `${monthlyPrice}/month`}, renews automatically. Cancel anytime in Settings.`;
+
+  return (
+    <Ctx.Provider value={{ openPaywall }}>
+      {children}
+      <Modal visible={!!state} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => close(false)}>
+        <LinearGradient colors={['#EEF2FF', '#F8FAFC', C.white]} style={{ flex: 1, paddingTop: insets.top }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8 }}>
+            <Pressable onPress={() => close(false)} hitSlop={12} accessibilityLabel="Close" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(15,23,42,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={18} color={C.slate500} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }}>
+            <View style={{ alignItems: 'center', marginTop: 4 }}>
+              <LogoMark size={56} />
+              <T size={26} weight="bold" color={C.slate900} style={{ marginTop: 16, textAlign: 'center', lineHeight: 32, letterSpacing: -0.5 }}>{state ? HEADLINES[state.reason] : ''}</T>
+              {state?.message ? <T size={15} color={C.slate600} style={{ marginTop: 8, textAlign: 'center' }}>{state.message}</T> : null}
+            </View>
+
+            <View style={{ gap: 12, marginTop: 24 }}>
+              {BENEFITS.map((b) => (
+                <View key={b} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' }}><Check size={14} color="#fff" strokeWidth={3} /></View>
+                  <T size={15} color={C.slate800} style={{ flex: 1 }}>{b}</T>
+                </View>
+              ))}
+            </View>
+
+            <View style={{ gap: 10, marginTop: 28 }}>
+              <PlanCard selected={plan === 'annual'} onPress={() => setPlan('annual')} title="Annual" price={`${annualPrice}/yr`} sub={`${annualPerMonth}/mo${trial ? ` · ${trial} free trial` : ''}`} badge={savings > 0 ? `Save ${savings}%` : undefined} />
+              <PlanCard selected={plan === 'monthly'} onPress={() => setPlan('monthly')} title="Monthly" price={`${monthlyPrice}/mo`} sub="Billed monthly" />
+            </View>
+
+            <Pressable onPress={buy} disabled={!!busy} style={({ pressed }) => [{ marginTop: 20, borderRadius: 999, opacity: pressed ? 0.9 : 1 }, shadowSm]}>
+              <LinearGradient colors={[C.brand, C.brandEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ borderRadius: 999, paddingVertical: 16, alignItems: 'center' }}>
+                {busy === 'buy' ? <ActivityIndicator color="#fff" /> : <T size={17} weight="semibold" color="#fff">{cta}</T>}
+              </LinearGradient>
+            </Pressable>
+            <T size={12} color={C.slate500} style={{ textAlign: 'center', marginTop: 10, lineHeight: 17 }}>{fineprint}</T>
+
+            <Pressable onPress={() => close(false)} style={{ marginTop: 20, paddingVertical: 8 }}>
+              <T size={15} weight="semibold" color={C.slate600} style={{ textAlign: 'center' }}>Continue with free plan</T>
+              <T size={12} color={C.slate400} style={{ textAlign: 'center', marginTop: 4 }}>{FREE_LINE}</T>
+            </Pressable>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 20 }}>
+              <Pressable onPress={restore} disabled={!!busy}><T size={12} color={C.slate500}>{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</T></Pressable>
+              <Pressable onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/terms`)}><T size={12} color={C.slate500}>Terms of Use</T></Pressable>
+              <Pressable onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/privacy`)}><T size={12} color={C.slate500}>Privacy Policy</T></Pressable>
+            </View>
+          </ScrollView>
+        </LinearGradient>
+      </Modal>
+    </Ctx.Provider>
+  );
+}

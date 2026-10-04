@@ -12,18 +12,21 @@ import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/lib/auth';
 import { WEB_URL } from '@/lib/config';
 import { addDaysYmd, formatDeadlineDate, localToday } from '@/lib/dates';
-import { presentPaywall, purchasesEnabled } from '@/lib/purchases';
-import type { Course, Subscription } from '@/lib/types';
+import { usePaywall } from '@/components/paywall';
+import { purchasesEnabled } from '@/lib/purchases';
+import type { Course, Deadline, Subscription } from '@/lib/types';
 
-type Entry = { id: string; deadline_id: string; course_name: string | null; course_code: string | null; date: string; time: string | null; type: string; title: string };
 type LmsConnection = { id: string; provider: string };
 
 const SETUP_DISMISSED_KEY = 'cm-setup-dismissed';
 
 export default function Home() {
-  const { me, refreshMe } = useAuth();
-  // Same source as the web Home: deadlines the student has added to their calendar.
-  const entries = useApi<Entry[]>('/calendar-entries');
+  const { me } = useAuth();
+  const { openPaywall } = usePaywall();
+  // All upcoming deadlines (syllabus + LMS + to-dos). The web Home only lists ones saved to the
+  // calendar, which shows almost nothing right after onboarding when deadlines arrive via iCal/syllabus.
+  const today = localToday();
+  const entries = useApi<Deadline[]>(`/deadlines?from=${today}&to=${addDaysYmd(today, 120)}`);
   const courses = useApi<Course[]>('/courses');
   const lms = useApi<LmsConnection[]>('/lms/connections');
   const sub = useApi<Subscription>('/me/subscription');
@@ -36,9 +39,10 @@ export default function Home() {
     SecureStore.getItemAsync(SETUP_DISMISSED_KEY).then((v) => setSetupDismissed(v === '1'));
   }, []);
 
-  const today = localToday();
   const { upcoming, dueThisWeek } = useMemo(() => {
-    const list = (entries.data ?? []).filter((d) => d.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    const list = (entries.data ?? [])
+      .filter((d): d is Deadline & { date: string } => !!d.date && d.date >= today && !d.completed && !d.recurring)
+      .sort((a, b) => a.date.localeCompare(b.date));
     const weekEnd = addDaysYmd(today, 6);
     return { upcoming: list.slice(0, 8), dueThisWeek: list.filter((d) => d.date <= weekEnd).length };
   }, [entries.data, today]);
@@ -66,9 +70,9 @@ export default function Home() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 16, borderWidth: 1, borderColor: '#E0E7FF', backgroundColor: '#EEF2FF', padding: 16 }}>
             <Sparkles size={18} color={C.brand} />
             <T size={15} color={C.slate800} style={{ flex: 1 }}>
-              <T size={15} weight="medium" color={C.slate900}>Upgrade to Pro</T> — unlimited AI generations, AI chat & more
+              <T size={15} weight="medium" color={C.slate900}>Upgrade to Pro</T> — unlimited flashcards, quizzes & summaries, more AI chat
             </T>
-            <OutlineButton title="Upgrade to Pro" size="sm" color={C.indigo} onPress={async () => { if (await presentPaywall()) { await refreshMe(); sub.reload(); } }} />
+            <OutlineButton title="Upgrade to Pro" size="sm" color={C.indigo} onPress={async () => { if (await openPaywall('home_banner')) sub.reload(); }} />
           </View>
         ) : null}
 
@@ -116,8 +120,8 @@ export default function Home() {
                   <View key={d.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: i ? 1 : 0, borderTopColor: C.slate100 }}>
                     <TypeChip type={d.type} />
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <T size={14} weight="medium" color={C.slate800} numberOfLines={2}>{d.title}</T>
-                      <T size={12} color={C.slate500} numberOfLines={1}>{d.course_code || d.course_name}{' · '}{normalizeType(d.type)}</T>
+                      <T size={14} weight="medium" color={C.slate800} numberOfLines={2}>{d.title || 'Untitled'}</T>
+                      <T size={12} color={C.slate500} numberOfLines={1}>{d.course_code || d.course_name || 'To do'}{' · '}{normalizeType(d.type)}</T>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <T size={14} weight={soon ? 'semibold' : 'medium'} color={soon ? C.rose : C.slate700}>{label}</T>
