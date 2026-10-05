@@ -2,6 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import { Check } from 'lucide-react-native';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, TextInput, View } from 'react-native';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
@@ -29,7 +30,9 @@ export default function ConnectStep() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState('');
-  const [synced, setSynced] = useState<number | null>(null);
+  const [localSynced, setSynced] = useState<number | null>(null);
+  const synced = answers.lmsSynced ?? localSynced;
+  const auto = answers.lms === 'oaks' || answers.lms === 'canvas';
 
   const connect = async (raw: string) => {
     const link = raw.trim().replace(/^webcal:\/\//i, 'https://');
@@ -56,8 +59,14 @@ export default function ConnectStep() {
     if (!quiet) setError('That doesn’t look like a calendar link. It usually ends in .ics.');
   };
 
-  // Open the LMS in an in-app browser. When they close it with the link copied, connect automatically.
+  // OAKS/Canvas: sign in inside ClassMate and the feed link is picked up automatically.
+  // Others: open the LMS; when they close it with the link copied, connect from the clipboard.
   const openLms = async () => {
+    if (auto) {
+      track('onboarding_lms_opened', { lms: answers.lms ?? null, method: 'auto' });
+      router.push('/onboarding/lms-signin');
+      return;
+    }
     setError(null);
     track('onboarding_lms_opened', { lms: answers.lms ?? null });
     await WebBrowser.openBrowserAsync(guide.url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET });
@@ -81,10 +90,11 @@ export default function ConnectStep() {
   return (
     <QuizScreen
       title={`Connect ${guide.name}`}
-      subtitle={`Copy your calendar link from ${guide.name}, come back, done.`}
+      subtitle={auto ? `Sign in and ClassMate pulls in every assignment. Read-only.` : `Copy your calendar link from ${guide.name}, come back, done.`}
       onSkip={() => { track('onboarding_lms_skipped', { reason: 'skipped' }); goTo('syllabus'); }}
       skipLabel="Skip for now"
-      footer={<QuizButton title={`Open ${guide.name}`} loading={busy} onPress={openLms} />}>
+      footer={<QuizButton title={auto ? `Sign in to ${guide.name}` : `Open ${guide.name}`} loading={busy} onPress={openLms} />}>
+      {!auto ? (
       <Animated.View entering={FadeInDown.delay(80).duration(360)} style={[{ backgroundColor: C.white, borderRadius: 24, padding: 18, gap: 14 }, shadowSm]}>
         {[`Sign in to ${guide.name}`, guide.where, 'Copy the link, then close the page'].map((s, i) => (
           <View key={s} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -95,6 +105,7 @@ export default function ConnectStep() {
           </View>
         ))}
       </Animated.View>
+      ) : null}
 
       {busy ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 }}>

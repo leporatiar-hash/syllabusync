@@ -17,13 +17,13 @@ export type Step = (typeof STEPS)[number];
 export type Goal = 'deadlines' | 'exams' | 'overwhelmed' | 'procrastinating' | 'understanding';
 export type Lms = 'oaks' | 'canvas' | 'blackboard' | 'other' | 'none';
 
-type Answers = { firstName: string; school: string; year: string; goals: Goal[]; lms: Lms | null };
+type Answers = { firstName: string; school: string; year: string; goals: Goal[]; lms: Lms | null; lmsSynced: number | null };
 type Ctx = { answers: Answers; set: (patch: Partial<Answers>) => void };
 
 const AnswersCtx = createContext<Ctx | null>(null);
 
 export function QuizProvider({ children, initial }: { children: ReactNode; initial?: Partial<Answers> }) {
-  const [answers, setAnswers] = useState<Answers>({ firstName: '', school: '', year: '', goals: [], lms: null, ...initial });
+  const [answers, setAnswers] = useState<Answers>({ firstName: '', school: '', year: '', goals: [], lms: null, lmsSynced: null, ...initial });
   return <AnswersCtx.Provider value={{ answers, set: (p) => setAnswers((a) => ({ ...a, ...p })) }}>{children}</AnswersCtx.Provider>;
 }
 

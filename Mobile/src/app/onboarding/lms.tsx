@@ -13,6 +13,7 @@ const OPTIONS: { value: Lms; label: string; sublabel?: string; icon: typeof Scho
 
 export default function LmsStep() {
   const { answers, set } = useQuiz();
+  // OAKS is CofC's LMS: only lead with it for CofC students; everyone else sees it near the end.
   const sorted = answers.school === 'College of Charleston' ? OPTIONS : [...OPTIONS.slice(1, 4), OPTIONS[0], OPTIONS[4]];
   return (
     <QuizScreen title="Where do your classes live?">
