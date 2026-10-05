@@ -11,24 +11,24 @@ import { notificationPermission, REMINDERS_ASKED_KEY } from '@/lib/notifications
 
 const SCREEN_ROUTES = { home: '/', calendar: '/calendar', courses: '/courses', chat: '/chat', settings: '/settings' } as const;
 
-/** Right after signup: the onboarding flow (which ends with reminders + paywall). Otherwise, ask
- *  existing users about reminders once. */
+/** Accounts that haven't finished onboarding (new app signups; the web marks its signups done)
+ *  go through it on first open. Everyone else gets asked about reminders once. */
 function useFirstRunPrompts() {
-  const { justSignedUp, clearJustSignedUp } = useAuth();
+  const { me, clearJustSignedUp } = useAuth();
   const ran = useRef(false);
   useEffect(() => {
-    if (ran.current) return;
+    if (ran.current || !me) return;
     ran.current = true;
     (async () => {
-      if (justSignedUp) {
-        clearJustSignedUp();
+      clearJustSignedUp();
+      if (!me.has_completed_onboarding) {
         router.replace('/onboarding/name');
         return;
       }
       const asked = await SecureStore.getItemAsync(REMINDERS_ASKED_KEY);
       if (!asked && (await notificationPermission()) === 'undetermined') router.push('/reminders');
     })();
-  }, [justSignedUp, clearJustSignedUp]);
+  }, [me, clearJustSignedUp]);
 }
 
 /** Tapping a reminder opens the tab it's about (data.screen set by the backend). */

@@ -13,6 +13,7 @@ import { type Goal, QuizButton, useQuiz } from '@/components/quiz-kit';
 import { T, TypeChip } from '@/components/web';
 import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
+import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { addDaysYmd, formatDeadlineDate, localToday } from '@/lib/dates';
 import { notificationPermission, registerForPush, REMINDERS_ASKED_KEY } from '@/lib/notifications';
@@ -54,6 +55,7 @@ export default function ReadyStep() {
   const insets = useSafeAreaInsets();
   const { answers } = useQuiz();
   const { openPaywall } = usePaywall();
+  const { refreshMe } = useAuth();
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [upcoming, setUpcoming] = useState<Deadline[]>([]);
   const [permission, setPermission] = useState('undetermined');
@@ -86,6 +88,8 @@ export default function ReadyStep() {
   const finish = async () => {
     setBusy(true);
     await SecureStore.setItemAsync(REMINDERS_ASKED_KEY, '1');
+    await api('/me/complete-onboarding', { method: 'POST' }).catch(() => {});
+    await refreshMe().catch(() => {});
     if ((courses?.length ?? 0) > 0 || upcoming.length > 0) {
       const line = answers.goals.map((g) => PAYWALL_LINES[g]).find(Boolean);
       await openPaywall('onboarding', line);
