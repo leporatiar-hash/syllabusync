@@ -15,7 +15,7 @@ import { api } from '@/lib/api';
 type Guide = { name: string; url: string; where: string };
 // `url` is where the in-app browser opens; `where` is the one thing to tap once they're signed in.
 const GUIDES: Record<Exclude<Lms, 'none'>, Guide> = {
-  oaks: { name: 'OAKS', url: 'https://lms.cofc.edu/d2l/home', where: 'Calendar → Subscribe' },
+  oaks: { name: 'OAKS', url: 'https://lms.cofc.edu/d2l/le/calendar/6606', where: 'Tap Subscribe, then copy the link' },
   canvas: { name: 'Canvas', url: 'https://www.instructure.com/canvas/login', where: 'Calendar → Calendar Feed' },
   blackboard: { name: 'Blackboard', url: 'https://www.google.com/search?q=my+school+blackboard+login', where: 'Calendar → ⚙ → Share Calendar' },
   other: { name: 'your LMS', url: 'https://www.google.com/search?q=my+school+lms+login', where: 'Calendar → Subscribe / Export' },

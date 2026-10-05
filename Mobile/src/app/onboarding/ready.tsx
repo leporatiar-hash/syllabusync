@@ -21,7 +21,7 @@ import type { Course, Deadline } from '@/lib/types';
 /** One line that ties their answer from the goals question to what they now have. */
 const GOAL_LINES: Record<Goal, string> = {
   deadlines: 'No more surprise due dates.',
-  procrastinating: 'We’ll nudge you 3 days out, not at 2am.',
+  procrastinating: 'We’ll nudge you 3 days out, so nothing slips.',
   exams: 'Exam reminders land a week early.',
   understanding: 'Turn any reading into flashcards.',
   overwhelmed: 'Everything’s in one place now.',

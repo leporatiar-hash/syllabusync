@@ -5955,6 +5955,7 @@ def sync_canvas(connection, user_id: str, db):
     token = decrypt_token(connection.encrypted_token)
     base = connection.instance_url.rstrip("/")
     headers = {"Authorization": f"Bearer {token}"}
+    user_tz = _user_timezone(db, user_id)
 
     # Load user's ClassMate courses for auto-matching
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
@@ -6009,7 +6010,7 @@ def sync_canvas(connection, user_id: str, db):
                         ext_id = f"canvas_{assignment['id']}"
                         # Parse due_at (ISO 8601)
                         try:
-                            dt = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+                            dt = _to_user_local(datetime.fromisoformat(due_at.replace("Z", "+00:00")), user_tz)
                             deadline_date = dt.strftime("%Y-%m-%d")
                             deadline_time = dt.strftime("%I:%M %p").lstrip("0")
                         except (ValueError, AttributeError):
@@ -6173,6 +6174,29 @@ def _bulk_create_ical_courses(events, user_id: str, db):
     return course_by_uid, list(created.values())
 
 
+DEFAULT_USER_TZ = "America/New_York"  # nearly all users are at CofC
+
+
+def _user_timezone(db, user_id: str) -> ZoneInfo:
+    """Best-known timezone for a user: their phone's (registered with a push token), else Eastern."""
+    try:
+        tok = db.query(PushToken).filter(PushToken.user_id == user_id, PushToken.timezone.isnot(None)).first()
+        if tok:
+            return ZoneInfo(tok.timezone)
+    except Exception:
+        pass
+    return ZoneInfo(DEFAULT_USER_TZ)
+
+
+def _to_user_local(dt: datetime, tz: ZoneInfo) -> datetime:
+    """LMS feeds give timezone-aware instants (usually UTC). Deadlines are stored as local
+    calendar date + wall-clock time, so convert before formatting; otherwise an 11:59 PM EDT
+    due date is stored as 3:59 AM the next day. Naive values are already local: left as-is."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(tz)
+
+
 def sync_ical(connection, user_id: str, db):
     """Sync events from an iCal feed into deadlines.
 
@@ -6185,6 +6209,7 @@ def sync_ical(connection, user_id: str, db):
     # Load user's existing courses for matching
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
     had_courses = bool(user_courses)
+    user_tz = _user_timezone(db, user_id)
 
     try:
         with httpx.Client(timeout=30.0) as http_client:
@@ -6231,6 +6256,7 @@ def sync_ical(connection, user_id: str, db):
 
                 dt_val = dtstart.dt
                 if isinstance(dt_val, datetime):
+                    dt_val = _to_user_local(dt_val, user_tz)
                     deadline_date = dt_val.strftime("%Y-%m-%d")
                     deadline_time = dt_val.strftime("%I:%M %p").lstrip("0")
                 elif isinstance(dt_val, date):

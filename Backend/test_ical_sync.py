@@ -269,6 +269,34 @@ def test_race_guard():
     check("race: nothing created", sorted(courses) == ["ARTH 103"], str(sorted(courses)))
 
 
+def _stored(user_id, uid):
+    db = main.SessionLocal()
+    try:
+        d = db.query(main.Deadline).filter(main.Deadline.user_id == user_id, main.Deadline.external_id.like(f"%{uid}%")).first()
+        return (d.date, d.time) if d else None
+    finally:
+        db.close()
+
+
+def test_utc_times_stored_local():
+    # D2L/OAKS sends 11:59 PM EDT as 03:59Z the next day; it must be stored as the local date + time.
+    user_id, _ = make_user("tz-default")
+    run_sync(user_id)
+    check("UTC 03:59Z on 10/08 stored as 10/07 11:59 PM Eastern", _stored(user_id, "2002") == ("2026-10-07", "11:59 PM"), str(_stored(user_id, "2002")))
+    check("04:00Z rolls back to midnight local", _stored(user_id, "2007") == ("2010-09-12", "12:00 AM"), str(_stored(user_id, "2007")))
+
+    # A phone that registered a different timezone wins over the Eastern default.
+    user2, _ = make_user("tz-phone")
+    db = main.SessionLocal()
+    try:
+        db.add(main.PushToken(token=f"ExponentPushToken[{user2[:12]}]", user_id=user2, timezone="America/Los_Angeles"))
+        db.commit()
+    finally:
+        db.close()
+    run_sync(user2)
+    check("phone timezone used when known", _stored(user2, "2002") == ("2026-10-07", "8:59 PM"), str(_stored(user2, "2002")))
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
@@ -278,6 +306,7 @@ if __name__ == "__main__":
         test_sync_twice_no_duplicates()
         test_connect_endpoint_then_background_sync()
         test_race_guard()
+        test_utc_times_stored_local()
         print("\nAll iCal sync tests passed.")
     finally:
         try:
