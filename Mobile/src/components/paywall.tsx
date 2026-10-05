@@ -1,12 +1,13 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
-import { Check, X } from 'lucide-react-native';
+import { Check, FileUp, Layers, MessageCircle, Sparkles, X, type LucideIcon } from 'lucide-react-native';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import Purchases, { INTRO_ELIGIBILITY_STATUS, PACKAGE_TYPE, type PurchasesPackage } from 'react-native-purchases';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { LogoMark, T } from '@/components/web';
+import { T } from '@/components/web';
 import { C, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { api } from '@/lib/api';
@@ -20,12 +21,12 @@ import type { Subscription } from '@/lib/types';
  * Numbers mirror Backend/main.py: FREE_AI_GENERATION_LIMIT=50/month, FREE_CHAT_MESSAGE_LIMIT=20/week,
  * PRO_CHAT_MESSAGE_LIMIT=50/week. Keep this copy in sync if those change: Apple rejects paywalls that oversell.
  */
-const BENEFITS = [
-  'Unlimited flashcards, quizzes & summaries',
-  '2.5× more AI chat: 50 messages a week',
-  'Study tools from any upload: PDFs, slides, notes',
+const BENEFITS: { icon: LucideIcon; title: string; body: string; color: string; bg: string }[] = [
+  { icon: Layers, title: 'Unlimited study tools', body: 'Flashcards, practice quizzes & summaries, no monthly cap', color: '#5B8DEF', bg: '#E0EAFF' },
+  { icon: MessageCircle, title: '2.5× more AI chat', body: '50 messages a week instead of 20', color: '#A78BFA', bg: '#F3E8FF' },
+  { icon: FileUp, title: 'Works with anything', body: 'PDFs, slides, readings, your own notes', color: '#38BDF8', bg: '#E0F2FE' },
 ];
-const FREE_LINE = 'Free plan: 50 AI generations a month. Reminders, calendar & course sync are always free.';
+const FREE_LINE = 'Free plan: 50 AI generations a month. Reminders & calendar sync are always free.';
 
 // Shown only when the store can't return products (Expo Go / before App Store Connect is set up).
 const FALLBACK = { annual: '$59.99', monthly: '$9.99', trialDays: 14 };
@@ -37,8 +38,8 @@ const Ctx = createContext<PaywallCtx>({ openPaywall: async () => false });
 export const usePaywall = () => useContext(Ctx);
 
 const HEADLINES: Record<PaywallReason, string> = {
-  onboarding: 'Let ClassMate study with you',
-  limit: 'Keep studying with Pro',
+  onboarding: 'Study smarter with Pro',
+  limit: 'Keep the momentum going',
   upgrade: 'ClassMate Pro',
   home_banner: 'ClassMate Pro',
 };
@@ -56,18 +57,27 @@ function trialLabel(pkg: PurchasesPackage | undefined, eligible: boolean) {
 
 function PlanCard({ selected, onPress, title, price, sub, badge }: { selected: boolean; onPress: () => void; title: string; price: string; sub: string; badge?: string }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected }} style={[{ borderRadius: 16, borderWidth: 2, borderColor: selected ? C.brand : C.slate200, backgroundColor: selected ? '#F5F8FF' : C.white, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }, selected ? shadowSm : null]}>
-      <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: selected ? C.brand : C.slate300, alignItems: 'center', justifyContent: 'center' }}>
-        {selected ? <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: C.brand }} /> : null}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      style={({ pressed }) => [
+        { borderRadius: 20, borderWidth: 2, borderColor: selected ? C.brand : C.slate200, backgroundColor: selected ? '#F2F6FF' : C.white, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, transform: [{ scale: pressed ? 0.98 : 1 }] },
+        selected ? shadowSm : null,
+      ]}>
+      {badge ? (
+        <View style={{ position: 'absolute', top: -11, right: 16, backgroundColor: C.green, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 }}>
+          <T size={11} weight="bold" color="#fff" style={{ letterSpacing: 0.5 }}>{badge.toUpperCase()}</T>
+        </View>
+      ) : null}
+      <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: selected ? 0 : 2, borderColor: C.slate300, backgroundColor: selected ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+        {selected ? <Check size={14} color="#fff" strokeWidth={3} /> : null}
       </View>
       <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <T size={16} weight="semibold" color={C.slate900}>{title}</T>
-          {badge ? <View style={{ backgroundColor: C.greenBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 }}><T size={11} weight="semibold" color={C.green}>{badge}</T></View> : null}
-        </View>
+        <T size={17} weight="semibold" color={C.slate900}>{title}</T>
         <T size={13} color={C.slate500}>{sub}</T>
       </View>
-      <T size={16} weight="semibold" color={C.slate900}>{price}</T>
+      <T size={17} weight="bold" color={C.slate900}>{price}</T>
     </Pressable>
   );
 }
@@ -183,52 +193,62 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={{ openPaywall }}>
       {children}
       <Modal visible={!!state} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => close(false)}>
-        <LinearGradient colors={['#EEF2FF', '#F8FAFC', C.white]} style={{ flex: 1, paddingTop: insets.top }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8 }}>
-            <Pressable onPress={() => close(false)} hitSlop={12} accessibilityLabel="Close" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(15,23,42,0.06)', alignItems: 'center', justifyContent: 'center' }}>
-              <X size={18} color={C.slate500} />
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }}>
-            <View style={{ alignItems: 'center', marginTop: 4 }}>
-              <LogoMark size={56} />
-              <T size={26} weight="bold" color={C.slate900} style={{ marginTop: 16, textAlign: 'center', lineHeight: 32, letterSpacing: -0.5 }}>{state ? HEADLINES[state.reason] : ''}</T>
-              {state?.message ? <T size={15} color={C.slate600} style={{ marginTop: 8, textAlign: 'center' }}>{state.message}</T> : null}
-            </View>
-
-            <View style={{ gap: 12, marginTop: 24 }}>
-              {BENEFITS.map((b) => (
-                <View key={b} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' }}><Check size={14} color="#fff" strokeWidth={3} /></View>
-                  <T size={15} color={C.slate800} style={{ flex: 1 }}>{b}</T>
+        <View style={{ flex: 1, backgroundColor: C.pageBg }}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }} bounces={false}>
+            <LinearGradient colors={[C.brand, C.lavender]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingTop: insets.top + 8, paddingHorizontal: 24, paddingBottom: 36, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <Pressable onPress={() => close(false)} hitSlop={12} accessibilityLabel="Close" style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                  <X size={18} color="#fff" />
+                </Pressable>
+              </View>
+              <Animated.View entering={FadeInDown.duration(380)}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 }}>
+                  <Sparkles size={14} color="#fff" />
+                  <T size={12} weight="bold" color="#fff" style={{ letterSpacing: 1.2 }}>CLASSMATE PRO</T>
                 </View>
+                <T size={32} weight="bold" color="#fff" style={{ marginTop: 14, lineHeight: 38, letterSpacing: -0.6 }}>{state ? HEADLINES[state.reason] : ''}</T>
+                {state?.message ? <T size={16} color="rgba(255,255,255,0.9)" style={{ marginTop: 8, lineHeight: 22 }}>{state.message}</T> : null}
+              </Animated.View>
+            </LinearGradient>
+
+            <View style={{ paddingHorizontal: 20, marginTop: -20, gap: 10 }}>
+              {BENEFITS.map((b, i) => (
+                <Animated.View key={b.title} entering={FadeInDown.delay(100 + i * 70).duration(360)} style={[{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: C.white, borderRadius: 18, padding: 14 }, shadowSm]}>
+                  <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: b.bg, alignItems: 'center', justifyContent: 'center' }}>
+                    <b.icon size={22} color={b.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <T size={15} weight="semibold" color={C.slate900}>{b.title}</T>
+                    <T size={13} color={C.slate500}>{b.body}</T>
+                  </View>
+                </Animated.View>
               ))}
             </View>
 
-            <View style={{ gap: 10, marginTop: 28 }}>
-              <PlanCard selected={plan === 'annual'} onPress={() => setPlan('annual')} title="Annual" price={`${annualPrice}/yr`} sub={`${annualPerMonth}/mo${trial ? ` · ${trial} free trial` : ''}`} badge={savings > 0 ? `Save ${savings}%` : undefined} />
-              <PlanCard selected={plan === 'monthly'} onPress={() => setPlan('monthly')} title="Monthly" price={`${monthlyPrice}/mo`} sub="Billed monthly" />
+            <View style={{ paddingHorizontal: 20, gap: 14, marginTop: 26 }}>
+              <PlanCard selected={plan === 'annual'} onPress={() => setPlan('annual')} title="Annual" price={`${annualPrice}/yr`} sub={`Just ${annualPerMonth}/mo${trial ? ` · ${trial} free trial` : ''}`} badge={savings > 0 ? `Save ${savings}%` : undefined} />
+              <PlanCard selected={plan === 'monthly'} onPress={() => setPlan('monthly')} title="Monthly" price={`${monthlyPrice}/mo`} sub="Cancel anytime" />
             </View>
+          </ScrollView>
 
-            <Pressable onPress={buy} disabled={!!busy} style={({ pressed }) => [{ marginTop: 20, borderRadius: 999, opacity: pressed ? 0.9 : 1 }, shadowSm]}>
-              <LinearGradient colors={[C.brand, C.brandEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ borderRadius: 999, paddingVertical: 16, alignItems: 'center' }}>
+          <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: insets.bottom + 8, backgroundColor: C.pageBg }}>
+            <Pressable onPress={buy} disabled={!!busy} style={({ pressed }) => [{ borderRadius: 999, transform: [{ scale: pressed ? 0.98 : 1 }] }, shadowSm]}>
+              <LinearGradient colors={[C.brand, C.lavender]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ borderRadius: 999, paddingVertical: 17, alignItems: 'center' }}>
                 {busy === 'buy' ? <ActivityIndicator color="#fff" /> : <T size={17} weight="semibold" color="#fff">{cta}</T>}
               </LinearGradient>
             </Pressable>
-            <T size={12} color={C.slate500} style={{ textAlign: 'center', marginTop: 10, lineHeight: 17 }}>{fineprint}</T>
-
-            <Pressable onPress={() => close(false)} style={{ marginTop: 20, paddingVertical: 8 }}>
-              <T size={15} weight="semibold" color={C.slate600} style={{ textAlign: 'center' }}>Continue with free plan</T>
-              <T size={12} color={C.slate400} style={{ textAlign: 'center', marginTop: 4 }}>{FREE_LINE}</T>
+            <T size={12} color={C.slate500} style={{ textAlign: 'center', marginTop: 8, lineHeight: 17 }}>{fineprint}</T>
+            <Pressable onPress={() => close(false)} hitSlop={6} style={{ marginTop: 12, paddingVertical: 4 }}>
+              <T size={15} weight="semibold" color={C.slate600} style={{ textAlign: 'center' }}>Maybe later</T>
+              <T size={12} color={C.slate400} style={{ textAlign: 'center', marginTop: 2 }}>{FREE_LINE}</T>
             </Pressable>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 20 }}>
-              <Pressable onPress={restore} disabled={!!busy}><T size={12} color={C.slate500}>{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</T></Pressable>
-              <Pressable onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/terms`)}><T size={12} color={C.slate500}>Terms of Use</T></Pressable>
-              <Pressable onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/privacy`)}><T size={12} color={C.slate500}>Privacy Policy</T></Pressable>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 10 }}>
+              <Pressable onPress={restore} disabled={!!busy}><T size={12} color={C.slate400}>{busy === 'restore' ? 'Restoring…' : 'Restore'}</T></Pressable>
+              <Pressable onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/terms`)}><T size={12} color={C.slate400}>Terms</T></Pressable>
+              <Pressable onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/privacy`)}><T size={12} color={C.slate400}>Privacy</T></Pressable>
             </View>
-          </ScrollView>
-        </LinearGradient>
+          </View>
+        </View>
       </Modal>
     </Ctx.Provider>
   );

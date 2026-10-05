@@ -11,7 +11,9 @@ const client = KEY ? new PostHog(KEY, { host: HOST, captureAppLifecycleEvents: t
 export type AnalyticsEvent =
   | 'signup'
   | 'onboarding_school_saved'
+  | 'onboarding_goals'
   | 'lms_connected'
+  | 'onboarding_lms_opened'
   | 'onboarding_lms_skipped'
   | 'syllabus_uploaded'
   | 'onboarding_syllabus_skipped'

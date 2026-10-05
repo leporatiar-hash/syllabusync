@@ -1,11 +1,12 @@
-import { router } from 'expo-router';
-import { Check, FileUp } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { Check, FileUp, Plus } from 'lucide-react-native';
 import { useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 
-import { OnboardingShell } from '@/components/onboarding-shell';
-import { DashedBox, GradientButton, IconSquare, OutlineButton, T } from '@/components/web';
-import { C } from '@/constants/theme';
+import { goTo, QuizButton, QuizScreen } from '@/components/quiz-kit';
+import { T } from '@/components/web';
+import { C, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { pickAndUploadSyllabus } from '@/lib/upload';
 
@@ -25,50 +26,74 @@ export default function SyllabusStep() {
       if (!res.ok) return setError(res.error);
       const course = res.data?.course;
       if (!course) return setError(res.data?.debug?.message ?? 'We couldn’t read that file. Try a PDF with selectable text.');
-      const deadlines = Array.isArray(res.data?.deadlines) ? res.data.deadlines.length : course?.deadline_count ?? 0;
-      setUploaded((u) => [...u, { name: course?.name ?? 'Course', deadlines }]);
+      const deadlines = Array.isArray(res.data?.deadlines) ? res.data.deadlines.length : 0;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setUploaded((u) => [...u, { name: course.name ?? 'Course', deadlines }]);
       track('syllabus_uploaded', { deadlines, source: 'onboarding' });
     } finally {
       setBusy(false);
     }
   };
 
-  const finish = (skipped: boolean) => {
-    if (skipped) track('onboarding_syllabus_skipped');
-    router.push('/onboarding/ready');
-  };
+  const total = uploaded.reduce((n, u) => n + u.deadlines, 0);
 
   return (
-    <OnboardingShell
-      step={2}
-      title="Add a syllabus"
-      subtitle="ClassMate reads it and pulls out every exam, quiz, and assignment, plus office hours, grading, and policies."
-      onSkip={uploaded.length ? undefined : () => finish(true)}
-      footer={
-        uploaded.length ? (
-          <>
-            <GradientButton title="Continue" size="lg" onPress={() => finish(false)} />
-            <OutlineButton title="Add another syllabus" onPress={upload} disabled={busy} />
-          </>
-        ) : (
-          <OutlineButton title="Skip for now" onPress={() => finish(true)} />
-        )
-      }>
+    <QuizScreen
+      title={uploaded.length ? `${total} deadline${total === 1 ? '' : 's'} found` : 'Drop in a syllabus'}
+      subtitle={uploaded.length ? undefined : 'We’ll pull out every exam and assignment.'}
+      onSkip={uploaded.length ? undefined : () => { track('onboarding_syllabus_skipped'); goTo('ready'); }}
+      skipLabel="Skip for now"
+      footer={uploaded.length ? <QuizButton title="See my semester" onPress={() => goTo('ready')} /> : undefined}>
       {uploaded.map((u, i) => (
-        <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#ECFDF5', borderRadius: 12, padding: 14 }}>
-          <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: C.emerald, alignItems: 'center', justifyContent: 'center' }}><Check size={14} color="#fff" strokeWidth={3} /></View>
-          <T size={14} weight="medium" color="#047857" style={{ flex: 1 }}>{u.name} · {u.deadlines} deadline{u.deadlines === 1 ? '' : 's'} found</T>
-        </View>
+        <Animated.View key={i} entering={FadeInUp.springify()} style={[{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: C.white, borderRadius: 18, padding: 16 }, shadowSm]}>
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' }}>
+            <Check size={20} color={C.green} strokeWidth={3} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <T size={16} weight="semibold" color={C.slate900} numberOfLines={1}>{u.name}</T>
+            <T size={13} color={C.slate500}>{u.deadlines} deadline{u.deadlines === 1 ? '' : 's'} added</T>
+          </View>
+        </Animated.View>
       ))}
-      {!uploaded.length || busy ? (
-        <DashedBox onPress={busy ? undefined : upload} style={{ minHeight: 220, backgroundColor: C.white, borderColor: '#C7D2FE' }}>
-          {busy ? <ActivityIndicator color={C.brand} size="large" /> : <IconSquare icon={FileUp} bg="#EEF2FF" fg={C.brand} size={64} radius={32} />}
-          <T size={16} weight="semibold" color={C.slate800} style={{ marginTop: 14 }}>{busy ? 'Reading your syllabus…' : 'Choose a syllabus'}</T>
-          <T size={13} color={C.slate400} style={{ marginTop: 4, textAlign: 'center' }}>{busy ? 'About 30 seconds. Hang tight.' : 'PDF or Word, from Files, iCloud Drive, or Google Drive'}</T>
-        </DashedBox>
-      ) : null}
+
+      <Animated.View entering={FadeInDown.delay(120).duration(380)}>
+        <Pressable
+          onPress={busy ? undefined : upload}
+          style={({ pressed }) => [{
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            minHeight: uploaded.length ? 96 : 220,
+            borderRadius: 24,
+            borderWidth: 2,
+            borderStyle: 'dashed',
+            borderColor: '#C7D2FE',
+            backgroundColor: pressed ? '#EEF2FF' : C.white,
+            transform: [{ scale: pressed ? 0.98 : 1 }],
+          }]}>
+          {busy ? (
+            <>
+              <ActivityIndicator color={C.brand} size="large" />
+              <T size={16} weight="semibold" color={C.slate800}>Reading your syllabus…</T>
+              <T size={13} color={C.slate400}>About 30 seconds</T>
+            </>
+          ) : uploaded.length ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Plus size={18} color={C.brand} />
+              <T size={16} weight="semibold" color={C.brand}>Add another syllabus</T>
+            </View>
+          ) : (
+            <>
+              <View style={{ width: 72, height: 72, borderRadius: 24, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' }}>
+                <FileUp size={32} color="#fff" />
+              </View>
+              <T size={18} weight="semibold" color={C.slate900}>Choose a file</T>
+              <T size={13} color={C.slate400}>PDF or Word</T>
+            </>
+          )}
+        </Pressable>
+      </Animated.View>
       {error ? <T size={14} color={C.red}>{error}</T> : null}
-      <T size={12} color={C.slate400}>Tip: your syllabus is usually on the course page in OAKS or Canvas. Download it to Files, then pick it here.</T>
-    </OnboardingShell>
+    </QuizScreen>
   );
 }

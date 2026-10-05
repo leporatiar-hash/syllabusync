@@ -1,0 +1,128 @@
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
+import { Check } from 'lucide-react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, TextInput, View } from 'react-native';
+import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
+
+import { goTo, type Lms, QuizButton, QuizScreen, useQuiz } from '@/components/quiz-kit';
+import { T } from '@/components/web';
+import { C, F, shadowSm } from '@/constants/theme';
+import { track } from '@/lib/analytics';
+import { api } from '@/lib/api';
+
+type Guide = { name: string; url: string; where: string };
+// `url` is where the in-app browser opens; `where` is the one thing to tap once they're signed in.
+const GUIDES: Record<Exclude<Lms, 'none'>, Guide> = {
+  oaks: { name: 'OAKS', url: 'https://lms.cofc.edu/d2l/home', where: 'Calendar → Subscribe' },
+  canvas: { name: 'Canvas', url: 'https://www.instructure.com/canvas/login', where: 'Calendar → Calendar Feed' },
+  blackboard: { name: 'Blackboard', url: 'https://www.google.com/search?q=my+school+blackboard+login', where: 'Calendar → ⚙ → Share Calendar' },
+  other: { name: 'your LMS', url: 'https://www.google.com/search?q=my+school+lms+login', where: 'Calendar → Subscribe / Export' },
+};
+
+const looksLikeFeed = (s: string) => /^(https?|webcal):\/\/\S+$/i.test(s.trim()) && /(ical|\.ics|calendar|feed|webcal)/i.test(s);
+
+export default function ConnectStep() {
+  const { answers } = useQuiz();
+  const guide = GUIDES[(answers.lms && answers.lms !== 'none' ? answers.lms : 'other') as Exclude<Lms, 'none'>];
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [manual, setManual] = useState('');
+  const [synced, setSynced] = useState<number | null>(null);
+
+  const connect = async (raw: string) => {
+    const link = raw.trim().replace(/^webcal:\/\//i, 'https://');
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ initial_sync?: { synced_count: number } }>('/lms/connect/ical', { method: 'POST', body: JSON.stringify({ ical_url: link }) });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSynced(r.initial_sync?.synced_count ?? 0);
+      track('lms_connected', { provider: 'ical', lms: answers.lms ?? null });
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(e instanceof Error ? e.message : 'That link didn’t work.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Check the clipboard; connect if it holds a calendar link. */
+  const tryClipboard = async (quiet = false) => {
+    if (!(await Clipboard.hasStringAsync())) return !quiet && setError('Copy the link first, then tap again.');
+    const text = (await Clipboard.getStringAsync()).trim();
+    if (looksLikeFeed(text)) return connect(text);
+    if (!quiet) setError('That doesn’t look like a calendar link. It usually ends in .ics.');
+  };
+
+  // Open the LMS in an in-app browser. When they close it with the link copied, connect automatically.
+  const openLms = async () => {
+    setError(null);
+    track('onboarding_lms_opened', { lms: answers.lms ?? null });
+    await WebBrowser.openBrowserAsync(guide.url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET });
+    await tryClipboard(true);
+  };
+
+  if (synced !== null) {
+    return (
+      <QuizScreen title="You’re synced." footer={<QuizButton title="Next" onPress={() => goTo('syllabus')} />}>
+        <Animated.View entering={ZoomIn.springify()} style={[{ alignItems: 'center', backgroundColor: C.white, borderRadius: 28, paddingVertical: 36, gap: 6 }, shadowSm]}>
+          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+            <Check size={36} color={C.green} strokeWidth={3} />
+          </View>
+          <T size={44} weight="bold" color={C.slate900} style={{ lineHeight: 50 }}>{synced}</T>
+          <T size={15} color={C.slate500}>{synced === 1 ? 'item' : 'items'} from {guide.name}. New ones sync on their own.</T>
+        </Animated.View>
+      </QuizScreen>
+    );
+  }
+
+  return (
+    <QuizScreen
+      title={`Connect ${guide.name}`}
+      subtitle={`Copy your calendar link from ${guide.name}, come back, done.`}
+      onSkip={() => { track('onboarding_lms_skipped', { reason: 'skipped' }); goTo('syllabus'); }}
+      skipLabel="Skip for now"
+      footer={<QuizButton title={`Open ${guide.name}`} loading={busy} onPress={openLms} />}>
+      <Animated.View entering={FadeInDown.delay(80).duration(360)} style={[{ backgroundColor: C.white, borderRadius: 24, padding: 18, gap: 14 }, shadowSm]}>
+        {[`Sign in to ${guide.name}`, guide.where, 'Copy the link, then close the page'].map((s, i) => (
+          <View key={s} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+              <T size={14} weight="bold" color={C.brand}>{i + 1}</T>
+            </View>
+            <T size={16} weight="medium" color={C.slate800} style={{ flex: 1 }}>{s}</T>
+          </View>
+        ))}
+      </Animated.View>
+
+      {busy ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 }}>
+          <ActivityIndicator color={C.brand} />
+          <T size={15} color={C.slate600}>Connecting…</T>
+        </View>
+      ) : null}
+      {error ? <T size={14} color={C.red} style={{ textAlign: 'center' }}>{error}</T> : null}
+
+      <Animated.View entering={FadeInDown.delay(180).duration(360)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+        <TextInput
+          value={manual}
+          onChangeText={(v) => { setManual(v); setError(null); }}
+          placeholder="Already copied it? Paste here"
+          placeholderTextColor={C.slate400}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          onSubmitEditing={() => manual.trim() && connect(manual)}
+          style={{ flex: 1, fontFamily: F.regular, fontSize: 15, color: C.slate900, backgroundColor: C.white, borderRadius: 14, borderWidth: 1, borderColor: C.slate200, paddingHorizontal: 14, paddingVertical: 13 }}
+        />
+        <Pressable
+          onPress={() => (manual.trim() ? connect(manual) : tryClipboard())}
+          accessibilityLabel={manual.trim() ? 'Connect' : 'Paste from clipboard'}
+          style={{ height: 48, paddingHorizontal: 16, borderRadius: 14, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 }}>
+          <T size={15} weight="semibold" color={C.brand}>{manual.trim() ? 'Connect' : 'Paste'}</T>
+        </Pressable>
+      </Animated.View>
+    </QuizScreen>
+  );
+}
