@@ -7,9 +7,10 @@ import { useEffect, useRef } from 'react';
 import { AppHeader, WebTabBar } from '@/components/app-chrome';
 import { C } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
+import { useLmsForegroundSync } from '@/lib/lms-sync';
 import { notificationPermission, REMINDERS_ASKED_KEY } from '@/lib/notifications';
 
-const SCREEN_ROUTES = { home: '/', calendar: '/calendar', courses: '/courses', chat: '/chat', settings: '/settings' } as const;
+const SCREEN_ROUTES = { home: '/', calendar: '/calendar', courses: '/courses', chat: '/chat', settings: '/settings', connect: '/onboarding/lms?from=app' } as const;
 
 /** Accounts that haven't finished onboarding (new app signups; the web marks its signups done)
  *  go through it on first open. Everyone else gets asked about reminders once. */
@@ -42,8 +43,10 @@ function useNotificationTaps() {
 }
 
 export default function TabsLayout() {
+  const { me } = useAuth();
   useFirstRunPrompts();
   useNotificationTaps();
+  useLmsForegroundSync(!!me);
   return (
     <Tabs
       tabBar={(props) => <WebTabBar {...props} />}

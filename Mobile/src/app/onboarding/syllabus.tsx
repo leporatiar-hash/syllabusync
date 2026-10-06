@@ -4,15 +4,19 @@ import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 
-import { goTo, QuizButton, QuizScreen } from '@/components/quiz-kit';
+import { goTo, QuizButton, QuizScreen, useQuiz } from '@/components/quiz-kit';
 import { BrandLoader, T } from '@/components/web';
 import { C, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { pickAndUploadSyllabus } from '@/lib/upload';
 
-type Uploaded = { name: string; deadlines: number };
+type Uploaded = { name: string; deadlines: number; lmsBacked: boolean };
 
 export default function SyllabusStep() {
+  const { answers } = useQuiz();
+  // With an LMS connected, due dates come from it; the syllabus adds what the LMS doesn't know.
+  const lmsName = answers.lms === 'oaks' ? 'OAKS' : answers.lms === 'canvas' ? 'Canvas' : 'your LMS';
+  const synced = (answers.lmsSynced ?? null) !== null;
   const [uploaded, setUploaded] = useState<Uploaded[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,9 +30,10 @@ export default function SyllabusStep() {
       if (!res.ok) return setError(res.error);
       const course = res.data?.course;
       if (!course) return setError(res.data?.debug?.message ?? 'We couldn’t read that file. Try a PDF with selectable text.');
-      const deadlines = Array.isArray(res.data?.deadlines) ? res.data.deadlines.length : 0;
+      const lmsBacked = !!res.data?.lms_backed;
+      const deadlines = typeof res.data?.deadlines_added === 'number' ? res.data.deadlines_added : Array.isArray(res.data?.deadlines) ? res.data.deadlines.length : 0;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setUploaded((u) => [...u, { name: course.name ?? 'Course', deadlines }]);
+      setUploaded((u) => [...u, { name: course.code || course.name || 'Course', deadlines, lmsBacked }]);
       track('syllabus_uploaded', { deadlines, source: 'onboarding' });
     } finally {
       setBusy(false);
@@ -36,11 +41,18 @@ export default function SyllabusStep() {
   };
 
   const total = uploaded.reduce((n, u) => n + u.deadlines, 0);
+  const allLms = uploaded.length > 0 && uploaded.every((u) => u.lmsBacked);
 
   return (
     <QuizScreen
-      title={uploaded.length ? `${total} deadline${total === 1 ? '' : 's'} found` : 'Drop in a syllabus'}
-      subtitle={uploaded.length ? undefined : 'We’ll pull out every exam and assignment.'}
+      title={uploaded.length ? (allLms ? 'Course info saved' : `${total} deadline${total === 1 ? '' : 's'} found`) : synced ? 'Now add a syllabus' : 'Drop in a syllabus'}
+      subtitle={
+        uploaded.length
+          ? allLms ? `Ask ClassMate about office hours, grading or how to reach your professor. Due dates stay synced from ${lmsName}.` : undefined
+          : synced
+            ? `Professor emails, office hours and grading policies. Due dates keep coming from ${lmsName}.`
+            : 'We’ll pull out every exam and assignment.'
+      }
       onSkip={uploaded.length ? undefined : () => { track('onboarding_syllabus_skipped'); goTo('ready'); }}
       skipLabel="Skip for now"
       footer={uploaded.length ? <QuizButton title="See my semester" onPress={() => goTo('ready')} /> : undefined}>
@@ -51,7 +63,11 @@ export default function SyllabusStep() {
           </View>
           <View style={{ flex: 1 }}>
             <T size={16} weight="semibold" color={C.slate900} numberOfLines={1}>{u.name}</T>
-            <T size={13} color={C.slate500}>{u.deadlines} deadline{u.deadlines === 1 ? '' : 's'} added</T>
+            <T size={13} color={C.slate500}>
+              {u.lmsBacked
+                ? `Added to your ${lmsName} course${u.deadlines ? ` · ${u.deadlines} exam${u.deadlines === 1 ? '' : 's'} ${lmsName} didn’t have` : ''}`
+                : `${u.deadlines} deadline${u.deadlines === 1 ? '' : 's'} added`}
+            </T>
           </View>
         </Animated.View>
       ))}

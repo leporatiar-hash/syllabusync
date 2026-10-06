@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
-import { Check } from 'lucide-react-native';
+import { BellOff, CalendarX2, Check, PencilLine } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, TextInput, View } from 'react-native';
@@ -25,12 +25,14 @@ const GUIDES: Record<Exclude<Lms, 'none'>, Guide> = {
 const looksLikeFeed = (s: string) => /^(https?|webcal):\/\/\S+$/i.test(s.trim()) && /(ical|\.ics|calendar|feed|webcal)/i.test(s);
 
 export default function ConnectStep() {
-  const { answers } = useQuiz();
+  const { answers, set } = useQuiz();
   const guide = GUIDES[(answers.lms && answers.lms !== 'none' ? answers.lms : 'other') as Exclude<Lms, 'none'>];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState('');
   const [localSynced, setSynced] = useState<number | null>(null);
+  const [confirmSkip, setConfirmSkip] = useState(false);
+  const inApp = answers.mode === 'app';
   const synced = answers.lmsSynced ?? localSynced;
   const auto = answers.lms === 'oaks' || answers.lms === 'canvas';
 
@@ -42,6 +44,7 @@ export default function ConnectStep() {
       const r = await api<{ initial_sync?: { synced_count: number } }>('/lms/connect/ical', { method: 'POST', body: JSON.stringify({ ical_url: link }) });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSynced(r.initial_sync?.synced_count ?? 0);
+      set({ lmsSynced: r.initial_sync?.synced_count ?? 0 });
       track('lms_connected', { provider: 'ical', lms: answers.lms ?? null });
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -73,9 +76,37 @@ export default function ConnectStep() {
     await tryClipboard(true);
   };
 
+  // Skipping the LMS is the biggest drop-off in value, so it takes a second, honest look.
+  if (confirmSkip) {
+    const costs = [
+      { icon: CalendarX2, text: 'When a professor moves a due date, you won’t hear about it.' },
+      { icon: PencilLine, text: 'Every assignment gets typed in by hand.' },
+      { icon: BellOff, text: `No reminders for anything posted in ${guide.name}.` },
+    ];
+    return (
+      <QuizScreen
+        title={`Skip ${guide.name}?`}
+        subtitle="It takes about 30 seconds, and you only do it once."
+        onSkip={() => { track('onboarding_lms_skipped', { reason: 'confirmed' }); goTo('syllabus'); }}
+        skipLabel="Skip anyway"
+        footer={<QuizButton title={`Connect ${guide.name}`} onPress={() => { track('onboarding_lms_skip_reversed', { lms: answers.lms ?? null }); setConfirmSkip(false); openLms(); }} />}>
+        <Animated.View entering={FadeInDown.delay(80).duration(360)} style={[{ backgroundColor: C.white, borderRadius: 24, padding: 18, gap: 16 }, shadowSm]}>
+          {costs.map(({ icon: Icon, text }) => (
+            <View key={text} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon size={18} color={C.red} />
+              </View>
+              <T size={15} weight="medium" color={C.slate800} style={{ flex: 1 }}>{text}</T>
+            </View>
+          ))}
+        </Animated.View>
+      </QuizScreen>
+    );
+  }
+
   if (synced !== null) {
     return (
-      <QuizScreen title="You’re synced." footer={<QuizButton title="Next" onPress={() => goTo('syllabus')} />}>
+      <QuizScreen title="You’re synced." footer={<QuizButton title="Next" onPress={() => (inApp ? router.replace('/') : goTo('syllabus'))} />}>
         <Animated.View entering={ZoomIn.springify()} style={[{ alignItems: 'center', backgroundColor: C.white, borderRadius: 28, paddingVertical: 36, gap: 6 }, shadowSm]}>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
             <Check size={36} color={C.green} strokeWidth={3} />
@@ -91,8 +122,12 @@ export default function ConnectStep() {
     <QuizScreen
       title={`Connect ${guide.name}`}
       subtitle={auto ? `Sign in and ClassMate pulls in every assignment. Read-only.` : `Copy your calendar link from ${guide.name}, come back, done.`}
-      onSkip={() => { track('onboarding_lms_skipped', { reason: 'skipped' }); goTo('syllabus'); }}
-      skipLabel="Skip for now"
+      onSkip={() => {
+        if (inApp) return router.back();
+        track('onboarding_lms_skip_tapped', { lms: answers.lms ?? null });
+        setConfirmSkip(true);
+      }}
+      skipLabel={inApp ? 'Not now' : 'Skip for now'}
       footer={<QuizButton title={auto ? `Sign in to ${guide.name}` : `Open ${guide.name}`} loading={busy} onPress={openLms} />}>
       {!auto ? (
       <Animated.View entering={FadeInDown.delay(80).duration(360)} style={[{ backgroundColor: C.white, borderRadius: 24, padding: 18, gap: 14 }, shadowSm]}>

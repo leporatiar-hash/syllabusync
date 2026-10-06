@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { CircleSlash, LayoutGrid, MonitorSmartphone, Palette, School } from 'lucide-react-native';
 
 import { advance, ChoiceCard, type Lms, QuizScreen, useQuiz } from '@/components/quiz-kit';
@@ -31,7 +32,8 @@ export default function LmsStep() {
             set({ lms: o.value });
             if (o.value === 'none') {
               track('onboarding_lms_skipped', { reason: 'no_lms' });
-              advance('syllabus');
+              if (answers.mode === 'app') router.replace('/');
+              else advance('syllabus');
             } else advance('connect');
           }}
         />

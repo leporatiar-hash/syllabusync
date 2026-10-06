@@ -156,7 +156,13 @@ export function DeadlinesTab({
             try {
               const res = await pickAndUploadSyllabus(`/courses/${courseId}/syllabus`);
               if (res && !res.ok) Alert.alert('Upload failed', res.error);
-              if (res?.ok) onSyllabusUploaded();
+              if (res?.ok) {
+                onSyllabusUploaded();
+                if (res.data?.lms_backed) {
+                  const extra = res.data.deadlines_added ? ` Also added ${res.data.deadlines_added} exam${res.data.deadlines_added === 1 ? '' : 's'} your LMS didn’t list.` : '';
+                  Alert.alert('Syllabus added', `Professor contact, office hours and policies are saved. Due dates stay synced from your LMS.${extra}`);
+                }
+              }
             } finally {
               setUploading(false);
             }

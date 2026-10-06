@@ -37,6 +37,8 @@ export type Course = {
   color: string | null;
   deadline_count: number;
   flashcard_set_count: number;
+  has_syllabus?: boolean;
+  lms_synced?: boolean;
 };
 
 export type Deadline = {

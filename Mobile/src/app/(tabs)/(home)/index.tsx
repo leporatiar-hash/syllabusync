@@ -1,17 +1,17 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as WebBrowser from 'expo-web-browser';
-import { ArrowRight, CalendarDays, Check, ChevronRight, Copy, Layers, MessageCircle, RefreshCw, Share2, Sparkles, X } from 'lucide-react-native';
+import { ArrowRight, CalendarDays, Check, ChevronRight, Copy, FileText, Layers, MessageCircle, RefreshCw, Share2, Sparkles, X } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Share, View } from 'react-native';
 
 import { Card, DashedBox, GradientButton, IconSquare, OutlineButton, PageBackground, Spinner, T, TypeChip } from '@/components/web';
-import { C, normalizeType } from '@/constants/theme';
+import { C, getCourseColor, normalizeType } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/lib/auth';
-import { WEB_URL } from '@/lib/config';
+import { track } from '@/lib/analytics';
 import { addDaysYmd, formatDeadlineDate, localToday } from '@/lib/dates';
+import { onLmsSynced } from '@/lib/lms-sync';
 import { usePaywall } from '@/components/paywall';
 import { purchasesEnabled } from '@/lib/purchases';
 import type { Course, Deadline, Subscription } from '@/lib/types';
@@ -48,11 +48,17 @@ export default function Home() {
   }, [entries.data, today]);
 
   const hasLms = (lms.data?.length ?? 0) > 0;
-  const providers = [...new Set((lms.data ?? []).map((c) => (c.provider === 'ical' ? 'iCal' : 'Canvas')))].join(' + ');
+  const providers = [...new Set((lms.data ?? []).map((c) => (c.provider === 'ical' ? 'LMS' : 'Canvas')))].join(' + ');
+  const connectLms = (from: string) => {
+    track('lms_nudge_tapped', { from });
+    router.push('/onboarding/lms?from=app');
+  };
+  // Once the LMS owns due dates, a syllabus is for what the LMS doesn't have: contacts, office hours, policies.
+  const missingSyllabus = (courses.data ?? []).filter((c) => !c.has_syllabus);
   const setupItems = [
-    { label: 'Connect your LMS', description: 'Sync your calendar and deadlines automatically', done: hasLms, onPress: () => WebBrowser.openBrowserAsync(`${WEB_URL}/settings`) },
+    { label: 'Connect your LMS', description: 'Every due date, kept up to date automatically', done: hasLms, onPress: () => connectLms('checklist') },
     { label: 'Add your courses', description: 'Create your course list for the semester', done: (courses.data?.length ?? 0) > 0, onPress: () => router.navigate('/courses') },
-    { label: 'Upload a syllabus', description: 'Let AI extract all deadlines from your syllabus PDF', done: (courses.data ?? []).some((c) => c.deadline_count > 0), onPress: () => router.navigate('/courses') },
+    { label: 'Upload a syllabus', description: 'Professor emails, office hours and policies', done: (courses.data ?? []).some((c) => c.has_syllabus), onPress: () => router.navigate('/courses') },
   ];
   const doneCount = setupItems.filter((i) => i.done).length;
   const isPro = sub.data?.is_pro ?? me?.subscription.is_pro;
@@ -60,6 +66,9 @@ export default function Home() {
   const loading = entries.loading && !entries.data;
   const refreshing = entries.refreshing;
   const refreshAll = () => Promise.all([entries.refresh(), courses.refresh(), lms.refresh(), sub.refresh()]);
+  const { reload: reloadEntries } = entries;
+  const { reload: reloadCourses } = courses;
+  useEffect(() => onLmsSynced(() => { reloadEntries(); reloadCourses(); }), [reloadEntries, reloadCourses]);
 
   const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -92,6 +101,51 @@ export default function Home() {
           ) : null}
         </View>
 
+        {lms.data && !hasLms ? (
+          <View style={{ borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#EEF2FF', padding: 18, gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <IconSquare icon={RefreshCw} bg={C.white} fg={C.brand} size={40} radius={12} />
+              <View style={{ flex: 1 }}>
+                <T size={17} weight="semibold" color={C.slate900}>Connect your LMS</T>
+                <T size={13} color={C.slate600}>OAKS, Canvas and more</T>
+              </View>
+            </View>
+            <T size={14} color={C.slate700} style={{ lineHeight: 20 }}>
+              Pull in every due date, and stay right when professors move them. You’re only seeing what you’ve added by hand right now.
+            </T>
+            <GradientButton title="Connect in 30 seconds" onPress={() => connectLms('home_card')} />
+          </View>
+        ) : null}
+
+        {hasLms && courses.data && missingSyllabus.length > 0 ? (
+          <Card>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <IconSquare icon={FileText} bg="#EEF2FF" fg={C.brand} size={36} radius={10} />
+              <View style={{ flex: 1 }}>
+                <T size={15} weight="semibold" color={C.slate900}>Add your syllabi</T>
+                <T size={12} color={C.slate500}>{missingSyllabus.length} of {courses.data.length} courses still need one</T>
+              </View>
+            </View>
+            <T size={13} color={C.slate600} style={{ marginTop: 10, lineHeight: 19 }}>
+              Professor emails, office hours and grading policies, ready when you ask ClassMate. Due dates stay synced from your LMS.
+            </T>
+            <View style={{ marginTop: 8 }}>
+              {missingSyllabus.slice(0, 4).map((c, i) => (
+                <Pressable
+                  key={c.id}
+                  onPress={() => { track('syllabus_nudge_tapped', { from: 'home_card' }); router.navigate(`/courses/${c.id}`); }}
+                  style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: C.slate100, backgroundColor: pressed ? C.slate50 : 'transparent' })}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: getCourseColor(c.id, c.color).accent }} />
+                  <T size={14} weight="medium" color={C.slate800} numberOfLines={1} style={{ flex: 1 }}>{c.code || c.name}</T>
+                  <T size={13} weight="medium" color={C.brand}>Add</T>
+                  <ChevronRight size={16} color={C.slate300} />
+                </Pressable>
+              ))}
+              {missingSyllabus.length > 4 ? <T size={12} color={C.slate400}>+{missingSyllabus.length - 4} more in Courses</T> : null}
+            </View>
+          </Card>
+        ) : null}
+
         <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <T size={16} weight="semibold" color={C.slate900}>Upcoming deadlines</T>
@@ -108,8 +162,14 @@ export default function Home() {
             <DashedBox style={{ marginTop: 16 }}>
               <IconSquare icon={CalendarDays} bg={C.slate100} fg={C.slate400} size={48} radius={24} />
               <T size={14} weight="semibold" color={C.slate700} style={{ marginTop: 12 }}>No upcoming deadlines yet</T>
-              <T size={12} color={C.slate500} style={{ marginTop: 4, textAlign: 'center' }}>Upload a syllabus and we&apos;ll pull out every due date.</T>
-              <GradientButton title="Go to My Courses" size="sm" style={{ marginTop: 16 }} onPress={() => router.navigate('/courses')} />
+              {hasLms ? (
+                <T size={12} color={C.slate500} style={{ marginTop: 4, textAlign: 'center' }}>Your LMS is synced. New due dates show up here on their own.</T>
+              ) : (
+                <>
+                  <T size={12} color={C.slate500} style={{ marginTop: 4, textAlign: 'center' }}>Connect your LMS and every due date shows up here.</T>
+                  <GradientButton title="Connect your LMS" size="sm" style={{ marginTop: 16 }} onPress={() => connectLms('empty_state')} />
+                </>
+              )}
             </DashedBox>
           ) : (
             <View style={{ marginTop: 8 }}>
@@ -167,20 +227,6 @@ export default function Home() {
                   {!item.done ? <ChevronRight size={16} color={C.slate300} /> : null}
                 </Pressable>
               ))}
-            </View>
-          </Card>
-        ) : null}
-
-        {lms.data && !hasLms ? (
-          <Card>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <IconSquare icon={RefreshCw} bg="#EEF2FF" fg={C.brand} size={32} radius={8} />
-              <T size={14} weight="semibold" color={C.slate900}>Sync your school calendar</T>
-            </View>
-            <T size={12} color={C.slate500} style={{ marginTop: 8 }}>Import assignments from Canvas or an iCal feed. Upload syllabi first so deadlines match your courses.</T>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-              <GradientButton title="Connect Canvas" size="sm" style={{ flex: 1 }} onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/settings`)} />
-              <OutlineButton title="iCal feed" size="sm" style={{ flex: 1 }} onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/settings`)} />
             </View>
           </Card>
         ) : null}
