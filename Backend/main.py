@@ -38,6 +38,7 @@ import time
 import asyncio
 import logging
 import stripe as stripe_lib
+import schools
 import hmac
 import resend
 import httpx
@@ -642,6 +643,9 @@ class UserProfile(Base):
     email = Column(String, unique=True, nullable=False)
     full_name = Column(String, nullable=True)
     school_name = Column(String, nullable=True)
+    school_domain = Column(String, nullable=True)
+    lms_provider = Column(String, nullable=True)
+    lms_host = Column(String, nullable=True)
     school_type = Column(String, nullable=True)
     academic_year = Column(String, nullable=True)
     major = Column(String, nullable=True)
@@ -783,6 +787,16 @@ class StripeWebhookEvent(Base):
     id = Column(String, primary_key=True)  # Stripe event id, e.g. "evt_..."
     event_type = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SchoolLms(Base):
+    """Cached LMS detection per school domain (see schools.py). `options` is a list of
+    {provider, host, name, source}, best first; a student-confirmed host goes to the front."""
+    __tablename__ = "school_lms"
+
+    domain = Column(String, primary_key=True)
+    options = Column(JSON, nullable=True)
+    checked_at = Column(DateTime, default=datetime.utcnow)
 
 
 class PushToken(Base):
@@ -932,6 +946,9 @@ class UserProfileRequest(BaseModel):
     academic_year: str | None = Field(None, description="Academic year: 'Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', etc.")
     major: str | None = Field(None, description="User's major or field of study")
     naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
+    school_domain: str | None = Field(None, description="The school's web domain, e.g. 'cofc.edu'")
+    lms_provider: str | None = Field(None, description="'brightspace' or 'canvas'")
+    lms_host: str | None = Field(None, description="The school's LMS host, e.g. 'lms.cofc.edu'")
 
 
 class RegenerateTitlesRequest(BaseModel):
@@ -1116,6 +1133,9 @@ class UserProfileOut(BaseModel):
     academic_year: str | None = Field(None, description="'Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate', etc.")
     major: str | None = Field(None, description="User's major or field of study")
     profile_picture: str | None = Field(None, description="URL to the user's profile picture")
+    school_domain: str | None = Field(None, description="The school's web domain, e.g. 'cofc.edu'")
+    lms_provider: str | None = Field(None, description="'brightspace' or 'canvas' when known")
+    lms_host: str | None = Field(None, description="The school's LMS host, e.g. 'lms.cofc.edu'")
     referral_code: str | None = Field(None, description="Unique referral code to share with friends")
     naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
 
@@ -1834,6 +1854,17 @@ def ensure_iap_columns():
             pass  # Column already exists
 
 
+def ensure_school_columns():
+    """School + LMS columns on user_profiles (nullable) for the in-app LMS sign-in."""
+    for col_name in ("school_domain", "lms_provider", "lms_host"):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col_name} VARCHAR"))
+            logger.info(f"[Migration] Added '{col_name}' column to user_profiles")
+        except Exception:
+            pass  # Column already exists
+
+
 def ensure_lms_health_columns():
     """Sync-health columns on lms_connections (nullable; NULL = healthy)."""
     for col_name, col_def in [("failure_count", "INTEGER"), ("failing_since", "TIMESTAMP"), ("last_error", "VARCHAR")]:
@@ -2000,6 +2031,7 @@ ensure_founding_member_expiry_column()
 ensure_iap_columns()
 ensure_notification_pref_columns()
 ensure_lms_health_columns()
+ensure_school_columns()
 ensure_naming_style_column()
 ensure_note_columns()
 Base.metadata.create_all(bind=engine)
@@ -3358,6 +3390,9 @@ def get_me(current_user: User = Depends(get_current_user)):
                 "profile_picture": profile.profile_picture,
                 "referral_code": profile.referral_code,
                 "naming_style": profile.naming_style or "simple",
+                "school_domain": profile.school_domain,
+                "lms_provider": profile.lms_provider,
+                "lms_host": profile.lms_host,
             },
             "subscription": {
                 "tier": tier,
@@ -3392,6 +3427,9 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                 academic_year=payload.academic_year,
                 major=payload.major,
                 naming_style=naming_style or "simple",
+                school_domain=payload.school_domain,
+                lms_provider=payload.lms_provider,
+                lms_host=payload.lms_host,
             )
             db.add(profile)
             db.commit()
@@ -3403,6 +3441,15 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
             profile.academic_year = payload.academic_year or profile.academic_year
             profile.major = payload.major or profile.major
             profile.naming_style = naming_style or profile.naming_style
+            if payload.school_domain:
+                if payload.school_domain != profile.school_domain:
+                    # New school: the old school's LMS no longer applies
+                    profile.lms_provider = None
+                    profile.lms_host = None
+                profile.school_domain = payload.school_domain
+            if payload.lms_provider in ("brightspace", "canvas") and payload.lms_host:
+                profile.lms_provider = payload.lms_provider
+                profile.lms_host = payload.lms_host
             db.commit()
 
         return {
@@ -3416,6 +3463,9 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                 "major": profile.major,
                 "profile_picture": profile.profile_picture,
                 "naming_style": profile.naming_style or "simple",
+                "school_domain": profile.school_domain,
+                "lms_provider": profile.lms_provider,
+                "lms_host": profile.lms_host,
             }
         }
     finally:
@@ -6549,6 +6599,119 @@ def sync_all_connections(user_id: str, db):
         all_errors.extend(errs)
 
     return total_synced, all_errors
+
+
+# ── Schools ("Where do you go?") ───────────────────────────────────────────
+
+SCHOOL_LMS_FOUND_TTL = timedelta(days=30)
+SCHOOL_LMS_NONE_TTL = timedelta(days=7)
+
+
+class LmsIdentifyRequest(BaseModel):
+    url: str = Field(description="The web address a student uses to sign in to their classes")
+
+
+class LmsConfirmRequest(BaseModel):
+    domain: str
+    provider: str
+    host: str
+
+
+def _cached_school_lms(db, domain: str):
+    row = db.query(SchoolLms).filter(SchoolLms.domain == domain).first()
+    if not row or row.options is None:
+        return row, None
+    pinned = any(o.get("source") == "confirmed" for o in row.options)
+    ttl = SCHOOL_LMS_FOUND_TTL if row.options else SCHOOL_LMS_NONE_TTL
+    if pinned or (row.checked_at and datetime.utcnow() - row.checked_at < ttl):
+        return row, row.options
+    return row, None
+
+
+def _save_school_lms(db, row, domain: str, options: list[dict]):
+    if row is None:
+        row = SchoolLms(domain=domain)
+        db.add(row)
+    row.options = options
+    row.checked_at = datetime.utcnow()
+    db.commit()
+
+
+@app.get("/schools/search", tags=["schools"], summary="Search US colleges by name, abbreviation or domain")
+@limiter.limit("60/minute")
+def search_schools(request: Request, q: str = Query("", max_length=80), current_user: User = Depends(get_current_user)):
+    return schools.search(q)
+
+
+@app.get("/schools/suggest", tags=["schools"], summary="The student's school, from their email domain")
+def suggest_school(current_user: User = Depends(get_current_user)):
+    return {"school": schools.school_for_email(current_user.email)}
+
+
+@app.get("/schools/lms", tags=["schools"], summary="Which LMS a school uses (Brightspace / Canvas), best first")
+@limiter.limit("20/minute")
+async def school_lms(request: Request, domain: str = Query(..., max_length=120), current_user: User = Depends(get_current_user)):
+    # Only schools in our directory: never probe arbitrary hosts a client sends.
+    school = schools.school_for_email(f"x@{domain.lower().strip()}")
+    if not school:
+        raise HTTPException(status_code=404, detail="Unknown school")
+    domain = school["domain"]
+    db = SessionLocal()
+    try:
+        row, options = _cached_school_lms(db, domain)
+        if options is None:
+            options = await schools.detect(domain, school["name"])
+            _save_school_lms(db, row, domain, options)
+            logger.info(f"[Schools] LMS detection for {domain}: {[(o['provider'], o['host']) for o in options]}")
+        return {"school": school, "options": options}
+    finally:
+        db.close()
+
+
+@app.post("/schools/lms/identify", tags=["schools"], summary="Check a typed-in LMS address (Brightspace or Canvas)")
+@limiter.limit("10/minute")
+async def identify_lms(request: Request, payload: LmsIdentifyRequest, current_user: User = Depends(get_current_user)):
+    host = schools.host_from_input(payload.url)
+    if not host:
+        raise HTTPException(status_code=400, detail="That doesn't look like a web address.")
+    option = await schools.identify(host)
+    if not option:
+        raise HTTPException(status_code=400, detail="We couldn't find Canvas or Brightspace at that address.")
+    return option
+
+
+@app.post("/schools/lms/confirm", tags=["schools"], summary="Remember the LMS a student just connected, for classmates")
+@limiter.limit("10/minute")
+async def confirm_school_lms(request: Request, payload: LmsConfirmRequest, current_user: User = Depends(get_current_user)):
+    school = schools.school_for_email(f"x@{payload.domain.lower().strip()}")
+    host = schools.host_from_input(payload.host)
+    if not school or not host:
+        return {"saved": False}
+    # Re-check the host ourselves instead of trusting the client.
+    option = await schools.identify(host)
+    if not option or option["provider"] != payload.provider:
+        return {"saved": False}
+    option["source"] = "confirmed"
+    db = SessionLocal()
+    try:
+        row = db.query(SchoolLms).filter(SchoolLms.domain == school["domain"]).first()
+        known = {o.get("host") for o in ((row.options or []) if row else [])}
+        mine = schools.school_for_email(current_user.email)
+        # Only pin it for the whole school when we have reason to believe it's theirs: the student's
+        # email is from that school, the LMS is on the school's domain, or detection already found it.
+        trusted = (mine and mine["domain"] == school["domain"]) or host.endswith("." + school["domain"]) or host in known
+        if trusted:
+            others = [o for o in ((row.options or []) if row else []) if o.get("host") != host]
+            _save_school_lms(db, row, school["domain"], [option] + others)
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if profile:
+            profile.school_domain = school["domain"]
+            profile.lms_provider = option["provider"]
+            profile.lms_host = host
+            db.commit()
+        return {"saved": True, "shared": bool(trusted)}
+    finally:
+        db.close()
 
 
 # ── LMS Endpoints ───────────────────────────────────────────────────────────
