@@ -22,16 +22,16 @@ Everything below needs the Apple Developer account unless marked "(now)".
 
 ## 2. In-app purchase products (App Store Connect → Subscriptions)
 
-Match the web prices so nobody is penalized for which store they used:
+Prices decided 2026-10-04 (the web's Stripe prices, still $5/$40, need raising to match before launch):
 
-| Product ID | Type | Price | Web equivalent |
+| Product ID | Type | Price | Intro offer |
 |---|---|---|---|
-| `classmate_pro_monthly` | Auto-renewable, group "ClassMate Pro" | $4.99 | $5/mo Stripe |
-| `classmate_pro_yearly` | Auto-renewable, same group | $39.99 | $40/yr Stripe |
+| `classmate_pro_monthly` | Auto-renewable, group "ClassMate Pro" | $9.99 | none |
+| `classmate_pro_yearly` | Auto-renewable, same group | $59.99 | 2-week free trial |
 
 - [ ] Both products need a display name, description, and review screenshot (the paywall).
 - [ ] The founding-member $15 one-time stays **web-only** for v1.
-- [ ] Optional: introductory offer (1-week free trial) on yearly.
+- [ ] Introductory offer on yearly: 2-week free trial (the paywall reads eligibility from RevenueCat).
 
 ## 3. RevenueCat
 
@@ -70,9 +70,27 @@ npx eas-cli@latest submit -p ios --latest
 
 - [ ] EAS creates the distribution certificate and provisioning profile on the first build (sign in with your Apple ID when prompted).
 - [ ] TestFlight: add yourself and a few CofC students as internal testers.
+- [ ] **OAKS connect on a real iPhone** (the thing Expo Go can't prove): fresh install → onboarding →
+      Sign in to OAKS → Microsoft + Authenticator on the same phone (switch to Authenticator and back)
+      → "OAKS is connected". Then: kill the app mid-sign-in and retry; turn on Airplane mode at the
+      "Finding your calendar" step (should show Try again); reopen the app next day and confirm due
+      dates refresh. PostHog `lms_connect_step` should show opened → page_ready → signed_in →
+      feed_found → connected.
 - [ ] **Sandbox purchase test**: buy monthly in the TestFlight build with a Sandbox Apple ID → Settings shows
       "ClassMate Pro · Billed through the App Store", and `/me/subscription` returns `billing_source: "app_store"`.
       Then test Restore purchases on a second device, and cancel (Pro should last until expiry).
+
+## 5b. Other schools (before any marketing outside CofC)
+
+The connect script only uses standard Brightspace/Canvas features, but it's only been proven at CofC.
+- [ ] Recruit 2–3 students at other **Brightspace/D2L** schools and 2–3 at **Canvas** schools as
+      TestFlight external testers (external testing needs a quick Beta App Review).
+- [ ] For each school note: LMS address, sign-in provider (Microsoft / Okta / Duo / Shibboleth /
+      Google), and the furthest `lms_connect_step` reached. `feed_missed` events include which
+      paths were tried (no tokens), which is what's needed to fix a school.
+- [ ] Known gap: Google sign-in schools can't sign in inside apps; they use the paste fallback.
+- [ ] Today the in-app sign-in starts at OAKS (`lms.cofc.edu`) or Canvas's generic login: picking a
+      school's own LMS address ("Where do you go?") is the next build for non-CofC students.
 
 ## 6. App Store listing
 
@@ -93,10 +111,14 @@ npx eas-cli@latest submit -p ios --latest
   opened from the app (e.g. `?from=ios`) or drop those links for the review build.
 - 5.1.1(v) account deletion: covered (Settings → Delete account).
 - 4.8 Sign in with Apple: not required (email/password only, no third-party login).
+- **LMS sign-in inside the app**: say in Review Notes that the school's own sign-in page is shown
+  in an in-app browser, ClassMate never reads or stores the password (the script skips password
+  fields), and only the student's own read-only calendar link is saved. Include a screen recording
+  of the CofC flow, since reviewers can't sign in to OAKS. Paste-a-link fallback exists.
 
 ## Next (not built yet)
 
-1. Connect Canvas/iCal natively (still opens the web settings page).
+1. School picker so non-CofC Brightspace schools open their own LMS address (OAKS/Canvas connect is native now).
 2. Profile photo upload, rich-text toolbar in notes (notes use markdown-style shortcuts that round-trip to the web editor).
 3. Replace the placeholder App Store URL in the force-update screen (`src/app/_layout.tsx`) once the listing exists.
 4. Test a real push on a device: Simulator/Expo Go can't receive remote pushes; use the TestFlight build.
