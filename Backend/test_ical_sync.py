@@ -14,9 +14,11 @@ and institution-wide events use LOCATION "College of Charleston".
 Covers:
   - zero courses: one course per real class, cleaned names, distinct palette colors, events
     assigned by LOCATION, no junk courses from SUMMARY / institution-wide / room events
-  - existing courses: no courses created, matched events assigned, unmatched stay NULL
+  - existing courses: reused (no duplicate), the LMS's other classes are created, events assigned
   - syncing twice (and connect + sync): no duplicate courses or deadlines
-  - race guard: if courses appear before the bulk insert, it creates nothing
+  - LMS as source of truth: moved due dates update, upcoming items removed from the feed are
+    removed (past/completed kept), an empty feed or a second feed never deletes anything
+  - syllabus deadlines in an LMS course give way to the LMS (exams on LMS-free dates stay)
   - LOCATION identity extraction and name cleaning
 """
 import os
@@ -215,17 +217,20 @@ def test_zero_courses_bulk_create():
     check("institution-wide + room events stay unassigned", assigned["2007"] is None and assigned["2008"] is None, str(assigned))
 
 
-def test_existing_courses_no_create():
+def test_existing_courses_reused_and_rest_created():
     user_id, _ = make_user("existing", course_codes=["FINC 400"])
     synced, errors = run_sync(user_id)
     courses, assigned, n = snapshot(user_id)
 
     check("existing user: no errors", errors == [], str(errors))
-    check("existing user: no courses created", sorted(courses) == ["FINC 400"], str(sorted(courses)))
-    check("existing user: matched events assigned", assigned["2001"] == assigned["2002"] == "FINC 400", str(assigned))
-    check("existing user: unmatched events NULL (incl. SUMMARY naming FINC-316)",
-          all(assigned[u] is None for u in ("2003", "2004", "2005", "2006", "2007", "2008")), str(assigned))
-    check("existing user: all events still stored", n == 8, f"stored={n}")
+    check("existing user: FINC 400 reused, the LMS's other classes created",
+          sorted(courses) == ["ARTH 103", "FINC 400", "FINC 418"], str(sorted(courses)))
+    check("existing user: kept their own course name", courses["FINC 400"].name == "FINC 400 course")
+    check("existing user: events assigned by LOCATION",
+          assigned["2001"] == assigned["2002"] == "FINC 400" and assigned["2005"] == "FINC 418"
+          and assigned["2006"] == "ARTH 103", str(assigned))
+    check("existing user: institution-wide events stay NULL", assigned["2007"] is None and assigned["2008"] is None, str(assigned))
+    check("existing user: all events stored", n == 8, f"stored={n}")
 
 
 def test_sync_twice_no_duplicates():
@@ -253,20 +258,13 @@ def test_connect_endpoint_then_background_sync():
     check("connect + sync: 3 courses, 8 deadlines", len(courses) == 3 and n == 8, f"courses={sorted(courses)} deadlines={n}")
 
 
-def test_race_guard():
-    """If courses appear between sync start and the bulk insert, bulk-create backs off."""
-    user_id, _ = make_user("race", course_codes=["ARTH 103"])
-    db = main.SessionLocal()
-    try:
-        from icalendar import Calendar
-        events = [c for c in Calendar.from_ical(build_feed()).walk() if c.name == "VEVENT"]
-        result = main._bulk_create_ical_courses(events, user_id, db)
-        db.commit()
-    finally:
-        db.close()
-    courses, _, _ = snapshot(user_id)
-    check("race: bulk-create returns None when courses exist", result is None)
-    check("race: nothing created", sorted(courses) == ["ARTH 103"], str(sorted(courses)))
+def test_course_codes_written_differently_are_reused():
+    """A course the student typed as "FINC400" (or created from a syllabus) is the same class."""
+    user_id, _ = make_user("codes", course_codes=["FINC400", "Arth-103"])
+    run_sync(user_id)
+    courses, assigned, _ = snapshot(user_id)
+    check("differently-written codes reused", sorted(courses) == ["Arth-103", "FINC 418", "FINC400"], str(sorted(courses)))
+    check("events land in the reused courses", assigned["2001"] == "FINC400" and assigned["2006"] == "Arth-103", str(assigned))
 
 
 def _stored(user_id, uid):
@@ -297,16 +295,119 @@ def test_utc_times_stored_local():
     check("phone timezone used when known", _stored(user2, "2002") == ("2026-10-07", "8:59 PM"), str(_stored(user2, "2002")))
 
 
+def _set_feed(events):
+    _FakeClient.feed = build_feed(events)
+
+
+def _deadline(user_id, uid):
+    db = main.SessionLocal()
+    try:
+        return db.query(main.Deadline).filter(main.Deadline.user_id == user_id, main.Deadline.external_id.like(f"%-{uid}@%")).first()
+    finally:
+        db.close()
+
+
+def test_lms_changes_flow_through():
+    user_id, _ = make_user("truth")
+    future = "20261120T045900Z"  # 11/19 11:59 PM Eastern
+    events = [
+        _event("3001", "Problem Set 5 - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=future),
+        _event("3002", "Old Quiz - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20260901T035900Z"),
+        _event("3003", "Draft - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=future),
+        _event("3004", "Done already - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=future),
+    ]
+    _set_feed(events)
+    try:
+        run_sync(user_id)
+        db = main.SessionLocal()
+        try:
+            db.query(main.Deadline).filter(main.Deadline.external_id.like("%-3004@%")).update({"completed": True}, synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+
+        # Professor moves Problem Set 5, deletes Draft and Done already, and the past quiz ages out
+        moved = _event("3001", "Problem Set 5 (extended) - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20261124T045900Z")
+        _set_feed([moved])
+        run_sync(user_id)
+        ps5 = _deadline(user_id, "3001")
+        check("moved due date updates", ps5 and (ps5.date, ps5.title) == ("2026-11-23", "Problem Set 5 (extended) - Due"),
+              str(ps5 and (ps5.date, ps5.title)))
+        check("upcoming item removed from the LMS is removed", _deadline(user_id, "3003") is None)
+        check("past item is kept as history", _deadline(user_id, "3002") is not None)
+        check("completed item is kept", _deadline(user_id, "3004") is not None)
+
+        # A feed that comes back empty must not wipe anything
+        _set_feed([])
+        run_sync(user_id)
+        check("empty feed deletes nothing", _deadline(user_id, "3001") is not None)
+
+        # With a second iCal feed connected, items missing from one feed aren't removed
+        db = main.SessionLocal()
+        try:
+            db.add(main.LMSConnection(user_id=user_id, provider="ical", ical_url=FEED_URL + "&second=1"))
+            db.commit()
+            conn = db.query(main.LMSConnection).filter_by(user_id=user_id, provider="ical").first()
+            _set_feed([_event("3999", "Other feed item", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=future)])
+            main.sync_ical(conn, user_id, db)
+        finally:
+            db.close()
+        check("second feed connected: nothing removed", _deadline(user_id, "3001") is not None)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+
+
+def test_syllabus_deadlines_give_way_to_lms():
+    """Syllabus uploaded first, LMS connected later: LMS dates replace the syllabus's, except
+    syllabus exams on a date the LMS has nothing for that course."""
+    user_id, _ = make_user("syl-first", course_codes=["FINC 400"])
+    db = main.SessionLocal()
+    try:
+        course = db.query(main.Course).filter_by(user_id=user_id).first()
+        for title, day, typ, done in (
+            ("Homework 3", "2026-11-06", "assignment", False),      # LMS has it: replaced
+            ("Midterm Exam", "2026-11-12", "exam", False),           # LMS silent that day: kept
+            ("Final Exam", "2026-11-19", "exam", False),             # LMS has an item that day: replaced
+            ("Reading 1", "2026-11-02", "reading", True),            # completed: kept
+        ):
+            db.add(main.Deadline(user_id=user_id, course_id=course.id, title=title, date=day, type=typ,
+                                 source="syllabus", completed=done))
+        db.add(main.Deadline(user_id=user_id, course_id=course.id, title="My study group", date="2026-11-06",
+                             type="assignment", source="manual"))
+        db.commit()
+    finally:
+        db.close()
+    _set_feed([
+        _event("4001", "Homework 3 - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20261107T045900Z"),
+        _event("4002", "Final Exam - Available", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20261120T045900Z"),
+    ])
+    try:
+        run_sync(user_id)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+    db = main.SessionLocal()
+    try:
+        rows = db.query(main.Deadline).filter_by(user_id=user_id).all()
+        left = sorted((d.source, d.title) for d in rows)
+    finally:
+        db.close()
+    check("syllabus copies replaced, LMS-free exam + completed + manual kept",
+          left == sorted([("ical", "Homework 3 - Due"), ("ical", "Final Exam - Available"), ("syllabus", "Midterm Exam"),
+                          ("syllabus", "Reading 1"), ("manual", "My study group")]), str(left))
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
         test_identity_extraction()
         test_zero_courses_bulk_create()
-        test_existing_courses_no_create()
+        test_existing_courses_reused_and_rest_created()
         test_sync_twice_no_duplicates()
         test_connect_endpoint_then_background_sync()
-        test_race_guard()
+        test_course_codes_written_differently_are_reused()
         test_utc_times_stored_local()
+        test_lms_changes_flow_through()
+        test_syllabus_deadlines_give_way_to_lms()
         print("\nAll iCal sync tests passed.")
     finally:
         try:

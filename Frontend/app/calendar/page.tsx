@@ -1353,7 +1353,7 @@ export default function CalendarPage() {
                                       {deadline.type}
                                     </span>
                                     <span>{deadline.course_code || deadline.course_name || (deadline.type === 'Task' ? 'Personal' : 'No course')}</span>
-                                    {deadline.source && deadline.source !== 'manual' && (
+                                    {(deadline.source === 'canvas' || deadline.source === 'ical') && (
                                       <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
                                         {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
                                       </span>
@@ -1442,7 +1442,7 @@ export default function CalendarPage() {
                             </div>
                             <div className="flex items-center gap-1 text-xs text-slate-500">
                               <span>{deadline.course_code || deadline.course_name || (deadline.type === 'Task' ? 'Personal' : 'No course')}</span>
-                              {deadline.source && deadline.source !== 'manual' && (
+                              {(deadline.source === 'canvas' || deadline.source === 'ical') && (
                                 <span className="rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-semibold text-indigo-600">
                                   {deadline.source === 'canvas' ? 'Canvas' : 'iCal'}
                                 </span>
@@ -1571,7 +1571,7 @@ export default function CalendarPage() {
                     </option>
                   ))}
                 </select>
-                {selectedDeadline.source && selectedDeadline.source !== 'manual' && (
+                {(selectedDeadline.source === 'canvas' || selectedDeadline.source === 'ical') && (
                   <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
                     {selectedDeadline.source === 'canvas' ? 'Canvas' : 'iCal'}
                   </span>

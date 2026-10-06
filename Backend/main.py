@@ -1016,6 +1016,8 @@ class CourseOut(BaseModel):
     color: str | None = Field(None, description="User-chosen accent color as a hex string, e.g. '#5B8DEF'. Null if the user hasn't picked one, in which case the client falls back to a deterministic default.")
     deadline_count: int = Field(description="Number of deadlines/assignments in this course")
     flashcard_set_count: int = Field(description="Number of flashcard sets in this course")
+    has_syllabus: bool = Field(False, description="A syllabus has been uploaded (course info, policies, contacts)")
+    lms_synced: bool = Field(False, description="Due dates come from the student's connected LMS")
     created_at: str = Field(description="ISO 8601 timestamp when the course was created")
 
 
@@ -2212,6 +2214,8 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             out.append(("exam_week", {"title": title, "body": body, "data": {"screen": "chat"}},
                         [f"{profile.user_id}:{x.id}:exam_week" for x in items]))
 
+    out += _setup_nudges(db, profile, local_now, already)
+
     if profile.notify_weekly is not False and local_now.weekday() == 6:  # Sunday
         iso = today.isocalendar()
         ledger_id = f"{profile.user_id}:weekly:{iso[0]}-W{iso[1]:02d}"
@@ -2225,6 +2229,41 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             out.append(("weekly", {"title": f"Your week: {_plural(len(week), 'deadline')}", "body": body,
                                    "data": {"screen": "calendar"}}, [ledger_id]))
     return out
+
+
+def _setup_nudges(db, profile, local_now: datetime, already: set[str]) -> list:
+    """Push students to finish setup, at most one nudge per evening:
+    no LMS connected -> "connect" a day after signup, again three days later;
+    LMS connected but courses missing a syllabus -> one "add your syllabi" a day after connecting."""
+    if profile.notify_deadlines is False:
+        return []
+    uid = profile.user_id
+    conns = db.query(LMSConnection).filter(LMSConnection.user_id == uid).all()
+    if not conns:
+        user = db.query(User).filter(User.id == uid).first()
+        age = (datetime.utcnow() - user.created_at).days if user and user.created_at else 0
+        for n, min_age in ((1, 1), (2, 4)):
+            ledger_id = f"{uid}:setup:connect_lms:{n}"
+            if age >= min_age and ledger_id not in already:
+                return [("setup", {
+                    "title": "Let ClassMate watch your due dates",
+                    "body": "Connect your school's LMS once. When a professor moves a deadline, your calendar updates on its own.",
+                    "data": {"screen": "connect"},
+                }, [f"{uid}:setup:connect_lms:{k}" for k in range(1, n + 1)])]
+        return []
+    ledger_id = f"{uid}:setup:add_syllabus"
+    connected_at = min((c.created_at for c in conns if c.created_at), default=None)
+    if ledger_id in already or not connected_at or (datetime.utcnow() - connected_at).days < 1:
+        return []
+    missing = [c for c in db.query(Course).filter(Course.user_id == uid).all() if not c.syllabus_text]
+    if not missing:
+        return []
+    names = ", ".join((c.code or c.name) for c in missing[:3]) + (f" +{len(missing) - 3}" if len(missing) > 3 else "")
+    return [("setup", {
+        "title": f"Add your syllabi ({len(missing)} to go)",
+        "body": f"Professor emails, office hours and grading policies for {names}. Due dates stay synced from your LMS.",
+        "data": {"screen": "courses"},
+    }, [ledger_id])]
 
 
 def format_time_12h(t: str) -> str:
@@ -3366,7 +3405,7 @@ async def regenerate_deadline_titles(request: Request, payload: RegenerateTitles
     in place — so a deadline already saved to the user's calendar keeps its id and
     just picks up the new title, no re-save needed.
 
-    Only renames syllabus-sourced deadlines (source is "manual" or unset); Canvas- and
+    Only renames syllabus-sourced deadlines (source "syllabus", or "manual"/unset from before syllabus deadlines were tagged); Canvas- and
     iCal-synced deadlines already carry real names and are left untouched. Matches are
     made by date within each course — this never creates new deadlines or deletes
     existing ones, it only renames matches it finds.
@@ -3395,7 +3434,7 @@ async def regenerate_deadline_titles(request: Request, payload: RegenerateTitles
                     Deadline.course_id == course.id,
                     Deadline.user_id == current_user.id,
                 ).all()
-                unmatched = [d for d in existing if d.source in ("manual", None)]
+                unmatched = [d for d in existing if d.source in ("manual", "syllabus", None)]
 
                 for item in extracted:
                     item_date = (item.get("date") or "").strip()
@@ -4180,6 +4219,8 @@ def list_courses(current_user: User = Depends(get_current_user)):
                 "color": c.color,
                 "deadline_count": len(c.deadlines),
                 "flashcard_set_count": len(c.flashcard_sets),
+                "has_syllabus": bool(c.syllabus_text),
+                "lms_synced": any(d.source in LMS_SOURCES for d in c.deadlines),
                 "created_at": c.created_at.isoformat()
             }
             for c in courses
@@ -4709,9 +4750,11 @@ async def upload_course_syllabus(
             for d in db.query(Deadline.title, Deadline.date).filter(Deadline.course_id == course_id).all()
         }
 
+        lms_backed = _course_is_lms_backed(db, course_id)
+        to_save = _syllabus_deadlines_to_keep(db, course_id, deadlines_data)
         seen_db: set[str] = set()
         saved_count = 0
-        for d in deadlines_data:
+        for d in to_save:
             d_title = (d.get("title") or "").strip()
             d_date = (d.get("date") or "").strip()
             db_key = f"{d_title.lower()[:40]}_{d_date}"
@@ -4728,7 +4771,8 @@ async def upload_course_syllabus(
                 description=d.get("context") or d.get("description"),
                 recurring=d.get("recurring", False),
                 frequency=d.get("frequency"),
-                day_of_week=d.get("day_of_week")
+                day_of_week=d.get("day_of_week"),
+                source="syllabus",
             )
             db.add(deadline)
             saved_count += 1
@@ -4738,6 +4782,8 @@ async def upload_course_syllabus(
 
         return {
             "course_id": course_id,
+            "lms_backed": lms_backed,
+            "deadlines_added": saved_count,
             "deadlines_created": len(deadlines_data),
             "deadlines": deadlines_data,
             "course_info": course.course_info
@@ -4761,16 +4807,14 @@ def delete_course_syllabus(course_id: str, current_user: User = Depends(get_curr
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Remove calendar entries that reference this course's deadlines first
-        deadline_ids = [d.id for d in course.deadlines]
-        if deadline_ids:
+        # LMS-synced deadlines aren't from the syllabus: they stay (the LMS is the source of truth)
+        doomed = [d.id for d in course.deadlines if d.source not in LMS_SOURCES]
+        if doomed:
             db.query(CalendarEntry).filter(
-                CalendarEntry.deadline_id.in_(deadline_ids),
+                CalendarEntry.deadline_id.in_(doomed),
                 CalendarEntry.user_id == user_id
             ).delete(synchronize_session=False)
-
-        # Delete all deadlines
-        db.query(Deadline).filter(Deadline.course_id == course_id).delete()
+            db.query(Deadline).filter(Deadline.id.in_(doomed)).delete(synchronize_session=False)
 
         # Clear extracted data so the sidebar shows the syllabus upload zone again
         course.course_info = None
@@ -5312,6 +5356,48 @@ def delete_flashcard_set(set_id: str, current_user: User = Depends(get_current_u
         db.close()
 
 
+def _course_is_lms_backed(db, course_id: str) -> bool:
+    return db.query(Deadline.id).filter(Deadline.course_id == course_id, Deadline.source.in_(LMS_SOURCES)).first() is not None
+
+
+def _syllabus_deadlines_to_keep(db, course_id: str, deadlines_data: list[dict]) -> list[dict]:
+    """The LMS is the source of truth for due dates. For a course it already feeds, a syllabus only
+    contributes exams the LMS doesn't have (nothing from the LMS on that date for this course);
+    everything else in the syllabus is course info (policies, office hours, professor contact)."""
+    if not _course_is_lms_backed(db, course_id):
+        return deadlines_data
+    lms_dates = {
+        r[0] for r in db.query(Deadline.date).filter(Deadline.course_id == course_id, Deadline.source.in_(LMS_SOURCES)).all()
+    }
+    keep = []
+    for d in deadlines_data:
+        probe = Deadline(type=d.get("type"), title=d.get("title"))
+        if _is_exam(probe) and (d.get("date") or "").strip() not in lms_dates and not d.get("recurring"):
+            keep.append(d)
+    return keep
+
+
+def _find_course_for_syllabus(db, user_id: str, course_code: str | None, course_name: str, semester: str | None):
+    """The student's existing course this syllabus belongs to: same code + semester first, then the
+    same code in a course with no semester (LMS-created courses have none), then the shared matcher."""
+    if course_code and semester:
+        hit = db.query(Course).filter(Course.user_id == user_id, Course.code == course_code, Course.semester == semester).first()
+        if hit:
+            return hit
+    if not course_code:
+        return None
+    courses = db.query(Course).filter(Course.user_id == user_id).all()
+    candidates = [c for c in courses if not c.semester or not semester or c.semester == semester]
+    match_id = _match_course(f"{course_code} {course_name}", course_code, candidates)
+    if not match_id:
+        return None
+    hit = next(c for c in candidates if c.id == match_id)
+    # Name-only matches are too loose to merge two different classes: require the codes to agree.
+    if hit.code and not (set(_extract_course_codes(hit.code)) & set(_extract_course_codes(course_code))):
+        return None
+    return hit
+
+
 @app.post("/upload")
 @limiter.limit("5/minute")
 async def upload_syllabus(
@@ -5370,19 +5456,17 @@ async def upload_syllabus(
                 course_code = parts[0].strip()
                 course_name = parts[1].strip() if len(parts) > 1 else course_name
 
-            # Idempotent course lookup — reuse existing course if same code+semester already exists
+            # Reuse the student's existing course (e.g. one their LMS created) instead of duplicating it
             course_semester = metadata.get("semester")
-            course = None
-            if course_code and course_semester:
-                course = db.query(Course).filter(
-                    Course.user_id == user_id,
-                    Course.code == course_code,
-                    Course.semester == course_semester,
-                ).first()
+            course = _find_course_for_syllabus(db, user_id, course_code, course_name, course_semester)
 
+            lms_backed = bool(course) and _course_is_lms_backed(db, course.id)
             if course:
-                # Update existing course in place
-                course.name = course_name
+                # Update existing course in place; an LMS-backed course keeps its LMS name
+                if not lms_backed:
+                    course.name = course_name
+                if not course.semester and course_semester:
+                    course.semester = course_semester
                 course.course_info = metadata.get("course_info")
                 course.syllabus_text = text[:50000]
                 if metadata.get("start_date"):
@@ -5410,8 +5494,9 @@ async def upload_syllabus(
             }
 
             # Create deadlines — skip any (title, date) pair already in DB or seen this call
+            to_save = _syllabus_deadlines_to_keep(db, course.id, deadlines_data)
             seen_db: set[str] = set()
-            for d in deadlines_data:
+            for d in to_save:
                 d_title = (d.get("title") or "").strip()
                 d_date = (d.get("date") or "").strip()
                 db_key = f"{d_title.lower()[:40]}_{d_date}"
@@ -5428,13 +5513,16 @@ async def upload_syllabus(
                     description=d.get("context") or d.get("description"),
                     recurring=d.get("recurring", False),
                     frequency=d.get("frequency"),
-                    day_of_week=d.get("day_of_week")
+                    day_of_week=d.get("day_of_week"),
+                    source="syllabus",
                 )
                 db.add(deadline)
 
             db.commit()
 
             return {
+                "lms_backed": lms_backed,
+                "deadlines_added": len(seen_db),
                 "course": {
                     "id": course.id,
                     "name": course.name,
@@ -5969,6 +6057,9 @@ def sync_canvas(connection, user_id: str, db):
                 return synced, errors
 
             canvas_courses = courses_resp.json()
+            seen_ext_ids: set[str] = set()
+            lms_course_ids: set[str] = set()
+            complete = True  # every course's assignments fetched: safe to mirror removals
 
             for course in canvas_courses:
                 course_id = course.get("id")
@@ -6000,6 +6091,7 @@ def sync_canvas(connection, user_id: str, db):
                     )
                     if assignments_resp.status_code != 200:
                         errors.append(f"Failed to fetch assignments for course {course_name}")
+                        complete = False
                         continue
 
                     for assignment in assignments_resp.json():
@@ -6016,7 +6108,11 @@ def sync_canvas(connection, user_id: str, db):
                         except (ValueError, AttributeError):
                             continue
 
-                        # Upsert
+                        seen_ext_ids.add(ext_id)
+                        if matched_course_id:
+                            lms_course_ids.add(matched_course_id)
+
+                        # Upsert: the LMS wins on title, date and time
                         existing = db.query(Deadline).filter(
                             Deadline.user_id == user_id,
                             Deadline.external_id == ext_id,
@@ -6046,8 +6142,14 @@ def sync_canvas(connection, user_id: str, db):
                         synced += 1
 
                 except Exception as e:
+                    complete = False
                     errors.append(f"Error syncing course {course_name}: {str(e)}")
 
+            db.flush()
+            canvas_accounts = db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "canvas").count()
+            if complete and seen_ext_ids and canvas_accounts <= 1:
+                _apply_lms_source_of_truth(db, user_id, "canvas", seen_ext_ids, lms_course_ids,
+                                           datetime.now(user_tz).date().isoformat())
             db.commit()
             connection.last_synced = datetime.utcnow()
             db.commit()
@@ -6126,14 +6228,14 @@ def _ical_course_identity(location: str) -> tuple[str, str] | None:
     return code, name or code
 
 
-def _bulk_create_ical_courses(events, user_id: str, db):
-    """For a user with no courses yet: create one course per class found in the feed (each with a
-    distinct palette color) and map every event UID to its course.
+def _ensure_ical_courses(events, user_id: str, db):
+    """Map every iCal event UID to a ClassMate course, the LMS being the source of truth for which
+    classes a student takes: each class found in the feed (by LOCATION code) is matched to the
+    student's existing course with the same code, or a course is created for it (distinct palette
+    color). Events with no recognizable class are left out of the map.
 
-    Returns (uid -> course_id, courses), or None if the user turned out to have courses by the time
-    we got the lock (a concurrent connect sync / background sync got there first); the caller then
-    falls back to normal matching. Adds to the session without committing — the caller's commit
-    writes the courses and deadlines together."""
+    Returns (uid -> course_id, courses). Adds to the session without committing: the caller's
+    commit writes the courses and deadlines together."""
     groups: dict[str, Counter] = {}  # code -> name votes, in first-seen order
     uid_code: dict[str, str] = {}
     for component in events:
@@ -6145,33 +6247,88 @@ def _bulk_create_ical_courses(events, user_id: str, db):
         groups.setdefault(code, Counter())[name] += 1
         uid_code[uid] = code
 
-    # Serialize per user so two overlapping syncs can't both see zero courses and double-create.
+    # Serialize per user so two overlapping syncs can't both create the same course.
     # Transaction-scoped: released when the caller commits. SQLite serializes writers itself.
     if db.bind.dialect.name == "postgresql":
         db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"ical-bulk-courses:{user_id}"})
-    existing = db.query(Course).filter(Course.user_id == user_id).all()
-    if existing:
-        return None
+    courses = db.query(Course).filter(Course.user_id == user_id).all()
 
-    created: dict[str, Course] = {}
-    for i, (code, names) in enumerate(groups.items()):
-        try:
-            check_tier_limit(db, user_id, "course")
-        except HTTPException:
-            break  # at the course limit: the rest of the events stay unassigned
-        course = Course(
-            user_id=user_id,
-            name=names.most_common(1)[0][0],
-            code=code,
-            color=COURSE_COLOR_PALETTE[i % len(COURSE_COLOR_PALETTE)],
-        )
-        db.add(course)
-        created[code] = course
-    db.flush()  # assign ids
+    by_code: dict[str, str] = {}
+    created: list[str] = []
+    for code, names in groups.items():
+        name = names.most_common(1)[0][0]
+        match_id = _match_course(f"{code} {name}", code, courses)
+        match = next((c for c in courses if c.id == match_id), None)
+        if match is None:
+            try:
+                check_tier_limit(db, user_id, "course")
+            except HTTPException:
+                continue  # at the course limit: this class's events stay unassigned
+            match = Course(
+                user_id=user_id,
+                name=name,
+                code=code,
+                color=COURSE_COLOR_PALETTE[len(courses) % len(COURSE_COLOR_PALETTE)],
+            )
+            db.add(match)
+            db.flush()  # assign id; also lets check_tier_limit count it
+            courses.append(match)
+            created.append(code)
+        by_code[code] = match.id
     if created:
-        logger.info(f"[LMS] Created {len(created)} courses from iCal for new user: {', '.join(created)}")
-    course_by_uid = {uid: created[code].id for uid, code in uid_code.items() if code in created}
-    return course_by_uid, list(created.values())
+        logger.info(f"[LMS] Created {len(created)} courses from iCal for user {user_id}: {', '.join(created)}")
+    course_by_uid = {uid: by_code[code] for uid, code in uid_code.items() if code in by_code}
+    return course_by_uid, courses
+
+
+def _apply_lms_source_of_truth(db, user_id: str, source: str, seen_ext_ids: set[str], lms_course_ids: set[str], today_iso: str):
+    """After an LMS sync, make ClassMate match the LMS:
+    - an upcoming LMS deadline the professor removed is removed here too (past ones are kept as
+      history; completed ones are left alone);
+    - in courses the LMS covers, syllabus-extracted deadlines give way to the LMS's. Syllabus exams
+      on a date the LMS has nothing for that course are kept, since many professors never post
+      exams to the LMS.
+    Only call with a non-empty feed, so a failed or empty fetch can never wipe a student's list."""
+    not_done = or_(Deadline.completed == False, Deadline.completed.is_(None))  # noqa: E712
+    gone = db.query(Deadline).filter(
+        Deadline.user_id == user_id,
+        Deadline.source == source,
+        Deadline.date >= today_iso,
+        not_done,
+    ).all()
+    doomed = [d for d in gone if d.external_id not in seen_ext_ids]
+    removed = len(doomed)
+
+    replaced = 0
+    if lms_course_ids:
+        lms_days = {
+            (cid, day) for cid, day in db.query(Deadline.course_id, Deadline.date).filter(
+                Deadline.user_id == user_id,
+                Deadline.course_id.in_(lms_course_ids),
+                Deadline.source.in_(LMS_SOURCES),
+            ).all()
+        }
+        for d in db.query(Deadline).filter(
+            Deadline.user_id == user_id,
+            Deadline.course_id.in_(lms_course_ids),
+            Deadline.source == "syllabus",
+            not_done,
+        ).all():
+            if _is_exam(d) and (d.course_id, d.date) not in lms_days:
+                continue
+            doomed.append(d)
+            replaced += 1
+    if doomed:
+        ids = [d.id for d in doomed]
+        db.query(CalendarEntry).filter(CalendarEntry.deadline_id.in_(ids)).delete(synchronize_session=False)
+        for d in doomed:
+            db.delete(d)
+    if removed or replaced:
+        logger.info(f"[LMS] {source} source-of-truth for user {user_id}: removed {removed} deleted-in-LMS, replaced {replaced} syllabus deadlines")
+    return removed, replaced
+
+
+LMS_SOURCES = ("ical", "canvas")
 
 
 DEFAULT_USER_TZ = "America/New_York"  # nearly all users are at CofC
@@ -6198,17 +6355,13 @@ def _to_user_local(dt: datetime, tz: ZoneInfo) -> datetime:
 
 
 def sync_ical(connection, user_id: str, db):
-    """Sync events from an iCal feed into deadlines.
-
-    Users who already have courses: events are matched against those courses; unmatched events
-    stay unassigned (course_id NULL) — iCal never adds courses for them. Users with no courses yet:
-    one course is created per class found in the feed, and events are assigned to them."""
+    """Sync events from an iCal feed into deadlines. The LMS is the source of truth: every class in
+    the feed gets a course (matched to the student's existing one or created), changed due dates
+    overwrite ours, and upcoming items removed from the feed are removed here
+    (see _apply_lms_source_of_truth). Events with no recognizable class fall back to text matching
+    against the student's courses, else stay unassigned (course_id NULL)."""
     synced = 0
     errors = []
-
-    # Load user's existing courses for matching
-    user_courses = db.query(Course).filter(Course.user_id == user_id).all()
-    had_courses = bool(user_courses)
     user_tz = _user_timezone(db, user_id)
 
     try:
@@ -6221,16 +6374,10 @@ def sync_ical(connection, user_id: str, db):
             cal = ICalCalendar.from_ical(resp.text)
             events = [c for c in cal.walk() if c.name == "VEVENT"]
 
-            # uid -> course_id when this sync created the user's courses; None means "match instead"
-            course_by_uid = None
-            if not had_courses:
-                bulk = _bulk_create_ical_courses(events, user_id, db)
-                if bulk is None:  # courses appeared concurrently — match against them instead
-                    user_courses = db.query(Course).filter(Course.user_id == user_id).all()
-                else:
-                    course_by_uid, user_courses = bulk
+            course_by_uid, user_courses = _ensure_ical_courses(events, user_id, db)
+            seen_ext_ids: set[str] = set()
+            lms_course_ids: set[str] = set()
 
-            # Sync events into deadlines, matching to existing courses
             for component in events:
                 uid = str(component.get("UID", ""))
                 if not uid:
@@ -6242,10 +6389,8 @@ def sync_ical(connection, user_id: str, db):
                 location = str(component.get("LOCATION", ""))
                 categories = str(component.get("CATEGORIES", ""))
 
-                if course_by_uid is not None:
-                    matched_course_id = course_by_uid.get(uid)
-                else:
-                    # Try to match against user's existing courses
+                matched_course_id = course_by_uid.get(uid)
+                if matched_course_id is None:
                     all_text = f"{summary} {description} {location} {categories} {uid}"
                     matched_course_id = _match_course(all_text, "", user_courses)
 
@@ -6265,7 +6410,11 @@ def sync_ical(connection, user_id: str, db):
                 else:
                     continue
 
-                # Upsert
+                seen_ext_ids.add(ext_id)
+                if matched_course_id:
+                    lms_course_ids.add(matched_course_id)
+
+                # Upsert: the LMS wins on title, date and time
                 existing = db.query(Deadline).filter(
                     Deadline.user_id == user_id,
                     Deadline.external_id == ext_id,
@@ -6294,11 +6443,19 @@ def sync_ical(connection, user_id: str, db):
                     db.add(deadline)
                 synced += 1
 
+            db.flush()
+            # Removal is only safe when this feed is the student's only iCal feed (external ids
+            # don't record which feed they came from) and it actually returned events.
+            ical_feeds = db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "ical").count()
+            if seen_ext_ids and ical_feeds <= 1:
+                _apply_lms_source_of_truth(db, user_id, "ical", seen_ext_ids, lms_course_ids,
+                                           datetime.now(user_tz).date().isoformat())
             db.commit()
             connection.last_synced = datetime.utcnow()
             db.commit()
 
     except Exception as e:
+        db.rollback()
         errors.append(f"iCal sync error: {str(e)}")
 
     return synced, errors

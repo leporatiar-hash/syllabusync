@@ -16,6 +16,8 @@ Covers:
   - Sunday weekly brief, once per ISO week
   - DeviceNotRegistered tickets delete the token; failed sends are not recorded (retry next pass)
   - delete-account removes tokens
+  - setup nudges: "connect your LMS" a day after signup and again at day 4 (then never);
+    once connected, one "add your syllabi" listing courses without one
 """
 import os
 import tempfile
@@ -219,6 +221,56 @@ def test_delete_account_removes_tokens():
         assert db.query(main.PushToken).filter(main.PushToken.user_id == uid).count() == 0
     finally:
         db.close()
+
+
+def _age(uid, days):
+    db = main.SessionLocal()
+    try:
+        db.query(main.User).filter(main.User.id == uid).update({"created_at": datetime.utcnow() - timedelta(days=days)})
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_setup_nudges():
+    uid, h, token = _user()
+    client.put("/me/notification-settings", json={"deadlines": True, "exams": False, "weekly": False}, headers=h)
+    _run()
+    assert _mine(token) == [], "no nudge on signup day"
+    _age(uid, 1)
+    _run()
+    assert [m["data"]["screen"] for m in _mine(token)] == ["connect"], _mine(token)
+    _run(SUNDAY_7PM_NY + timedelta(minutes=15))
+    assert len(_mine(token)) == 1, "connect nudge once"
+    _age(uid, 4)
+    _run(SUNDAY_7PM_NY + timedelta(minutes=30))
+    assert len(_mine(token)) == 2, "second connect nudge at day 4"
+    _age(uid, 9)
+    _run(SUNDAY_7PM_NY + timedelta(minutes=45))
+    assert len(_mine(token)) == 2, "never a third"
+
+    # Connected: once a day has passed, one nudge for the courses without a syllabus
+    db = main.SessionLocal()
+    try:
+        db.add(main.LMSConnection(user_id=uid, provider="ical", ical_url="https://x.edu/f.ics",
+                                  created_at=datetime.utcnow() - timedelta(days=2)))
+        db.add(main.Course(user_id=uid, name="Investments", code="FINC 400"))
+        db.add(main.Course(user_id=uid, name="Art", code="ARTH 103", syllabus_text="has one"))
+        db.commit()
+    finally:
+        db.close()
+    _run(SUNDAY_7PM_NY + timedelta(minutes=60))
+    last = _mine(token)[-1]
+    assert last["title"] == "Add your syllabi (1 to go)" and "FINC 400" in last["body"], last
+    _run(SUNDAY_7PM_NY + timedelta(minutes=75))
+    assert len(_mine(token)) == 3, "syllabus nudge once"
+
+    # Muted deadline reminders also mute setup nudges
+    uid2, h2, token2 = _user()
+    client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h2)
+    _age(uid2, 2)
+    _run(SUNDAY_7PM_NY + timedelta(minutes=90))
+    assert _mine(token2) == []
 
 
 if __name__ == "__main__":
