@@ -11,7 +11,8 @@ import {
   Target,
   type LucideIcon,
 } from 'lucide-react-native';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
+import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { ActivityIndicator, Pressable, Text, View, type StyleProp, type TextProps, type TextStyle, type ViewStyle } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 
@@ -179,10 +180,38 @@ export function Divider() {
   return <View style={{ height: 1, backgroundColor: C.slate100 }} />;
 }
 
+/** The ClassMate mark breathing in and out: our "working on it" state anywhere the app waits. */
+export function BrandLoader({ size = 44, label, sublabel }: { size?: number; label?: string; sublabel?: string }) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }), -1, true);
+    return () => cancelAnimation(t);
+  }, [t]);
+  const pulse = useAnimatedStyle(() => ({ transform: [{ scale: 0.9 + t.value * 0.1 }], opacity: 0.75 + t.value * 0.25 }));
+  return (
+    <View accessibilityRole="progressbar" accessibilityLabel={label ?? 'Loading'} style={{ alignItems: 'center', gap: 14 }}>
+      <Animated.View style={[{ borderRadius: size * 0.22 }, shadowSm, pulse]}>
+        <LogoMark size={size} />
+      </Animated.View>
+      {label ? <T size={17} weight="semibold" color={C.slate800} style={{ textAlign: 'center' }}>{label}</T> : null}
+      {sublabel ? <T size={14} color={C.slate500} style={{ textAlign: 'center', marginTop: -8 }}>{sublabel}</T> : null}
+    </View>
+  );
+}
+
+/** Centered loader that fills its parent. */
+export function LoadingScreen({ label, sublabel, background = C.pageBg }: { label?: string; sublabel?: string; background?: string }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: background, padding: 24 }}>
+      <BrandLoader size={56} label={label} sublabel={sublabel} />
+    </View>
+  );
+}
+
 export function Spinner() {
   return (
     <View style={{ padding: 40, alignItems: 'center' }}>
-      <ActivityIndicator color={C.brand} />
+      <BrandLoader size={40} />
     </View>
   );
 }

@@ -1,11 +1,11 @@
 import * as Haptics from 'expo-haptics';
 import { Check, FileUp, Plus } from 'lucide-react-native';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 
 import { goTo, QuizButton, QuizScreen } from '@/components/quiz-kit';
-import { T } from '@/components/web';
+import { BrandLoader, T } from '@/components/web';
 import { C, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { pickAndUploadSyllabus } from '@/lib/upload';
@@ -73,9 +73,7 @@ export default function SyllabusStep() {
           }]}>
           {busy ? (
             <>
-              <ActivityIndicator color={C.brand} size="large" />
-              <T size={16} weight="semibold" color={C.slate800}>Reading your syllabus…</T>
-              <T size={13} color={C.slate400}>About 30 seconds</T>
+              <BrandLoader size={48} label="Reading your syllabus…" sublabel="About 30 seconds" />
             </>
           ) : uploaded.length ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

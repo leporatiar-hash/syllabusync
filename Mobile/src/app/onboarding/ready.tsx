@@ -4,13 +4,13 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { Bell, BellRing, Check } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePaywall } from '@/components/paywall';
 import { type Goal, QuizButton, useQuiz } from '@/components/quiz-kit';
-import { T, TypeChip } from '@/components/web';
+import { LoadingScreen, T, TypeChip } from '@/components/web';
 import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { useAuth } from '@/lib/auth';
@@ -98,7 +98,7 @@ export default function ReadyStep() {
   };
 
   if (!courses) {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.pageBg }}><ActivityIndicator color={C.brand} /></View>;
+    return <LoadingScreen label="Building your semester…" />;
   }
   const empty = courses.length === 0 && upcoming.length === 0;
   const name = answers.firstName.trim();

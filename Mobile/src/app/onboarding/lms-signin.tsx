@@ -1,25 +1,36 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { Lock, X } from 'lucide-react-native';
-import { useRef, useState } from 'react';
+import { Check, Lock, X } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
-import { useQuiz } from '@/components/quiz-kit';
-import { T } from '@/components/web';
-import { C, shadowSm } from '@/constants/theme';
+import { QuizButton, useQuiz } from '@/components/quiz-kit';
+import { BrandLoader, T } from '@/components/web';
+import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { api } from '@/lib/api';
 import { CANVAS_SCRIPT, D2L_SCRIPT, type FeedMessage, redactFeed } from '@/lib/lms-feed';
+import type { Course } from '@/lib/types';
 
 const LMS = {
-  oaks: { name: 'OAKS', start: 'https://lms.cofc.edu/d2l/home', script: D2L_SCRIPT },
-  canvas: { name: 'Canvas', start: 'https://www.instructure.com/canvas/login', script: CANVAS_SCRIPT },
+  oaks: {
+    name: 'OAKS',
+    start: 'https://lms.cofc.edu/d2l/home',
+    script: D2L_SCRIPT,
+  },
+  canvas: {
+    name: 'Canvas',
+    start: 'https://www.instructure.com/canvas/login',
+    script: CANVAS_SCRIPT,
+  },
 } as const;
 
-type Phase = 'signin' | 'looking' | 'connecting' | 'manual' | 'error';
+type Phase = 'signin' | 'looking' | 'connecting' | 'done' | 'manual' | 'error';
+
+const close = () => (router.canGoBack() ? router.back() : router.replace('/onboarding/connect'));
 
 /** The LMS loads inside ClassMate. Once the student is signed in we read their own calendar feed
  *  link from the page and connect it; they never copy anything. */
@@ -32,25 +43,58 @@ export default function LmsSignIn() {
   const [error, setError] = useState<string | null>(null);
   const done = useRef(false);
   const navigatedToCalendar = useRef(false);
+  const [result, setResult] = useState<{
+    count: number;
+    courses: Course[];
+  } | null>(null);
+  // Cover the page while it loads so a blank SSO redirect never looks broken.
+  const [pageLoading, setPageLoading] = useState(true);
+  useEffect(() => {
+    if (!pageLoading) return;
+    const t = setTimeout(() => setPageLoading(false), 15000); // never trap them behind the loader
+    return () => clearTimeout(t);
+  }, [pageLoading]);
 
   const connect = async (url: string) => {
     if (done.current) return;
     done.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setPhase('connecting');
+    let count = 0;
     try {
       const r = await api<{ initial_sync?: { synced_count: number } }>('/lms/connect/ical', {
         method: 'POST',
-        body: JSON.stringify({ ical_url: url.replace(/^webcal:\/\//i, 'https://') }),
+        body: JSON.stringify({
+          ical_url: url.replace(/^webcal:\/\//i, 'https://'),
+        }),
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      track('lms_connected', { provider: 'ical', lms: answers.lms ?? null, method: 'auto' });
-      set({ lmsSynced: r.initial_sync?.synced_count ?? 0 });
-      router.back();
+      count = r.initial_sync?.synced_count ?? 0;
     } catch (e) {
-      done.current = false;
-      setPhase('error');
-      setError(e instanceof Error ? e.message : 'Couldn’t connect');
+      const msg = e instanceof Error ? e.message : '';
+      // Connected on an earlier try: that's still a success for the student.
+      if (!/already connected/i.test(msg)) {
+        done.current = false;
+        setPhase('error');
+        setError(msg || 'Couldn’t connect');
+        return;
+      }
     }
+    const list = await api<Course[]>('/courses').catch(() => [] as Course[]);
+    if (!count) count = list.reduce((n, c) => n + (c.deadline_count || 0), 0);
+    setResult({ count, courses: list });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    track('lms_connected', {
+      provider: 'ical',
+      lms: answers.lms ?? null,
+      method: 'auto',
+    });
+    setPhase('done');
+  };
+
+  // The celebration already happened here, so skip the connect step's own "synced" card.
+  const finish = () => {
+    set({ lmsSynced: result?.count ?? 0 });
+    router.replace('/onboarding/syllabus');
   };
 
   const onMessage = (e: WebViewMessageEvent) => {
@@ -60,7 +104,9 @@ export default function LmsSignIn() {
     } catch {
       return;
     }
-    if (m.type === 'page') {
+    if (m.type === 'ready') {
+      setPageLoading(false);
+    } else if (m.type === 'page') {
       if (m.signedIn) setPhase((p) => (p === 'signin' ? 'looking' : p));
     } else if (m.type === 'feed') {
       if (__DEV__) console.log('[lms-feed] found', m.source, redactFeed(m.url), m.tried.join(' | '));
@@ -84,39 +130,222 @@ export default function LmsSignIn() {
   };
 
   const banner =
-    phase === 'signin' ? { text: `Sign in to ${lms.name}. ClassMate takes it from there.`, busy: false }
-    : phase === 'looking' ? { text: 'Finding your calendar…', busy: true }
-    : phase === 'connecting' ? { text: 'Connecting…', busy: true }
-    : phase === 'manual' ? { text: 'Almost: tap Subscribe on the calendar.', busy: false }
-    : { text: error ?? 'Something went wrong', busy: false };
+    phase === 'signin'
+      ? {
+          text: `Sign in to ${lms.name}. ClassMate takes it from there.`,
+          busy: false,
+        }
+      : phase === 'manual'
+        ? { text: 'Almost: tap Subscribe on the calendar.', busy: false }
+        : { text: error ?? 'Something went wrong', busy: false };
 
   return (
     <View style={{ flex: 1, backgroundColor: C.white, paddingTop: insets.top }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.slate100 }}>
-        <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel="Close" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: C.slate100, alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          borderBottomWidth: 1,
+          borderBottomColor: C.slate100,
+        }}
+      >
+        <Pressable
+          onPress={close}
+          hitSlop={10}
+          accessibilityLabel="Close"
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: C.slate100,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <X size={18} color={C.slate600} />
         </Pressable>
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <View
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+        >
           <Lock size={13} color={C.slate400} />
-          <T size={14} weight="semibold" color={C.slate700}>{lms.name}</T>
+          <T size={14} weight="semibold" color={C.slate700}>
+            {lms.name}
+          </T>
         </View>
         <View style={{ width: 32 }} />
       </View>
 
-      <WebView
-        ref={web}
-        source={{ uri: lms.start }}
-        injectedJavaScript={lms.script}
-        onLoadEnd={() => web.current?.injectJavaScript(lms.script)}
-        onMessage={onMessage}
-        sharedCookiesEnabled
-        style={{ flex: 1 }}
-      />
+      <View style={{ flex: 1 }}>
+        <WebView
+          ref={web}
+          source={{ uri: lms.start }}
+          injectedJavaScript={lms.script}
+          onLoadStart={() => setPageLoading(true)}
+          onLoadEnd={() => web.current?.injectJavaScript(lms.script)}
+          onError={() => setPageLoading(false)}
+          onMessage={onMessage}
+          sharedCookiesEnabled
+          style={{ flex: 1 }}
+        />
 
-      <Animated.View key={phase} entering={FadeIn.duration(250)} style={[{ position: 'absolute', left: 16, right: 16, bottom: insets.bottom + 16, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: phase === 'error' ? '#FEF2F2' : C.slate900, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 14 }, shadowSm]}>
-        {banner.busy ? <ActivityIndicator color="#fff" /> : null}
-        <T size={15} weight="medium" color={phase === 'error' ? C.red : '#fff'} style={{ flex: 1 }}>{banner.text}</T>
-      </Animated.View>
+        {phase === 'looking' || phase === 'connecting' || phase === 'done' || (pageLoading && phase === 'signin') ? (
+          <Animated.View
+            entering={FadeIn.duration(220)}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: C.slate50,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: 24,
+              paddingBottom: insets.bottom + 16,
+            }}
+          >
+            {phase === 'signin' ? (
+              <BrandLoader size={56} label={`Opening ${lms.name}…`} />
+            ) : phase === 'looking' ? (
+              <BrandLoader size={56} label="You’re signed in" sublabel={`Finding your ${lms.name} calendar…`} />
+            ) : phase === 'connecting' ? (
+              <Animated.View entering={FadeInDown.duration(300)}>
+                <BrandLoader size={56} label={`Found your ${lms.name} calendar`} sublabel="Pulling in your classes and due dates…" />
+              </Animated.View>
+            ) : (
+              <View
+                style={{
+                  alignSelf: 'stretch',
+                  flex: 1,
+                  justifyContent: 'center',
+                  gap: 18,
+                }}
+              >
+                <Animated.View
+                  entering={ZoomIn.springify().damping(12)}
+                  style={{
+                    alignSelf: 'center',
+                    width: 96,
+                    height: 96,
+                    borderRadius: 48,
+                    backgroundColor: '#DCFCE7',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Check size={48} color={C.green} strokeWidth={3} />
+                </Animated.View>
+                <Animated.View entering={FadeInDown.delay(150).duration(360)} style={{ alignItems: 'center', gap: 6 }}>
+                  <T size={28} weight="bold" color={C.slate900} style={{ textAlign: 'center' }}>
+                    {lms.name} is connected
+                  </T>
+                  <T size={16} color={C.slate500} style={{ textAlign: 'center' }}>
+                    {result?.count ? `${result.count} ${result.count === 1 ? 'due date' : 'due dates'} pulled in. ` : ''}
+                    New ones show up on their own.
+                  </T>
+                </Animated.View>
+                {result?.courses.length ? (
+                  <Animated.View
+                    entering={FadeInDown.delay(300).duration(360)}
+                    style={[
+                      {
+                        backgroundColor: C.white,
+                        borderRadius: 20,
+                        padding: 14,
+                        gap: 10,
+                      },
+                      shadowSm,
+                    ]}
+                  >
+                    {result.courses.slice(0, 5).map((c) => (
+                      <View
+                        key={c.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: 5,
+                            backgroundColor: getCourseColor(c.id, c.color).accent,
+                          }}
+                        />
+                        <T size={15} weight="medium" color={C.slate800} numberOfLines={1} style={{ flex: 1 }}>
+                          {c.code || c.name}
+                        </T>
+                        <T size={13} color={C.slate400}>
+                          {c.deadline_count}
+                        </T>
+                      </View>
+                    ))}
+                    {result.courses.length > 5 ? (
+                      <T size={13} color={C.slate400}>
+                        +{result.courses.length - 5} more
+                      </T>
+                    ) : null}
+                  </Animated.View>
+                ) : null}
+                <Animated.View
+                  entering={FadeInDown.delay(420).duration(360)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Lock size={12} color={C.slate400} />
+                  <T size={13} color={C.slate400}>
+                    Read-only. ClassMate never changes anything in {lms.name}.
+                  </T>
+                </Animated.View>
+                <View style={{ marginTop: 8 }}>
+                  <QuizButton title="Continue" onPress={finish} />
+                </View>
+              </View>
+            )}
+          </Animated.View>
+        ) : (
+          <Animated.View
+            key={phase}
+            entering={FadeIn.duration(250)}
+            style={[
+              {
+                position: 'absolute',
+                left: 16,
+                right: 16,
+                bottom: insets.bottom + 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+                backgroundColor: phase === 'error' ? '#FEF2F2' : C.slate900,
+                borderRadius: 18,
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+              },
+              shadowSm,
+            ]}
+          >
+            {banner.busy ? <ActivityIndicator color="#fff" /> : null}
+            <T size={15} weight="medium" color={phase === 'error' ? C.red : '#fff'} style={{ flex: 1 }}>
+              {banner.text}
+            </T>
+          </Animated.View>
+        )}
+      </View>
     </View>
   );
 }

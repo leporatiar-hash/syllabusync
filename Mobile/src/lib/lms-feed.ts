@@ -6,10 +6,22 @@
 export type FeedMessage =
   | { type: 'feed'; url: string; source: string; tried: string[] }
   | { type: 'miss'; tried: string[]; path: string; calendar?: string | null }
-  | { type: 'page'; path: string; signedIn: boolean };
+  | { type: 'page'; path: string; signedIn: boolean }
+  | { type: 'ready' };
 
 const COMMON = `
   var post = function (m) { window.ReactNativeWebView.postMessage(JSON.stringify(m)); };
+  // SSO pages finish "loading" before their form is drawn. Tell the app once there's something to use.
+  (function () {
+    var n = 0;
+    var t = setInterval(function () {
+      n++;
+      var els = document.querySelectorAll('input:not([type=hidden]), button, [role=button]');
+      var visible = false;
+      for (var i = 0; i < els.length && !visible; i++) { var r = els[i].getBoundingClientRect(); visible = r.width > 0 && r.height > 0; }
+      if (visible || n > 40) { clearInterval(t); post({ type: 'ready' }); }
+    }, 150);
+  })();
   var RX = /(?:https?|webcal):\\/\\/[^"'\\s<>]*?\\.ics(?:\\?[^"'\\s<>]*)?/i;
   var clean = function (s) { return s.replace(/&amp;/g, '&').replace(/\\\\u0026/g, '&').replace(/\\\\\\//g, '/'); };
   var find = function (text) { if (!text) return null; var m = clean(text).match(RX); return m ? m[0] : null; };
