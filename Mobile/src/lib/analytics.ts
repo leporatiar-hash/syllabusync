@@ -20,6 +20,8 @@ export type AnalyticsEvent =
   | 'lms_nudge_tapped'
   | 'syllabus_nudge_tapped'
   | 'lms_foreground_sync'
+  | 'lms_connect_step'
+  | 'lms_reconnect_tapped'
   | 'syllabus_uploaded'
   | 'onboarding_syllabus_skipped'
   | 'dashboard_revealed'

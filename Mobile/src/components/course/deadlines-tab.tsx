@@ -23,6 +23,8 @@ export function DeadlinesTab({
   onSyllabusUploaded: () => void;
 }) {
   const today = localToday();
+  // The LMS owns this course's due dates; the syllabus card pitches course info instead.
+  const lmsBacked = deadlines.some((d) => d.source === 'ical' || d.source === 'canvas');
   const visible = deadlines.filter((d) => !d.recurring);
   const groups = groupDeadlines(visible, today);
   const unsaved = visible.filter((d) => !d.saved_to_calendar).length;
@@ -129,7 +131,7 @@ export function DeadlinesTab({
             <T size={14} weight="semibold" color="#fff">{bulk ? 'Adding…' : `Add ${unsaved} to calendar`}</T>
           </Pressable>
         ) : null}
-        {visible.length === 0 ? <T size={14} color={C.slate500} style={{ marginTop: 16 }}>No deadlines yet. Upload the syllabus and they’ll appear here.</T> : null}
+        {visible.length === 0 ? <T size={14} color={C.slate500} style={{ marginTop: 16 }}>{lmsBacked ? 'Nothing coming up. New due dates from your LMS show up here on their own.' : 'No deadlines yet. Upload the syllabus and they’ll appear here.'}</T> : null}
         {section('This week', groups.week)}
         {section('Later', groups.later)}
         {groups.earlier.length ? (
@@ -144,10 +146,12 @@ export function DeadlinesTab({
       </Card>
 
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <IconSquare icon={FileText} bg={C.slate100} fg={C.slate500} size={36} radius={18} />
+        <IconSquare icon={FileText} bg={lmsBacked ? '#EEF2FF' : C.slate100} fg={lmsBacked ? C.brand : C.slate500} size={36} radius={18} />
         <View style={{ flex: 1 }}>
-          <T size={14} weight="medium" color={C.slate800}>Have a syllabus?</T>
-          <T size={13} color={C.slate500}>Add it to pull in every exam and assignment.</T>
+          <T size={14} weight="medium" color={C.slate800}>{lmsBacked ? 'Add the syllabus' : 'Have a syllabus?'}</T>
+          <T size={13} color={C.slate500}>
+            {lmsBacked ? 'Professor email, office hours and grading policy. Due dates stay synced from your LMS.' : 'Add it to pull in every exam and assignment.'}
+          </T>
         </View>
         <Pressable
           disabled={uploading}

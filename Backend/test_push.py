@@ -265,6 +265,21 @@ def test_setup_nudges():
     _run(SUNDAY_7PM_NY + timedelta(minutes=75))
     assert len(_mine(token)) == 3, "syllabus nudge once"
 
+    # A feed that stopped working: one "reconnect" nudge per failing episode
+    db = main.SessionLocal()
+    try:
+        conn = db.query(main.LMSConnection).filter_by(user_id=uid).first()
+        conn.failure_count = 2
+        conn.failing_since = datetime.utcnow()
+        db.commit()
+    finally:
+        db.close()
+    _run(SUNDAY_7PM_NY + timedelta(minutes=80))
+    last = _mine(token)[-1]
+    assert last["title"] == "Your LMS stopped syncing" and last["data"]["screen"] == "connect", last
+    _run(SUNDAY_7PM_NY + timedelta(minutes=85))
+    assert len(_mine(token)) == 4, "reconnect nudge once per episode"
+
     # Muted deadline reminders also mute setup nudges
     uid2, h2, token2 = _user()
     client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h2)

@@ -16,7 +16,7 @@ import { usePaywall } from '@/components/paywall';
 import { purchasesEnabled } from '@/lib/purchases';
 import type { Course, Deadline, Subscription } from '@/lib/types';
 
-type LmsConnection = { id: string; provider: string };
+type LmsConnection = { id: string; provider: string; status?: 'ok' | 'broken' };
 
 const SETUP_DISMISSED_KEY = 'cm-setup-dismissed';
 
@@ -48,6 +48,7 @@ export default function Home() {
   }, [entries.data, today]);
 
   const hasLms = (lms.data?.length ?? 0) > 0;
+  const lmsBroken = (lms.data ?? []).some((c) => c.status === 'broken');
   const providers = [...new Set((lms.data ?? []).map((c) => (c.provider === 'ical' ? 'LMS' : 'Canvas')))].join(' + ');
   const connectLms = (from: string) => {
     track('lms_nudge_tapped', { from });
@@ -95,11 +96,24 @@ export default function Home() {
           ) : null}
           {hasLms ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, marginTop: 8 }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.emerald }} />
-              <T size={12} weight="medium" color={C.slate600}>{providers} synced</T>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: lmsBroken ? C.red : C.emerald }} />
+              <T size={12} weight="medium" color={C.slate600}>{lmsBroken ? `${providers} not syncing` : `${providers} synced`}</T>
             </View>
           ) : null}
         </View>
+
+        {lmsBroken ? (
+          <View style={{ borderRadius: 20, borderWidth: 1, borderColor: '#FECACA', backgroundColor: '#FEF2F2', padding: 18, gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <IconSquare icon={RefreshCw} bg={C.white} fg={C.red} size={40} radius={12} />
+              <View style={{ flex: 1 }}>
+                <T size={17} weight="semibold" color={C.slate900}>Your LMS stopped syncing</T>
+                <T size={13} color={C.slate600}>New and changed due dates aren’t coming through</T>
+              </View>
+            </View>
+            <GradientButton title="Reconnect" onPress={() => { track('lms_reconnect_tapped', { from: 'home_card' }); router.push('/onboarding/lms?from=app'); }} />
+          </View>
+        ) : null}
 
         {lms.data && !hasLms ? (
           <View style={{ borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#EEF2FF', padding: 18, gap: 10 }}>

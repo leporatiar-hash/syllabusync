@@ -12,6 +12,7 @@ import { BrandLoader, T } from '@/components/web';
 import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { api } from '@/lib/api';
+import { syncLms } from '@/lib/lms-sync';
 import { CANVAS_SCRIPT, D2L_SCRIPT, type FeedMessage, redactFeed } from '@/lib/lms-feed';
 import type { Course } from '@/lib/types';
 
@@ -47,6 +48,29 @@ export default function LmsSignIn() {
     count: number;
     courses: Course[];
   } | null>(null);
+  // One event per step, so the funnel shows exactly where connects fail at each school.
+  const opened = useRef(0);
+  const stepsSeen = useRef(new Set<string>());
+  const phaseRef = useRef<Phase>('signin');
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+  const step = (name: string, extra: Record<string, string | number | boolean | null> = {}) => {
+    if (stepsSeen.current.has(name)) return;
+    stepsSeen.current.add(name);
+    track('lms_connect_step', { step: name, lms: answers.lms ?? null, host: new URL(lms.start).host, seconds: Math.round((Date.now() - opened.current) / 1000), ...extra });
+  };
+  useEffect(() => {
+    const start = Date.now();
+    opened.current = start;
+    step('opened');
+    // Leaving before it's connected is the drop-off we most need to see.
+    return () => {
+      if (phaseRef.current !== 'done') track('lms_connect_step', { step: 'closed', at: phaseRef.current, lms: answers.lms ?? null, seconds: Math.round((Date.now() - start) / 1000) });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Cover the page while it loads so a blank SSO redirect never looks broken.
   const [pageLoading, setPageLoading] = useState(true);
   useEffect(() => {
@@ -74,21 +98,33 @@ export default function LmsSignIn() {
       // Connected on an earlier try: that's still a success for the student.
       if (!/already connected/i.test(msg)) {
         done.current = false;
+        step('connect_failed', { error: msg.slice(0, 120) });
         setPhase('error');
         setError(msg || 'Couldn’t connect');
         return;
       }
     }
+    syncLms(true); // a reconnect with the same link clears a stale "not syncing" state
     const list = await api<Course[]>('/courses').catch(() => [] as Course[]);
     if (!count) count = list.reduce((n, c) => n + (c.deadline_count || 0), 0);
     setResult({ count, courses: list });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    step('connected', { items: count, courses: list.length });
     track('lms_connected', {
       provider: 'ical',
       lms: answers.lms ?? null,
       method: 'auto',
     });
     setPhase('done');
+  };
+
+  const retry = () => {
+    done.current = false;
+    navigatedToCalendar.current = false;
+    setError(null);
+    setPhase('signin');
+    setPageLoading(true);
+    web.current?.reload();
   };
 
   // The celebration already happened here, so skip the connect step's own "synced" card.
@@ -106,17 +142,24 @@ export default function LmsSignIn() {
     }
     if (m.type === 'ready') {
       setPageLoading(false);
+      step('page_ready');
     } else if (m.type === 'page') {
-      if (m.signedIn) setPhase((p) => (p === 'signin' ? 'looking' : p));
+      if (m.signedIn) {
+        step('signed_in');
+        setPhase((p) => (p === 'signin' ? 'looking' : p));
+      }
     } else if (m.type === 'feed') {
       if (__DEV__) console.log('[lms-feed] found', m.source, redactFeed(m.url), m.tried.join(' | '));
+      // `tried` holds paths + status codes only (no tokens): it says which method found it.
+      step('feed_found', { source: m.source, tried: m.tried.join(' | ').slice(0, 300) });
       connect(m.url);
     } else if (m.type === 'miss') {
       if (__DEV__) console.log('[lms-feed] miss', m.path, m.tried.join(' | '));
+      step('feed_missed', { tried: m.tried.join(' | ').slice(0, 300), has_calendar: !!m.calendar });
       // Only fall back to "tap Subscribe" once we've confirmed a real signed-in miss with a calendar to show.
       if (!m.calendar) {
         setPhase('error');
-        setError('Couldn’t find your OAKS calendar automatically. Use “Paste” on the previous screen instead.');
+        setError(`Couldn’t find your ${lms.name} calendar automatically. Go back and paste your calendar link instead.`);
         return;
       }
       // Couldn't find it on our own: open the real calendar once so one tap on Subscribe finishes it.
@@ -343,6 +386,11 @@ export default function LmsSignIn() {
             <T size={15} weight="medium" color={phase === 'error' ? C.red : '#fff'} style={{ flex: 1 }}>
               {banner.text}
             </T>
+            {phase === 'error' ? (
+              <Pressable onPress={retry} hitSlop={8} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: C.white }}>
+                <T size={14} weight="semibold" color={C.red}>Try again</T>
+              </Pressable>
+            ) : null}
           </Animated.View>
         )}
       </View>

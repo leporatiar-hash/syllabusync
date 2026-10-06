@@ -19,6 +19,8 @@ Covers:
   - LMS as source of truth: moved due dates update, upcoming items removed from the feed are
     removed (past/completed kept), an empty feed or a second feed never deletes anything
   - syllabus deadlines in an LMS course give way to the LMS (exams on LMS-free dates stay)
+  - link health: a dead link (404 / sign-in page) is "broken" on the first failure, a 500 only on
+    the second; a good sync clears it; reconnecting replaces the broken feed
   - LOCATION identity extraction and name cleaning
 """
 import os
@@ -103,14 +105,15 @@ def build_feed(events=FIXTURE_EVENTS) -> str:
 
 
 class _FakeResponse:
-    def __init__(self, body):
-        self.status_code = 200
+    def __init__(self, body, status=200):
+        self.status_code = status
         self.text = body
 
 
 class _FakeClient:
     """Stands in for httpx.Client in main: every GET returns the fixture feed."""
     feed = build_feed()
+    status = 200
 
     def __init__(self, *args, **kwargs):
         pass
@@ -122,7 +125,7 @@ class _FakeClient:
         return False
 
     def get(self, url, **kwargs):
-        return _FakeResponse(_FakeClient.feed)
+        return _FakeResponse(_FakeClient.feed, _FakeClient.status)
 
 
 main.httpx.Client = _FakeClient
@@ -396,6 +399,42 @@ def test_syllabus_deadlines_give_way_to_lms():
                           ("syllabus", "Reading 1"), ("manual", "My study group")]), str(left))
 
 
+def _status(headers):
+    return [c["status"] for c in client.get("/lms/connections", headers=headers).json()]
+
+
+def test_dead_link_detected_and_replaced():
+    user_id, headers = make_user("health")
+    run_sync(user_id)
+    check("healthy after a good sync", _status(headers) == ["ok"], str(_status(headers)))
+    try:
+        _FakeClient.status = 500
+        run_sync(user_id)
+        check("one 500 is not enough", _status(headers) == ["ok"], str(_status(headers)))
+        run_sync(user_id)
+        check("two failures in a row: broken", _status(headers) == ["broken"], str(_status(headers)))
+        _FakeClient.status = 200
+        run_sync(user_id)
+        check("a good sync clears it", _status(headers) == ["ok"], str(_status(headers)))
+
+        _FakeClient.status = 404
+        run_sync(user_id)
+        check("dead link (404): broken at once", _status(headers) == ["broken"], str(_status(headers)))
+        _FakeClient.status = 200
+        _FakeClient.feed = "<html>Sign in</html>"
+        run_sync(user_id)
+        check("sign-in page instead of a calendar: still broken", _status(headers) == ["broken"], str(_status(headers)))
+    finally:
+        _FakeClient.status = 200
+        _set_feed(FIXTURE_EVENTS)
+    _, _, before = snapshot(user_id)
+    r = client.post("/lms/connect/ical", json={"ical_url": FEED_URL + "&new=1"}, headers=headers)
+    check("reconnect succeeds", r.status_code == 200, r.text[:200])
+    _, _, after = snapshot(user_id)
+    check("reconnect replaces the broken feed", _status(headers) == ["ok"], str(_status(headers)))
+    check("deadlines carry over, no duplicates", before == after == 8, f"{before} -> {after}")
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
@@ -408,6 +447,7 @@ if __name__ == "__main__":
         test_utc_times_stored_local()
         test_lms_changes_flow_through()
         test_syllabus_deadlines_give_way_to_lms()
+        test_dead_link_detected_and_replaced()
         print("\nAll iCal sync tests passed.")
     finally:
         try:

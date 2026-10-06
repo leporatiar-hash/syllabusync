@@ -75,6 +75,7 @@ export type CourseDeadline = {
   recurring: boolean | null;
   completed: boolean;
   saved_to_calendar: boolean;
+  source?: string | null;
 };
 
 export type CourseInfo = {

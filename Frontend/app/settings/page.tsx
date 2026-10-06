@@ -590,12 +590,18 @@ function SettingsPageContent() {
                     <p className="text-sm font-medium text-slate-900">
                       {conn.provider === 'canvas' ? 'Canvas LMS' : 'iCal Feed'}
                     </p>
-                    <p className="text-xs text-slate-500">
-                      {conn.instance_url || 'Feed connected'}
-                      {conn.last_synced && (
-                        <span> &middot; Last synced {new Date(conn.last_synced).toLocaleDateString()}</span>
-                      )}
-                    </p>
+                    {conn.status === 'broken' ? (
+                      <p className="text-xs font-medium text-red-600">
+                        Stopped syncing. Disconnect it and connect again with a fresh calendar link.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        {conn.instance_url || 'Feed connected'}
+                        {conn.last_synced && (
+                          <span> &middot; Last synced {new Date(conn.last_synced).toLocaleDateString()}</span>
+                        )}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <button

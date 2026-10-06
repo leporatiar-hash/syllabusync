@@ -1,7 +1,8 @@
 // Finds the signed-in student's own calendar feed link from inside their LMS session, so they
 // never have to hunt for "Subscribe" and copy anything. Runs as injected JS in our WebView and
 // reports back with window.ReactNativeWebView.postMessage. Only reads the student's own read-only
-// feed (the same link the LMS shows under Subscribe); nothing is changed in the LMS.
+// feed (the same link the LMS shows under Subscribe); nothing is changed in the LMS. It never
+// touches the sign-in form or password fields, and only the feed link leaves the phone.
 
 export type FeedMessage =
   | { type: 'feed'; url: string; source: string; tried: string[] }
@@ -26,11 +27,12 @@ const COMMON = `
   var clean = function (s) { return s.replace(/&amp;/g, '&').replace(/\\\\u0026/g, '&').replace(/\\\\\\//g, '/'); };
   var find = function (text) { if (!text) return null; var m = clean(text).match(RX); return m ? m[0] : null; };
   // Fallback: if the student opens Subscribe themselves, grab the link the moment it renders.
+  // Only runs after sign-in, and never reads password fields: just text boxes that could hold a link.
   var watchInputs = function (tried) {
     var n = 0;
     var t = setInterval(function () {
       n++;
-      var els = document.querySelectorAll('input, textarea');
+      var els = document.querySelectorAll('input[type=text], input[type=url], input:not([type]), textarea');
       for (var i = 0; i < els.length; i++) {
         var u = find(els[i].value || '');
         if (u) { clearInterval(t); post({ type: 'feed', url: u, source: 'subscribe-dialog', tried: tried }); return; }

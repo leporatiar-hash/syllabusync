@@ -342,6 +342,7 @@ export default function HomeClient() {
   const today = localToday()
   const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
   const providers = lmsConnections.map((c) => (c.provider === 'canvas' ? 'Canvas' : 'iCal')).join(' & ')
+  const lmsBroken = lmsConnections.some((c) => c.status === 'broken')
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
@@ -375,8 +376,8 @@ export default function HomeClient() {
               className="inline-flex items-center gap-2 self-start rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-white sm:self-auto"
               title="Manage connections"
             >
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              {providers} synced
+              <span className={`h-2 w-2 rounded-full ${lmsBroken ? 'bg-red-500' : 'bg-emerald-500'}`} />
+              {lmsBroken ? `${providers} stopped syncing. Reconnect` : `${providers} synced`}
             </Link>
           )}
         </header>

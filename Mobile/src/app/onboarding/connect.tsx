@@ -32,6 +32,7 @@ export default function ConnectStep() {
   const [manual, setManual] = useState('');
   const [localSynced, setSynced] = useState<number | null>(null);
   const [confirmSkip, setConfirmSkip] = useState(false);
+  const [showPaste, setShowPaste] = useState(false);
   const inApp = answers.mode === 'app';
   const synced = answers.lmsSynced ?? localSynced;
   const auto = answers.lms === 'oaks' || answers.lms === 'canvas';
@@ -150,6 +151,11 @@ export default function ConnectStep() {
       ) : null}
       {error ? <T size={14} color={C.red} style={{ textAlign: 'center' }}>{error}</T> : null}
 
+      {auto && !showPaste ? (
+        <Pressable onPress={() => setShowPaste(true)} hitSlop={8} style={{ alignSelf: 'center', paddingVertical: 8 }}>
+          <T size={14} weight="medium" color={C.slate500}>Already have your calendar link? Paste it</T>
+        </Pressable>
+      ) : (
       <Animated.View entering={FadeInDown.delay(180).duration(360)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
         <TextInput
           value={manual}
@@ -169,6 +175,7 @@ export default function ConnectStep() {
           <T size={15} weight="semibold" color={C.brand}>{manual.trim() ? 'Connect' : 'Paste'}</T>
         </Pressable>
       </Animated.View>
+      )}
     </QuizScreen>
   );
 }

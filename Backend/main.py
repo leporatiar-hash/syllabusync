@@ -745,6 +745,10 @@ class LMSConnection(Base):
     ical_url = Column(Text, nullable=True)  # raw iCal feed URL
     last_synced = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Health: a feed link dies when the student resets it or the school changes something.
+    failure_count = Column(Integer, nullable=True)  # consecutive failed syncs (NULL/0 = healthy)
+    failing_since = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
 
 
 class Feedback(Base):
@@ -1830,6 +1834,17 @@ def ensure_iap_columns():
             pass  # Column already exists
 
 
+def ensure_lms_health_columns():
+    """Sync-health columns on lms_connections (nullable; NULL = healthy)."""
+    for col_name, col_def in [("failure_count", "INTEGER"), ("failing_since", "TIMESTAMP"), ("last_error", "VARCHAR")]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE lms_connections ADD COLUMN {col_name} {col_def}"))
+            logger.info(f"[Migration] Added '{col_name}' column to lms_connections")
+        except Exception:
+            pass  # Column already exists
+
+
 def ensure_notification_pref_columns():
     """Add push-notification preference columns to user_profiles (nullable; NULL = enabled)."""
     for col_name in ("notify_deadlines", "notify_exams", "notify_weekly"):
@@ -1984,6 +1999,7 @@ ensure_value_prompt_columns()
 ensure_founding_member_expiry_column()
 ensure_iap_columns()
 ensure_notification_pref_columns()
+ensure_lms_health_columns()
 ensure_naming_style_column()
 ensure_note_columns()
 Base.metadata.create_all(bind=engine)
@@ -2239,6 +2255,15 @@ def _setup_nudges(db, profile, local_now: datetime, already: set[str]) -> list:
         return []
     uid = profile.user_id
     conns = db.query(LMSConnection).filter(LMSConnection.user_id == uid).all()
+    for c in conns:
+        if _lms_status(c) == "broken" and c.failing_since:
+            ledger_id = f"{uid}:setup:reconnect:{c.id}:{c.failing_since.date().isoformat()}"
+            if ledger_id not in already:
+                return [("setup", {
+                    "title": "Your LMS stopped syncing",
+                    "body": "New and changed due dates aren't coming through. Tap to reconnect; it takes 30 seconds.",
+                    "data": {"screen": "connect"},
+                }, [ledger_id])]
     if not conns:
         user = db.query(User).filter(User.id == uid).first()
         age = (datetime.utcnow() - user.created_at).days if user and user.created_at else 0
@@ -4266,6 +4291,7 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
             "start_date": str(course.start_date) if course.start_date else None,
             "end_date": str(course.end_date) if course.end_date else None,
             "course_info": course.course_info,
+            "has_syllabus": bool(course.syllabus_text),
             "color": course.color,
             "note_count": db.query(Note).filter(Note.course_id == course_id, Note.user_id == user_id).count(),
             "deadlines": [
@@ -4280,6 +4306,7 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
                     "frequency": d.frequency,
                     "day_of_week": d.day_of_week,
                     "completed": d.completed,
+                    "source": d.source,
                     "saved_to_calendar": d.id in saved_deadline_ids
                 }
                 for d in sorted(course.deadlines, key=lambda x: x.date or "9999")
@@ -6054,6 +6081,8 @@ def sync_canvas(connection, user_id: str, db):
             courses_resp = client.get(f"{base}/api/v1/courses", params={"enrollment_state": "active", "per_page": 100}, headers=headers)
             if courses_resp.status_code != 200:
                 errors.append(f"Failed to fetch Canvas courses: {courses_resp.status_code}")
+                _record_lms_health(db, connection, False, f"HTTP {courses_resp.status_code}",
+                                   dead=courses_resp.status_code in _LMS_DEAD_STATUSES)
                 return synced, errors
 
             canvas_courses = courses_resp.json()
@@ -6152,9 +6181,14 @@ def sync_canvas(connection, user_id: str, db):
                                            datetime.now(user_tz).date().isoformat())
             db.commit()
             connection.last_synced = datetime.utcnow()
-            db.commit()
+            _record_lms_health(db, connection, True)
 
+    except httpx.RequestError as e:
+        db.rollback()
+        errors.append(f"Canvas sync error: {str(e)}")
+        _record_lms_health(db, connection, False, f"network: {e}")
     except Exception as e:
+        db.rollback()
         errors.append(f"Canvas sync error: {str(e)}")
 
     return synced, errors
@@ -6354,6 +6388,31 @@ def _to_user_local(dt: datetime, tz: ZoneInfo) -> datetime:
     return dt.astimezone(tz)
 
 
+# A response that means "this link/token is dead" counts double, so the student hears about it
+# on the next sync instead of after three; timeouts and 5xx need three in a row.
+LMS_BROKEN_AFTER = 2
+_LMS_DEAD_STATUSES = {401, 403, 404, 410}
+
+
+def _record_lms_health(db, connection, ok: bool, error: str | None = None, dead: bool = False):
+    if ok:
+        connection.failure_count = 0
+        connection.failing_since = None
+        connection.last_error = None
+    else:
+        connection.failure_count = (connection.failure_count or 0) + (LMS_BROKEN_AFTER if dead else 1)
+        connection.failing_since = connection.failing_since or datetime.utcnow()
+        connection.last_error = (error or "sync failed")[:200]
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def _lms_status(connection) -> str:
+    return "broken" if (connection.failure_count or 0) >= LMS_BROKEN_AFTER else "ok"
+
+
 def sync_ical(connection, user_id: str, db):
     """Sync events from an iCal feed into deadlines. The LMS is the source of truth: every class in
     the feed gets a course (matched to the student's existing one or created), changed due dates
@@ -6366,12 +6425,23 @@ def sync_ical(connection, user_id: str, db):
 
     try:
         with httpx.Client(timeout=30.0) as http_client:
-            resp = http_client.get(connection.ical_url)
+            try:
+                resp = http_client.get(connection.ical_url)
+            except Exception as e:
+                errors.append(f"Failed to fetch iCal feed: {e}")
+                _record_lms_health(db, connection, False, f"network: {e}")
+                return synced, errors
             if resp.status_code != 200:
                 errors.append(f"Failed to fetch iCal feed: {resp.status_code}")
+                _record_lms_health(db, connection, False, f"HTTP {resp.status_code}", dead=resp.status_code in _LMS_DEAD_STATUSES)
                 return synced, errors
-
-            cal = ICalCalendar.from_ical(resp.text)
+            try:
+                cal = ICalCalendar.from_ical(resp.text)
+            except Exception as e:
+                # e.g. a sign-in page instead of a calendar: the link no longer works
+                errors.append(f"Invalid iCal feed: {e}")
+                _record_lms_health(db, connection, False, "not a calendar", dead=True)
+                return synced, errors
             events = [c for c in cal.walk() if c.name == "VEVENT"]
 
             course_by_uid, user_courses = _ensure_ical_courses(events, user_id, db)
@@ -6452,7 +6522,7 @@ def sync_ical(connection, user_id: str, db):
                                            datetime.now(user_tz).date().isoformat())
             db.commit()
             connection.last_synced = datetime.utcnow()
-            db.commit()
+            _record_lms_health(db, connection, True)
 
     except Exception as e:
         db.rollback()
@@ -6587,6 +6657,12 @@ def connect_ical(
         if existing:
             raise HTTPException(status_code=400, detail="This iCal feed is already connected")
 
+        # Reconnecting: the new link replaces feeds that stopped working (deadlines carry over,
+        # since they're keyed by the events' own UIDs, not the link).
+        for dead in db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "ical").all():
+            if _lms_status(dead) == "broken":
+                db.delete(dead)
+
         connection = LMSConnection(
             user_id=user_id,
             provider="ical",
@@ -6627,6 +6703,8 @@ def list_lms_connections(current_user: User = Depends(get_current_user)):
                 "instance_url": c.instance_url,
                 "last_synced": c.last_synced.isoformat() if c.last_synced else None,
                 "created_at": c.created_at.isoformat(),
+                "status": _lms_status(c),
+                "failing_since": c.failing_since.isoformat() if c.failing_since else None,
             }
             for c in connections
         ]
