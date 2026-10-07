@@ -29,8 +29,8 @@ export function SchoolLogo({ domain, name, size = 44 }: { domain?: string | null
       {domain ? (
         <Image
           source={{ uri: schoolLogoUrl(domain) }}
-          // Sites with no icon get Google's tiny generic globe: keep the initials for those.
-          onLoad={(e) => setShow((e.nativeEvent.source?.width ?? 0) >= 32)}
+          onLoad={() => setShow(true)}
+          onError={() => setShow(false)}
           style={{ position: 'absolute', width: size * 0.7, height: size * 0.7, opacity: show ? 1 : 0 }}
           resizeMode="contain"
         />

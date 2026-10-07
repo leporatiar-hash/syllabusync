@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, validator
 from collections import Counter
@@ -6641,6 +6641,17 @@ def _save_school_lms(db, row, domain: str, options: list[dict]):
 @limiter.limit("60/minute")
 def search_schools(request: Request, q: str = Query("", max_length=80), current_user: User = Depends(get_current_user)):
     return schools.search(q)
+
+
+@app.get("/schools/logo", tags=["schools"], summary="Redirect to a school's best square logo (404 if none)")
+@limiter.limit("120/minute")
+async def school_logo(request: Request, domain: str = Query(..., max_length=120)):
+    # Public (images load without auth headers), but only for schools in the directory.
+    school = schools.school_for_email(f"x@{domain.lower().strip()}")
+    url = await schools.logo_url(school["domain"]) if school else None
+    if not url:
+        raise HTTPException(status_code=404, detail="No logo")
+    return RedirectResponse(url, status_code=302, headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/schools/suggest", tags=["schools"], summary="The student's school, from their email domain")

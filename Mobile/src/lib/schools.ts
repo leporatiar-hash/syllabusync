@@ -1,4 +1,5 @@
 import { api } from './api';
+import { API_URL } from './config';
 
 // "Where do you go?" -> which LMS the school uses -> sign in there. Backend: Backend/schools.py.
 
@@ -39,5 +40,5 @@ export function lmsStartUrl(provider: LmsProvider, host: string) {
   return provider === 'brightspace' ? `https://${host}/d2l/home` : `https://${host}/login`;
 }
 
-/** The school's site icon at up to 128px (Google's favicon service); SchoolLogo falls back to initials. */
-export const schoolLogoUrl = (domain: string) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+/** The school's best square icon, picked server-side (404 when it has none; SchoolLogo shows initials). */
+export const schoolLogoUrl = (domain: string) => `${API_URL}/schools/logo?domain=${encodeURIComponent(domain)}`;

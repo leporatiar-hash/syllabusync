@@ -223,3 +223,90 @@ async def identify(host: str) -> dict | None:
     if cv:
         return lms_option("canvas", host, "manual")
     return None
+
+
+# ── Logos ──────────────────────────────────────────────────────────────────
+# A school's best square icon: whatever its homepage declares (apple-touch-icon / icon links),
+# its /apple-touch-icon.png, or Google's favicon service, keeping the largest real PNG/JPEG.
+# Resolved once per school and remembered for the life of the process.
+
+_logo_cache: dict[str, str | None] = {}
+_ICON_LINK_RE = re.compile(r"<link\b[^>]*>", re.I)
+MIN_LOGO_PX = 48
+
+
+def _image_size(data: bytes) -> int:
+    """Smaller side in px for PNG/JPEG bytes, 0 if it isn't one we can read."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+        w, h = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+        return min(w, h)
+    if data[:4] == b"\x00\x00\x01\x00" and len(data) >= 6:  # .ico: largest entry (0 means 256)
+        count = int.from_bytes(data[4:6], "little")
+        sizes = [(data[6 + 16 * k] or 256) for k in range(min(count, 16)) if 6 + 16 * k < len(data)]
+        return max(sizes, default=0)
+    if data[:2] == b"\xff\xd8":
+        i = 2
+        while i + 9 < len(data):
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker, seg = data[i + 1], int.from_bytes(data[i + 2:i + 4], "big")
+            if marker in (0xC0, 0xC1, 0xC2):
+                h, w = int.from_bytes(data[i + 5:i + 7], "big"), int.from_bytes(data[i + 7:i + 9], "big")
+                return min(w, h)
+            i += 2 + seg
+    return 0
+
+
+def _icon_links(html: str, base: str) -> list[str]:
+    out = []
+    for tag in _ICON_LINK_RE.findall(html[:300_000]):
+        rel = re.search(r'rel=["\']([^"\']+)', tag, re.I)
+        href = re.search(r'href=["\']([^"\']+)', tag, re.I)
+        if not rel or not href or "icon" not in rel.group(1).lower():
+            continue
+        url = href.group(1).strip()
+        if url.startswith("//"):
+            url = "https:" + url
+        elif url.startswith("/"):
+            url = base + url
+        elif not url.startswith("http"):
+            url = base + "/" + url
+        if not url.lower().split("?")[0].endswith(".svg"):
+            out.append(url)
+    return out
+
+
+async def logo_url(domain: str) -> str | None:
+    if domain in _logo_cache:
+        return _logo_cache[domain]
+    best: tuple[int, str | None] = (0, None)
+    async with httpx.AsyncClient(follow_redirects=True, timeout=5.0,
+                                 headers={"User-Agent": "Mozilla/5.0 (compatible; ClassMate/1.0; +https://tryclassmate.com)"}) as client:
+        candidates: list[str] = []
+        for base in (f"https://www.{domain}", f"https://{domain}"):
+            try:
+                r = await client.get(base + "/")
+                if r.status_code == 200 and "html" in r.headers.get("content-type", ""):
+                    candidates += _icon_links(r.text, str(r.url).rstrip("/").split("/", 3)[0] + "//" + str(r.url).split("/")[2])
+                    break
+            except Exception:
+                continue
+        candidates += [f"https://www.{domain}/apple-touch-icon.png", f"https://{domain}/apple-touch-icon.png",
+                       f"https://www.google.com/s2/favicons?domain={domain}&sz=256", f"https://www.{domain}/favicon.ico"]
+
+        async def size_of(url: str) -> tuple[int, str]:
+            try:
+                r = await client.get(url)
+                if r.status_code != 200 or len(r.content) > 2_000_000:
+                    return 0, url
+                return _image_size(r.content), str(r.url)
+            except Exception:
+                return 0, url
+
+        for px, url in await asyncio.gather(*[size_of(u) for u in dict.fromkeys(candidates[:12])]):
+            if px > best[0]:
+                best = (px, url)
+    url = best[1] if best[0] >= MIN_LOGO_PX else None
+    _logo_cache[domain] = url
+    return url
