@@ -40,5 +40,6 @@ export function lmsStartUrl(provider: LmsProvider, host: string) {
   return provider === 'brightspace' ? `https://${host}/d2l/home` : `https://${host}/login`;
 }
 
-/** The school's best square icon, picked server-side (404 when it has none; SchoolLogo shows initials). */
-export const schoolLogoUrl = (domain: string) => `${API_URL}/schools/logo?domain=${encodeURIComponent(domain)}`;
+/** square: athletics mark or site icon; wide: the official logo. Picked server-side (404 when none). */
+export const schoolLogoUrl = (domain: string, kind: 'square' | 'wide' = 'square') =>
+  `${API_URL}/schools/logo?domain=${encodeURIComponent(domain)}&kind=${kind}`;

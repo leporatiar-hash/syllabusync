@@ -5,7 +5,7 @@ import { Pressable, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 import { advance, ChoiceCard, type Lms, QuizButton, QuizScreen, useQuiz } from '@/components/quiz-kit';
-import { SchoolLogo } from '@/components/school-logo';
+import { SchoolLogo, SchoolWordmark } from '@/components/school-logo';
 import { BrandLoader, T } from '@/components/web';
 import { C, F, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
@@ -142,7 +142,7 @@ export default function LmsStep() {
         onSkip={() => setShowAll(true)}
         skipLabel="That’s not it">
         <Animated.View entering={ZoomIn.springify().damping(14)} style={[{ alignItems: 'center', gap: 14, backgroundColor: C.white, borderRadius: 28, borderCurve: 'continuous', paddingVertical: 30, paddingHorizontal: 20 }, shadowSm]}>
-          <SchoolLogo domain={domain} name={answers.school || best.name} size={76} />
+          <SchoolWordmark domain={domain} name={answers.school || best.name} />
           <View style={{ alignItems: 'center', gap: 4 }}>
             <T size={15} color={C.slate500} style={{ textAlign: 'center' }}>{answers.school}</T>
             <T size={26} weight="bold" color={C.slate900} style={{ textAlign: 'center' }}>{best.name}</T>

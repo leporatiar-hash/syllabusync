@@ -6645,10 +6645,10 @@ def search_schools(request: Request, q: str = Query("", max_length=80), current_
 
 @app.get("/schools/logo", tags=["schools"], summary="Redirect to a school's best square logo (404 if none)")
 @limiter.limit("120/minute")
-async def school_logo(request: Request, domain: str = Query(..., max_length=120)):
+async def school_logo(request: Request, domain: str = Query(..., max_length=120), kind: str = Query("square", pattern="^(square|wide)$")):
     # Public (images load without auth headers), but only for schools in the directory.
     school = schools.school_for_email(f"x@{domain.lower().strip()}")
-    url = await schools.logo_url(school["domain"]) if school else None
+    url = await schools.logo_url(school["domain"], kind) if school else None
     if not url:
         raise HTTPException(status_code=404, detail="No logo")
     return RedirectResponse(url, status_code=302, headers={"Cache-Control": "public, max-age=604800"})

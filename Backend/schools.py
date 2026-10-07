@@ -277,7 +277,64 @@ def _icon_links(html: str, base: str) -> list[str]:
     return out
 
 
-async def logo_url(domain: str) -> str | None:
+# Wikidata has the official logo for most colleges (P154) and, through the athletics program that
+# "represents" the school (P1268), its athletics mark: the square logo students actually know
+# (Clemson's paw, the CofC Cougars). Images are served by Wikimedia Commons, rendered to PNG.
+WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
+_wikidata_cache: dict[str, dict] = {}
+_UA = {"User-Agent": "ClassMate/1.0 (https://tryclassmate.com; support@tryclassmate.com)"}
+
+
+def _commons_png(file_url: str, width: int) -> str:
+    name = file_url.rsplit("/", 1)[-1]
+    return f"https://commons.wikimedia.org/wiki/Special:FilePath/{name}?width={width}"
+
+
+def _mark_score(file_url: str) -> int:
+    n = file_url.rsplit("/", 1)[-1].lower()
+    score = 0
+    if "logo" in n or "logomark" in n:
+        score += 2
+    if any(w in n for w in ("wordmark", "woodmark", "script", "text", "word")):
+        score -= 3
+    return score
+
+
+async def wikidata_logos(domain: str) -> dict:
+    """{'square': url|None, 'wide': url|None} from Wikidata, matched on the school's official website."""
+    if domain in _wikidata_cache:
+        return _wikidata_cache[domain]
+    sites = " ".join(f"<{p}://{w}{domain}{s}>" for p in ("https", "http") for w in ("www.", "") for s in ("/", ""))
+    query = f"""SELECT ?wide ?mark WHERE {{
+      VALUES ?site {{ {sites} }} ?u wdt:P856 ?site .
+      OPTIONAL {{ ?u wdt:P154 ?wide }}
+      OPTIONAL {{ ?team wdt:P1268 ?u ; wdt:P154 ?mark }} }} LIMIT 40"""
+    out = {"square": None, "wide": None}
+    try:
+        async with httpx.AsyncClient(timeout=12.0, headers=_UA) as client:
+            r = await client.get(WIKIDATA_SPARQL, params={"query": query, "format": "json"})
+        rows = r.json()["results"]["bindings"] if r.status_code == 200 else []
+        marks = sorted({x["mark"]["value"] for x in rows if "mark" in x}, key=_mark_score, reverse=True)
+        wides = sorted({x["wide"]["value"] for x in rows if "wide" in x})
+        if marks and _mark_score(marks[0]) >= 0:
+            out["square"] = _commons_png(marks[0], 256)
+        if wides:
+            out["wide"] = _commons_png(wides[0], 600)
+    except Exception:
+        return out  # not cached: try again next time
+    _wikidata_cache[domain] = out
+    return out
+
+
+async def logo_url(domain: str, kind: str = "square") -> str | None:
+    """Best logo for a school. square: athletics mark -> site icon; wide: official logo."""
+    wd = await wikidata_logos(domain)
+    if kind == "wide":
+        return wd["wide"]
+    return wd["square"] or await site_icon_url(domain)
+
+
+async def site_icon_url(domain: str) -> str | None:
     if domain in _logo_cache:
         return _logo_cache[domain]
     best: tuple[int, str | None] = (0, None)

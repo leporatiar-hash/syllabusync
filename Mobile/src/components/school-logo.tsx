@@ -38,3 +38,22 @@ export function SchoolLogo({ domain, name, size = 44 }: { domain?: string | null
     </View>
   );
 }
+
+/** The school's official (usually wide) logo for hero cards, falling back to the square tile. */
+export function SchoolWordmark({ domain, name, height = 72, maxWidth = 260 }: { domain?: string | null; name: string; height?: number; maxWidth?: number }) {
+  const [state, setState] = useState<'loading' | 'ok' | 'none'>(domain ? 'loading' : 'none');
+  if (!domain || state === 'none') return <SchoolLogo domain={domain} name={name} size={height + 4} />;
+  return (
+    <View style={{ width: maxWidth, height, alignItems: 'center', justifyContent: 'center' }}>
+      {state === 'loading' ? <SchoolLogo domain={domain} name={name} size={height} /> : null}
+      <Image
+        source={{ uri: schoolLogoUrl(domain, 'wide') }}
+        onLoad={() => setState('ok')}
+        onError={() => setState('none')}
+        accessibilityLabel={`${name} logo`}
+        style={{ position: 'absolute', width: maxWidth, height, opacity: state === 'ok' ? 1 : 0 }}
+        resizeMode="contain"
+      />
+    </View>
+  );
+}

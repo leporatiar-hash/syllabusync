@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { advance, QuizScreen, useQuiz } from '@/components/quiz-kit';
-import { SchoolLogo } from '@/components/school-logo';
+import { SchoolLogo, SchoolWordmark } from '@/components/school-logo';
 import { T } from '@/components/web';
 import { C, F, shadowSm } from '@/constants/theme';
 import { api } from '@/lib/api';
@@ -89,7 +89,7 @@ export default function SchoolStep() {
               backgroundColor: C.white, borderWidth: 2, borderColor: answers.schoolDomain === suggested.domain ? C.brand : C.slate200,
               transform: [{ scale: pressed ? 0.98 : 1 }],
             }, shadowSm]}>
-            <SchoolLogo domain={suggested.domain} name={suggested.name} size={72} />
+            <SchoolWordmark domain={suggested.domain} name={suggested.name} />
             <T size={20} weight="bold" color={C.slate900} style={{ textAlign: 'center' }}>{suggested.name}</T>
             <View style={{ borderRadius: 999, backgroundColor: C.brand, paddingHorizontal: 18, paddingVertical: 9 }}>
               <T size={15} weight="semibold" color="#fff">That’s me</T>

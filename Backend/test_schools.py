@@ -124,6 +124,20 @@ def test_profile_school_change_clears_lms():
     assert (p["school_domain"], p["lms_host"]) == ("clemson.edu", None), p
 
 
+def test_logo_choice():
+    # Athletics marks win over wordmarks/script versions; images come back as Commons PNG renders
+    marks = ["http://commons.wikimedia.org/wiki/Special:FilePath/Clemson%20Tigers%20Woodmark.png",
+             "http://commons.wikimedia.org/wiki/Special:FilePath/Clemson%20Tigers%20logo.svg"]
+    assert sorted(marks, key=schools._mark_score, reverse=True)[0].endswith("logo.svg")
+    assert schools._mark_score(marks[0]) < 0
+    assert schools._commons_png(marks[1], 256) == "https://commons.wikimedia.org/wiki/Special:FilePath/Clemson%20Tigers%20logo.svg?width=256"
+    # PNG / ICO size sniffing
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (180).to_bytes(4, "big") + (180).to_bytes(4, "big")
+    assert schools._image_size(png) == 180
+    ico = b"\x00\x00\x01\x00\x02\x00" + bytes([16]) + b"\x00" * 15 + bytes([0]) + b"\x00" * 15
+    assert schools._image_size(ico) == 256
+
+
 def test_host_parsing():
     assert schools.host_from_input("https://LMS.cofc.edu/d2l/home?x=1") == "lms.cofc.edu"
     assert schools.host_from_input("lms.cofc.edu") == "lms.cofc.edu"
