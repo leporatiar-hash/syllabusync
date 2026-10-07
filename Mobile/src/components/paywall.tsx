@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
-import { Check, FileUp, Layers, MessageCircle, Sparkles, X, type LucideIcon } from 'lucide-react-native';
+import { BookOpen, Check, GraduationCap, MessageCircle, Sparkles, X, type LucideIcon } from 'lucide-react-native';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -22,11 +22,13 @@ import type { Subscription } from '@/lib/types';
  * PRO_CHAT_MESSAGE_LIMIT=50/week. Keep this copy in sync if those change: Apple rejects paywalls that oversell.
  */
 const BENEFITS: { icon: LucideIcon; title: string; body: string; color: string; bg: string }[] = [
-  { icon: Layers, title: 'Unlimited study tools', body: 'Flashcards, practice quizzes & summaries, no monthly cap', color: '#5B8DEF', bg: '#E0EAFF' },
-  { icon: MessageCircle, title: '2.5× more AI chat', body: '50 messages a week instead of 20', color: '#A78BFA', bg: '#F3E8FF' },
-  { icon: FileUp, title: 'Works with anything', body: 'PDFs, slides, readings, your own notes', color: '#38BDF8', bg: '#E0F2FE' },
+  { icon: GraduationCap, title: 'Ace the next exam', body: 'Turn your notes and slides into flashcards and a practice quiz in seconds', color: '#5B8DEF', bg: '#E0EAFF' },
+  { icon: MessageCircle, title: 'A tutor that knows your classes', body: 'Ask about your syllabus, deadlines and notes. ChatGPT can’t see any of that.', color: '#A78BFA', bg: '#F3E8FF' },
+  { icon: BookOpen, title: 'Skip the 40-page reading', body: 'Get the key points in 2 minutes, right before class', color: '#38BDF8', bg: '#E0F2FE' },
 ];
-const FREE_LINE = 'Free plan: 50 AI generations a month. Reminders & calendar sync are always free.';
+
+// The limits answer "what exactly do I get" in the small print; the tiles sell the outcome.
+const FREE_LINE = 'Pro: unlimited flashcards, quizzes & summaries, 50 AI chats a week. Reminders & LMS sync are always free.';
 
 // Shown only when the store can't return products (Expo Go / before App Store Connect is set up).
 const FALLBACK = { annual: '$59.99', monthly: '$9.99', trialDays: 14 };
