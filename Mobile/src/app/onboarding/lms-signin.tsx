@@ -14,20 +14,15 @@ import { track } from '@/lib/analytics';
 import { api } from '@/lib/api';
 import { syncLms } from '@/lib/lms-sync';
 import { CANVAS_SCRIPT, D2L_SCRIPT, type FeedMessage, redactFeed } from '@/lib/lms-feed';
+import { confirmLms, lmsBrand, lmsStartUrl } from '@/lib/schools';
 import type { Course } from '@/lib/types';
 
-const LMS = {
-  oaks: {
-    name: 'OAKS',
-    start: 'https://lms.cofc.edu/d2l/home',
-    script: D2L_SCRIPT,
-  },
-  canvas: {
-    name: 'Canvas',
-    start: 'https://www.instructure.com/canvas/login',
-    script: CANVAS_SCRIPT,
-  },
-} as const;
+/** The school's own LMS (from "Where do you go?"), falling back to OAKS for old sessions. */
+function lmsFor(provider: string | null, host: string | null, name: string | null) {
+  const p = provider === 'canvas' ? 'canvas' : 'brightspace';
+  const h = host ?? (p === 'canvas' ? 'canvas.instructure.com' : 'lms.cofc.edu');
+  return { provider: p, host: h, name: name ?? lmsBrand(h, p), start: lmsStartUrl(p, h), script: p === 'canvas' ? CANVAS_SCRIPT : D2L_SCRIPT } as const;
+}
 
 type Phase = 'signin' | 'looking' | 'connecting' | 'done' | 'manual' | 'error';
 
@@ -38,7 +33,7 @@ const close = () => (router.canGoBack() ? router.back() : router.replace('/onboa
 export default function LmsSignIn() {
   const insets = useSafeAreaInsets();
   const { answers, set } = useQuiz();
-  const lms = LMS[answers.lms === 'canvas' ? 'canvas' : 'oaks'];
+  const [lms] = useState(() => lmsFor(answers.lms, answers.lmsHost, answers.lmsName));
   const web = useRef<WebView>(null);
   const [phase, setPhase] = useState<Phase>('signin');
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +53,7 @@ export default function LmsSignIn() {
   const step = (name: string, extra: Record<string, string | number | boolean | null> = {}) => {
     if (stepsSeen.current.has(name)) return;
     stepsSeen.current.add(name);
-    track('lms_connect_step', { step: name, lms: answers.lms ?? null, host: new URL(lms.start).host, seconds: Math.round((Date.now() - opened.current) / 1000), ...extra });
+    track('lms_connect_step', { step: name, lms: answers.lms ?? null, host: lms.host, seconds: Math.round((Date.now() - opened.current) / 1000), ...extra });
   };
   useEffect(() => {
     const start = Date.now();
@@ -105,6 +100,8 @@ export default function LmsSignIn() {
       }
     }
     syncLms(true); // a reconnect with the same link clears a stale "not syncing" state
+    // Remember it on their profile, and for classmates at the same school.
+    if (answers.schoolDomain) confirmLms(answers.schoolDomain, lms.provider, lms.host);
     const list = await api<Course[]>('/courses').catch(() => [] as Course[]);
     if (!count) count = list.reduce((n, c) => n + (c.deadline_count || 0), 0);
     setResult({ count, courses: list });

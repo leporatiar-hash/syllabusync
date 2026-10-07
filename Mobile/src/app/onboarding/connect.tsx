@@ -15,8 +15,9 @@ import { api } from '@/lib/api';
 
 type Guide = { name: string; url: string; where: string };
 // `url` is where the in-app browser opens; `where` is the one thing to tap once they're signed in.
+// Only used when we don't know the school's LMS address; with one, sign-in happens in the app.
 const GUIDES: Record<Exclude<Lms, 'none'>, Guide> = {
-  oaks: { name: 'OAKS', url: 'https://lms.cofc.edu/d2l/le/calendar/6606', where: 'Tap Subscribe, then copy the link' },
+  brightspace: { name: 'Brightspace', url: 'https://www.google.com/search?q=my+school+brightspace+login', where: 'Calendar → Subscribe, then copy the link' },
   canvas: { name: 'Canvas', url: 'https://www.instructure.com/canvas/login', where: 'Calendar → Calendar Feed' },
   blackboard: { name: 'Blackboard', url: 'https://www.google.com/search?q=my+school+blackboard+login', where: 'Calendar → ⚙ → Share Calendar' },
   other: { name: 'your LMS', url: 'https://www.google.com/search?q=my+school+lms+login', where: 'Calendar → Subscribe / Export' },
@@ -26,7 +27,8 @@ const looksLikeFeed = (s: string) => /^(https?|webcal):\/\/\S+$/i.test(s.trim())
 
 export default function ConnectStep() {
   const { answers, set } = useQuiz();
-  const guide = GUIDES[(answers.lms && answers.lms !== 'none' ? answers.lms : 'other') as Exclude<Lms, 'none'>];
+  const base = GUIDES[(answers.lms && answers.lms !== 'none' ? answers.lms : 'other') as Exclude<Lms, 'none'>];
+  const guide = { ...base, name: answers.lmsName ?? base.name };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState('');
@@ -35,7 +37,8 @@ export default function ConnectStep() {
   const [showPaste, setShowPaste] = useState(false);
   const inApp = answers.mode === 'app';
   const synced = answers.lmsSynced ?? localSynced;
-  const auto = answers.lms === 'oaks' || answers.lms === 'canvas';
+  // We know where they sign in: open it in the app and pick up the calendar link ourselves.
+  const auto = (answers.lms === 'brightspace' || answers.lms === 'canvas') && !!answers.lmsHost;
 
   const connect = async (raw: string) => {
     const link = raw.trim().replace(/^webcal:\/\//i, 'https://');

@@ -28,6 +28,7 @@ export default function YearStep() {
         email: me?.profile?.email,
         full_name: answers.firstName.trim() || null,
         school_name: answers.school.trim() || null,
+        school_domain: answers.schoolDomain ?? undefined,
         academic_year: year === 'Other' ? null : year,
         school_type: year === 'Graduate' ? 'Graduate School' : 'University',
       }),

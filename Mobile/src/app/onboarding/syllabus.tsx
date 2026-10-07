@@ -15,7 +15,7 @@ type Uploaded = { name: string; deadlines: number; lmsBacked: boolean };
 export default function SyllabusStep() {
   const { answers } = useQuiz();
   // With an LMS connected, due dates come from it; the syllabus adds what the LMS doesn't know.
-  const lmsName = answers.lms === 'oaks' ? 'OAKS' : answers.lms === 'canvas' ? 'Canvas' : 'your LMS';
+  const lmsName = answers.lmsName ?? 'your LMS';
   const synced = (answers.lmsSynced ?? null) !== null;
   const [uploaded, setUploaded] = useState<Uploaded[]>([]);
   const [busy, setBusy] = useState(false);

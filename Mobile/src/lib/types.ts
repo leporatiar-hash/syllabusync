@@ -10,6 +10,9 @@ export type Me = {
     academic_year?: string | null;
     major: string | null;
     naming_style: string;
+    school_domain?: string | null;
+    lms_provider?: 'brightspace' | 'canvas' | null;
+    lms_host?: string | null;
   } | null;
   subscription: { tier: 'free' | 'pro'; is_pro: boolean; is_founding_member: boolean };
   has_completed_onboarding: boolean;

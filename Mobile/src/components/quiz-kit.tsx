@@ -15,16 +15,28 @@ export const STEPS = ['name', 'school', 'year', 'goals', 'lms', 'connect', 'syll
 export type Step = (typeof STEPS)[number];
 
 export type Goal = 'deadlines' | 'exams' | 'overwhelmed' | 'procrastinating' | 'understanding';
-export type Lms = 'oaks' | 'canvas' | 'blackboard' | 'other' | 'none';
+export type Lms = 'brightspace' | 'canvas' | 'blackboard' | 'other' | 'none';
 
 // mode 'app': the LMS steps were opened from inside the app (home card, push), not onboarding.
-type Answers = { firstName: string; school: string; year: string; goals: Goal[]; lms: Lms | null; lmsSynced: number | null; mode: 'onboarding' | 'app' };
+type Answers = {
+  firstName: string;
+  school: string;
+  schoolDomain: string | null;
+  year: string;
+  goals: Goal[];
+  lms: Lms | null;
+  /** Set when we know where to sign in (detected, typed in, or saved on the profile). */
+  lmsHost: string | null;
+  lmsName: string | null;
+  lmsSynced: number | null;
+  mode: 'onboarding' | 'app';
+};
 type Ctx = { answers: Answers; set: (patch: Partial<Answers>) => void };
 
 const AnswersCtx = createContext<Ctx | null>(null);
 
 export function QuizProvider({ children, initial }: { children: ReactNode; initial?: Partial<Answers> }) {
-  const [answers, setAnswers] = useState<Answers>({ firstName: '', school: '', year: '', goals: [], lms: null, lmsSynced: null, mode: 'onboarding', ...initial });
+  const [answers, setAnswers] = useState<Answers>({ firstName: '', school: '', schoolDomain: null, year: '', goals: [], lms: null, lmsHost: null, lmsName: null, lmsSynced: null, mode: 'onboarding', ...initial });
   return <AnswersCtx.Provider value={{ answers, set: (p) => setAnswers((a) => ({ ...a, ...p })) }}>{children}</AnswersCtx.Provider>;
 }
 
@@ -68,6 +80,7 @@ export function QuizScreen({
   onSkip,
   skipLabel = 'Skip',
   back = true,
+  align = 'center',
 }: {
   title: string;
   subtitle?: string;
@@ -76,6 +89,8 @@ export function QuizScreen({
   onSkip?: () => void;
   skipLabel?: string;
   back?: boolean;
+  /** 'top' for screens whose content grows as you type (search), so it doesn't jump around. */
+  align?: 'center' | 'top';
 }) {
   const insets = useSafeAreaInsets();
   return (
@@ -90,7 +105,7 @@ export function QuizScreen({
         <View style={{ width: 36 }} />
       </View>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 24, gap: 12 }}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: align === 'top' ? 'flex-start' : 'center', paddingHorizontal: 20, paddingVertical: 24, gap: 12 }}>
           <Animated.View entering={FadeInDown.duration(380)} style={{ gap: 6, marginBottom: 16 }}>
             <T size={32} weight="bold" color={C.slate900} style={{ lineHeight: 38, letterSpacing: -0.8 }}>{title}</T>
             {subtitle ? <T size={16} color={C.slate500} style={{ lineHeight: 22 }}>{subtitle}</T> : null}

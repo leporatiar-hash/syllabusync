@@ -115,25 +115,34 @@ export const D2L_SCRIPT = `(function () {
   check();
 })(); true;`;
 
-/** Canvas: the profile API returns the student's calendar feed URL. */
+/** Canvas: the profile API returns the student's calendar feed URL. Works on any Canvas host
+ *  (school.instructure.com or a custom domain): a successful profile call is what "signed in" means. */
 export const CANVAS_SCRIPT = `(function () {
   ${COMMON}
-  var path = location.pathname;
-  var signedIn = !/login|saml|sso|auth/i.test(path) && /instructure|canvas/i.test(location.host + path) ;
-  post({ type: 'page', path: path, signedIn: signedIn });
   if (window.__cmFeedRun) return;
-  (async function () {
+  var attempts = 0;
+  var check = async function () {
+    attempts++;
+    var path = location.pathname;
     var tried = [];
     try {
       var r = await fetch('/api/v1/users/self/profile', { credentials: 'include', headers: { Accept: 'application/json' } });
-      tried.push('profile:' + r.status);
+      tried.push('profile#' + r.status);
       if (r.ok) {
+        if (window.__cmFeedRun) return;
+        window.__cmFeedRun = true;
+        post({ type: 'page', path: path, signedIn: true });
         var j = JSON.parse((await r.text()).replace(/^while\\(1\\);/, ''));
-        if (j && j.calendar && j.calendar.ics) { window.__cmFeedRun = true; post({ type: 'feed', url: j.calendar.ics, source: 'auto', tried: tried }); return; }
+        if (j && j.calendar && j.calendar.ics) { post({ type: 'feed', url: j.calendar.ics, source: 'auto', tried: tried }); return; }
+        post({ type: 'miss', tried: tried, path: path, calendar: '/calendar' });
+        watchInputs(tried);
+        return;
       }
     } catch (e) { tried.push('profile:err'); }
-    if (signedIn) { post({ type: 'miss', tried: tried, path: path }); watchInputs(tried); }
-  })();
+    post({ type: 'page', path: path, signedIn: false });
+    if (attempts < 40) setTimeout(check, 1500);
+  };
+  check();
 })(); true;`;
 
 /** Strip the secret token before anything is logged. */
