@@ -1193,6 +1193,30 @@ def generate_flashcards_fallback(text: str):
     return cards
 
 
+def _page_text_with_tables(page) -> str:
+    """One page's text in reading order, each table rendered once as "a | b | c" rows.
+    (Extracting tables and then the full page text printed every table twice, and put tables
+    ahead of the heading above them.) The page is cut into horizontal bands around each table."""
+    try:
+        tables = sorted(page.find_tables(), key=lambda t: t.bbox[1])
+    except Exception:
+        tables = []
+    if not tables:
+        return page.extract_text(layout=False) or ""
+    parts, top = [], page.bbox[1]
+    x0, x1, bottom = page.bbox[0], page.bbox[2], page.bbox[3]
+    for t in tables:
+        t_top, t_bottom = max(t.bbox[1], top), min(t.bbox[3], bottom)
+        if t_top > top:
+            parts.append(page.crop((x0, top, x1, t_top)).extract_text(layout=False) or "")
+        rows = t.extract() or []
+        parts.append("\n".join(" | ".join((c or "").replace("\n", " ") for c in row) for row in rows) + "\n")
+        top = max(top, t_bottom)
+    if top < bottom:
+        parts.append(page.crop((x0, top, x1, bottom)).extract_text(layout=False) or "")
+    return "\n".join(p for p in parts if p.strip())
+
+
 def _extract_pdf_text_raw(content: bytes) -> str:
     """Extract text from a PDF's text layer (tables + prose) via pdfplumber.
     May return an empty/short string for scanned or image-based PDFs — callers
@@ -1202,17 +1226,7 @@ def _extract_pdf_text_raw(content: bytes) -> str:
         page_count = len(pdf.pages)
         print(f"[DEBUG] PDF has {page_count} pages")
         for i, page in enumerate(pdf.pages):
-            # Extract tables first, then remaining text — preserves column structure
-            page_text = ""
-            tables = page.extract_tables()
-            if tables:
-                for table in tables:
-                    for row in table:
-                        page_text += " | ".join(cell or "" for cell in row) + "\n"
-                    page_text += "\n"
-            # extract_text with layout=True preserves column order better than default
-            prose = page.extract_text(layout=False) or ""
-            page_text += prose
+            page_text = _page_text_with_tables(page)
             text += page_text + "\n"
             if i < 3:
                 print(f"[DEBUG] Page {i+1} extracted {len(page_text)} characters")
@@ -2581,6 +2595,102 @@ def parse_json_response(result: str):
     return json.loads(result.strip())
 
 
+# The syllabus passes are the one place accuracy matters more than cost (a few calls per student
+# per semester), so the model is configurable without a code change.
+# Measured on a synthetic test set (tables, week-number schedules, long syllabi, dense schedules):
+# gpt-4.1-mini found 97% of deadlines vs 94% for gpt-4o-mini, at about a cent per syllabus.
+SYLLABUS_MODEL = os.getenv("SYLLABUS_MODEL", "gpt-4.1-mini")
+SYLLABUS_FALLBACK_MODEL = "gpt-4o-mini"
+
+
+async def _syllabus_completion(**kwargs):
+    """chat.completions.create with SYLLABUS_MODEL, retrying on the long-standing fallback model
+    if the configured one isn't available to this API key."""
+    try:
+        return await client.chat.completions.create(model=SYLLABUS_MODEL, **kwargs)
+    except Exception as e:
+        status = getattr(e, "status_code", None)
+        if SYLLABUS_MODEL != SYLLABUS_FALLBACK_MODEL and (status == 404 or "model" in str(e).lower() and status == 400):
+            logger.warning(f"[Syllabus] {SYLLABUS_MODEL} unavailable ({status}); falling back to {SYLLABUS_FALLBACK_MODEL}")
+            return await client.chat.completions.create(model=SYLLABUS_FALLBACK_MODEL, **kwargs)
+        raise
+# gpt-4o-mini reads ~128k tokens; this keeps a schedule at the end of a long syllabus in view
+# (the old 25k-char cut dropped it entirely). Longer documents are read in overlapping chunks.
+SYLLABUS_DEADLINE_CHARS = 100_000
+SYLLABUS_CHUNK_OVERLAP = 4_000
+
+
+def _guess_term_dates(today: date | None = None) -> tuple[str, str, str]:
+    """Fallback term when the syllabus doesn't say: the semester in progress or about to start."""
+    today = today or date.today()
+    y = today.year
+    if today.month >= 11:
+        return f"{y + 1}-01-12", f"{y + 1}-05-08", f"Spring {y + 1}"
+    if today.month <= 5:
+        return f"{y}-01-12", f"{y}-05-08", f"Spring {y}"
+    if today.month <= 7:
+        return f"{y}-05-15", f"{y}-08-10", f"Summer {y}"
+    return f"{y}-08-24", f"{y}-12-15", f"Fall {y}"
+
+
+def _iso_date(value) -> date | None:
+    try:
+        return datetime.strptime(str(value or "").strip()[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _term_breaks(metadata: dict) -> list[tuple[date, date]]:
+    out = []
+    for b in (metadata or {}).get("breaks") or []:
+        if isinstance(b, dict):
+            s0, e0 = _iso_date(b.get("start")), _iso_date(b.get("end") or b.get("start"))
+            if s0 and e0 and e0 >= s0 and (e0 - s0).days <= 21:
+                out.append((s0, e0))
+    return out
+
+
+def _in_break(d: date, breaks: list[tuple[date, date]]) -> bool:
+    return any(s0 <= d <= e0 for s0, e0 in breaks)
+
+
+_WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+             "mon": 0, "tue": 1, "tues": 1, "wed": 2, "thu": 3, "thur": 3, "thurs": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def _date_for_week(week: int, weekday: str, start: date, breaks: list[tuple[date, date]]) -> date | None:
+    """'Week 5, Thursday' -> a date. Week 1 is the week the term starts in; a week that's mostly a
+    break (3+ weekdays off, e.g. spring break) isn't counted. Done in code because models get this
+    calendar arithmetic wrong (measured: every date off on a Week-N schedule)."""
+    wd = _WEEKDAYS.get((weekday or "").strip().lower())
+    if wd is None or not isinstance(week, int) or week < 1 or week > 30:
+        return None
+    monday = start - timedelta(days=start.weekday())
+    n = 0
+    for _ in range(60):
+        days_off = sum(1 for k in range(5) if _in_break(monday + timedelta(days=k), breaks))
+        if days_off < 3:
+            n += 1
+            if n == week:
+                return monday + timedelta(days=wd)
+        monday += timedelta(days=7)
+    return None
+
+
+def _normalize_deadline_fields(d: dict) -> None:
+    t = (d.get("time") or "").strip()
+    if t:
+        m = re.match(r"^\s*(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?\s*$", t, re.I)
+        if m:
+            d["time"] = f"{int(m.group(1))}:{m.group(2) or '00'} {m.group(3).upper()}M"
+        elif re.match(r"^\d{1,2}:\d{2}$", t):
+            d["time"] = format_time_12h(t)
+        else:
+            d["time"] = t
+    else:
+        d["time"] = None
+
+
 async def extract_course_metadata(text: str):
     """PASS 1: Extract course metadata from syllabus."""
     print("[DEBUG] PASS 1: Extracting course metadata...")
@@ -2594,6 +2704,7 @@ Return ONLY valid JSON with no additional text:
     "start_date": "First day of class in YYYY-MM-DD format (infer from semester if not explicit)",
     "end_date": "Last day of class/finals in YYYY-MM-DD format (infer from semester if not explicit)",
     "holidays": ["List of break dates or holidays mentioned"],
+    "breaks": [{"name": "e.g. 'Spring Break'", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD (same as start for a single day off)"}],
     "instructor": "Professor name if mentioned",
     "course_info": {
         "instructor": {
@@ -2641,14 +2752,14 @@ IMPORTANT: For any field where information is not found in the syllabus, use nul
     metadata_text = text if len(text) <= 60000 else text[:60000]
 
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = await _syllabus_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Extract metadata from this syllabus:\n\n{metadata_text}"}
             ],
             temperature=0.1,
-            max_tokens=2000
+            max_tokens=2000,
+            response_format={"type": "json_object"},
         )
 
         result = response.choices[0].message.content
@@ -2681,14 +2792,11 @@ async def extract_deadlines_with_context(text: str, metadata: dict, naming_style
     """
     print(f"[DEBUG] PASS 2: Extracting deadlines with context (naming_style={naming_style})...")
 
-    max_chars = 25000
-    if len(text) > max_chars:
-        text = text[:max_chars]
-        print(f"[DEBUG] Truncated text to {max_chars} characters")
-
-    start_date = metadata.get("start_date", "2026-01-12")
-    end_date = metadata.get("end_date", "2026-05-08")
-    semester = metadata.get("semester", "Spring 2026")
+    g_start, g_end, g_sem = _guess_term_dates()
+    start_date = metadata.get("start_date") if _iso_date(metadata.get("start_date")) else g_start
+    end_date = metadata.get("end_date") if _iso_date(metadata.get("end_date")) else g_end
+    semester = metadata.get("semester") if metadata.get("semester") not in (None, "", "Unknown") else g_sem
+    breaks = _term_breaks(metadata)
 
     if naming_style == "descriptive":
         title_instruction = (
@@ -2725,7 +2833,7 @@ EXTRACT THESE TYPES OF DEADLINES (be thorough - extract ALL you find):
 4. HOMEWORK - HW assignments with due dates (look for "HW 1 DUE", "Homework due", etc.)
 5. PRESENTATIONS - Pitches, presentations with specific dates (look for "Pitch 1", "Mini Pitch", "Presentation")
 6. RECURRING ASSESSMENTS - Weekly quizzes, homework, reading checks (mark as recurring)
-7. IMPORTANT ADMIN DATES - Add/drop deadline, makeup day, last day of class, final assignment deadline
+7. IMPORTANT ADMIN DATES - Add/drop or withdrawal deadline, makeup day, final assignment deadline
 
 IMPORTANT - LOOK FOR THESE SECTIONS:
 - "IMPORTANT DAYS" or "IMPORTANT DATES" sections - these list key deadlines
@@ -2748,6 +2856,15 @@ DO NOT EXTRACT:
 - Reading assignments without assessments
 - Topic lists without deliverables
 - Spring break, holidays (unless they're makeup days)
+- The first or last day of class (those aren't deadlines)
+
+EVERY ROW COUNTS: in schedule tables, create one entry for every row that has a quiz, test, exam,
+homework, paper, project, lab, presentation or other deliverable. Do not skip or summarize rows.
+
+DATE AS WRITTEN: for every item, copy into "date_as_written" exactly how the syllabus states its date,
+including the week number and the day/column heading when the schedule is organized by week
+(e.g. "Week 5, Thursday", "Jan 30", "01/30/2027", "Tuesday of week 7"). For week-number schedules also
+fill "week" (number) and "weekday"; the calendar date is calculated from those.
 
 HANDLING RECURRING ITEMS — CRITICAL:
 If you see patterns like "Quiz every Monday", "Weekly homework due Fridays", "Homework due every week":
@@ -2763,7 +2880,7 @@ BAD — do NOT do this (generates massive duplicates):
 GOOD — do this instead:
 {{"date": "2026-09-01", "type": "Homework", "title": "Weekly Homework", "recurring": true, "frequency": "weekly", "day_of_week": "Monday", "time": "11:59pm"}}
 
-Return ONLY a valid JSON array. Each item must have:
+Return ONLY a JSON object of the form {{"deadlines": [...]}}. Each item must have:
 {{
     "date": "YYYY-MM-DD (first occurrence for recurring, or specific date)",
     "type": "Exam|Assignment|Project|Quiz|Homework|Presentation|Admin",
@@ -2772,36 +2889,79 @@ Return ONLY a valid JSON array. Each item must have:
     "time": "Due time if mentioned (e.g., '11:59pm', '7:00 AM'), or null",
     "recurring": true/false (true if it repeats weekly),
     "frequency": "weekly" or null,
-    "day_of_week": "Monday|Tuesday|...|Sunday" or null
+    "day_of_week": "Monday|Tuesday|...|Sunday" or null,
+    "date_as_written": "The item's date exactly as the syllabus writes it",
+    "week": week number if the syllabus places the item by week number, else null,
+    "weekday": "Monday|...|Sunday" if the syllabus places the item by week number, else null
 }}
 
 {examples_block}
 
-Return [] if no deadlines found."""
+Return {{"deadlines": []}} if no deadlines found."""
 
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+    user_prefix = ("Extract ALL deadlines, quizzes, tests, exams, homework due dates, presentations, and important dates "
+                   "from this syllabus. Pay special attention to 'IMPORTANT DAYS' sections, schedule tables, and any dates "
+                   "with Quiz/Test/Exam/HW/Pitch/Presentation labels:\n\n")
+
+    # Long syllabi used to be cut at 25k characters, which dropped the schedule (usually at the end).
+    if len(text) <= SYLLABUS_DEADLINE_CHARS:
+        chunks = [text]
+    else:
+        step = SYLLABUS_DEADLINE_CHARS - SYLLABUS_CHUNK_OVERLAP
+        chunks = [text[i:i + SYLLABUS_DEADLINE_CHARS] for i in range(0, len(text), step)][:4]
+        print(f"[DEBUG] Long syllabus ({len(text)} chars): reading in {len(chunks)} chunks")
+
+    async def extract_chunk(chunk: str) -> list:
+        response = await _syllabus_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract ALL deadlines, quizzes, tests, exams, homework due dates, presentations, and important dates from this syllabus. Pay special attention to 'IMPORTANT DAYS' sections, schedule tables, and any dates with Quiz/Test/Exam/HW/Pitch/Presentation labels:\n\n{text}"}
+                {"role": "user", "content": user_prefix + chunk}
             ],
             temperature=0.1,
-            max_tokens=6000
+            max_tokens=12000,
+            # JSON mode: the reply always parses (a long list used to come back as text that
+            # didn't, which silently produced zero deadlines)
+            response_format={"type": "json_object"},
         )
-
         result = response.choices[0].message.content
         print(f"[DEBUG] Deadlines response (first 1000 chars): {result[:1000]}...")
+        parsed = parse_json_response(result)
+        if isinstance(parsed, dict):
+            parsed = parsed.get("deadlines") or next((v for v in parsed.values() if isinstance(v, list)), [])
+        return [x for x in parsed if isinstance(x, dict)] if isinstance(parsed, list) else []
 
-        deadlines = parse_json_response(result)
+    try:
+        deadlines = [d for part in await asyncio.gather(*[extract_chunk(c) for c in chunks]) for d in part]
         print(f"[DEBUG] Parsed {len(deadlines)} deadlines before validation")
+
+        # Week-number items get their calendar date here, from the term start and breaks: models
+        # get "Week 7, Thursday" arithmetic wrong, so a date written only as a week is computed.
+        term_start = _iso_date(start_date)
+        for d in deadlines:
+            written = str(d.get("date_as_written") or "")
+            by_week = bool(re.search(r"\bweek\s*\d+", written, re.I)) and not re.search(r"\d{1,2}[/-]\d{1,2}|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d", written, re.I)
+            if term_start and (by_week or (not _iso_date(d.get("date")) and d.get("week"))):
+                wk = d.get("week")
+                if not wk:
+                    m = re.search(r"\bweek\s*(\d+)", written, re.I)
+                    wk = m.group(1) if m else None
+                wday = d.get("weekday") or next((w for w in _WEEKDAYS if re.search(rf"\b{w}\b", written, re.I)), "") or d.get("day_of_week") or ""
+                try:
+                    resolved = _date_for_week(int(wk), wday, term_start, breaks) if wk else None
+                except (TypeError, ValueError):
+                    resolved = None
+                if resolved:
+                    d["date"] = resolved.isoformat()
+            _normalize_deadline_fields(d)
+            if d.get("date") and not _iso_date(d.get("date")):
+                d["date"] = None  # unparseable dates would break the calendar; validation drops them
 
         # Validate and filter deadlines
         validated = validate_deadlines(deadlines)
         print(f"[DEBUG] {len(validated)} deadlines after validation")
 
         # Expand recurring deadlines into individual instances
-        expanded = expand_recurring_deadlines(validated, start_date, end_date)
+        expanded = expand_recurring_deadlines(validated, start_date, end_date, breaks)
         print(f"[DEBUG] {len(expanded)} deadlines after recurring expansion")
 
         # Final dedup pass after expansion (catches duplicates across multiple recurring entries)
@@ -2826,8 +2986,9 @@ Return [] if no deadlines found."""
         raise
 
 
-def expand_recurring_deadlines(deadlines: list, start_date_str: str, end_date_str: str) -> list:
-    """Expand recurring deadlines into individual instances."""
+def expand_recurring_deadlines(deadlines: list, start_date_str: str, end_date_str: str, breaks: list | None = None) -> list:
+    """Expand recurring deadlines into individual instances, skipping break days."""
+    breaks = breaks or []
     DAY_MAP = {
         "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
         "friday": 4, "saturday": 5, "sunday": 6
@@ -2854,14 +3015,21 @@ def expand_recurring_deadlines(deadlines: list, start_date_str: str, end_date_st
             current = start
             instance_num = 1
 
-            # Find first occurrence of the target day
-            while current.weekday() != target_day:
-                current += timedelta(days=1)
+            first = _iso_date(d.get("date"))
+            if first and start <= first <= end and first.weekday() == target_day:
+                current = first  # the syllabus said when it starts
+            else:
+                # Find first occurrence of the target day
+                while current.weekday() != target_day:
+                    current += timedelta(days=1)
 
-            # Generate all instances (skip first week usually just intro)
-            current += timedelta(days=7)
+                # Generate all instances (skip first week usually just intro)
+                current += timedelta(days=7)
 
             while current <= end:
+                if _in_break(current, breaks):
+                    current += timedelta(days=7)
+                    continue
                 instance = {
                     "date": current.strftime("%Y-%m-%d"),
                     "time": d.get("time"),
@@ -2893,15 +3061,11 @@ def validate_deadlines(deadlines: list) -> list:
     validated = []
     seen_titles = set()
 
-    # Generic titles to reject (but allow if marked as recurring with specific day)
-    generic_patterns = [
-        "class meeting",
-        "office hours",
-        "lecture",
-    ]
-
-    # Week patterns to reject
-    week_patterns = ["week 1", "week 2", "week 3", "week 4", "week 5"]
+    # Plain class sessions / office hours / "Week N" rows aren't deadlines. Only the bare labels are
+    # dropped: "Lecture Quiz 2" or "Week 3 Reflection" are real deliverables (the old substring
+    # match deleted them).
+    deliverable = re.compile(r"\b(quiz|exam|test|midterm|final|due|homework|hw|assignment|paper|essay|report|project|presentation|lab|reflection|problem set|pset|reading check|discussion|post)\b")
+    generic_re = re.compile(r"^(class( meeting| session)?|office hours?|lectures?|no class(es)?|week \d+|(spring|fall|winter|thanksgiving|mid-?term|easter) break|holiday|.*\bholiday\b|.*\b(no classes|university closed|campus closed)\b)")
 
     for d in deadlines:
         title = (d.get("title") or "").lower().strip()
@@ -2912,14 +3076,9 @@ def validate_deadlines(deadlines: list) -> list:
             print(f"[DEBUG] Skipping deadline with no date: {title}")
             continue
 
-        # Skip class meetings, office hours, lectures
-        if any(pattern in title for pattern in generic_patterns):
-            print(f"[DEBUG] Skipping generic deadline: {title}")
-            continue
-
-        # Skip plain "Week X" entries
-        if any(pattern in title for pattern in week_patterns):
-            print(f"[DEBUG] Skipping week entry: {title}")
+        # Skip class meetings, office hours, lectures and bare "Week X" rows
+        if generic_re.match(title) and not deliverable.search(title):
+            print(f"[DEBUG] Skipping non-deadline: {title}")
             continue
 
         # Skip duplicates (same title + same date)
