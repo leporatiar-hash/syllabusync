@@ -95,6 +95,8 @@ export default function CalendarPage() {
   const [bulkSaving, setBulkSaving] = useState(false)
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [addingTask, setAddingTask] = useState(false)
+  // Month-view days the user expanded past the per-cell cap ("+N more")
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
 
   // Infinite scroll: selected full date and month range
   const [selectedFullDate, setSelectedFullDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -1113,6 +1115,7 @@ export default function CalendarPage() {
                       const isToday = todayStr === dateStr
                       const isWeekend = [0, 6].includes(new Date(dateStr).getDay())
                       const desktopMax = 3
+                      const isExpanded = expandedDays.has(dateStr)
 
                       return (
                         <div
@@ -1141,7 +1144,7 @@ export default function CalendarPage() {
                             {day}
                           </div>
                           <div className="mt-1 space-y-1">
-                            {dayDeadlines.slice(0, desktopMax).map((deadline) => {
+                            {dayDeadlines.slice(0, isExpanded ? dayDeadlines.length : desktopMax).map((deadline) => {
                               const courseColor = courseColors[deadline.course_id]
                               return (
                                 <div
@@ -1213,11 +1216,16 @@ export default function CalendarPage() {
                                 type="button"
                                 onClick={(event) => {
                                   event.stopPropagation()
-                                  setSelectedDeadline(dayDeadlines[0])
+                                  setExpandedDays((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(dateStr)) next.delete(dateStr)
+                                    else next.add(dateStr)
+                                    return next
+                                  })
                                 }}
                                 className="text-[10px] font-medium text-slate-500 hover:text-[#5B8DEF] transition-colors"
                               >
-                                +{dayDeadlines.length - desktopMax}
+                                {isExpanded ? 'Show less' : `+${dayDeadlines.length - desktopMax} more`}
                               </button>
                             )}
                           </div>
