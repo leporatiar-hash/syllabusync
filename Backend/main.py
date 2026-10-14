@@ -40,6 +40,8 @@ import logging
 import stripe as stripe_lib
 import schools
 import hmac
+import hashlib
+import html
 import resend
 import httpx
 from icalendar import Calendar as ICalCalendar
@@ -208,6 +210,9 @@ async def timeout_middleware(request: Request, call_next):
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
+# Who our emails come from. onboarding@resend.dev is Resend's test sender and only delivers to the
+# Resend account owner, so production needs a verified domain: EMAIL_FROM="ClassMate <noreply@tryclassmate.com>".
+EMAIL_FROM = os.getenv("EMAIL_FROM", "onboarding@resend.dev")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
 
@@ -799,6 +804,25 @@ class SurveyResponse(Base):
     answers = Column(JSON, nullable=True)
     dismissed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class InboundEmail(Base):
+    """An email sent to a ClassMate address (hello@ etc.), received through Resend's inbound webhook.
+    Kept so support can be read and answered from the API (and drafted by an assistant), not only Gmail."""
+    __tablename__ = "inbound_emails"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    resend_id = Column(String, unique=True, nullable=False)  # Resend's email_id; makes webhook retries no-ops
+    message_id = Column(String, nullable=True)  # RFC Message-ID, for threading replies
+    from_addr = Column(String, nullable=False)
+    to_addr = Column(String, nullable=True)
+    subject = Column(String, nullable=True)
+    text = Column(Text, nullable=True)
+    user_id = Column(String, nullable=True, index=True)  # sender's account, when the address matches one
+    status = Column(String, default="new", index=True)  # new | replied | archived
+    reply_text = Column(Text, nullable=True)
+    replied_at = Column(DateTime, nullable=True)
+    received_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ValuePromptResponse(Base):
@@ -1674,8 +1698,9 @@ def _send_subscription_confirmation(profile, plan: str, amount_cents: int | None
     try:
         resend.api_key = RESEND_API_KEY
         resend.Emails.send({
-            "from": "onboarding@resend.dev",
+            "from": EMAIL_FROM,
             "to": [profile.email],
+            "reply_to": SUPPORT_EMAIL,
             "subject": f"You're on {name}",
             "html": f"""
             <p>Thanks for supporting ClassMate. Here are the details, in plain English:</p>
@@ -3393,7 +3418,7 @@ def auth_forgot_password(request: Request, payload: AuthForgotPasswordRequest, d
         try:
             resend.api_key = RESEND_API_KEY
             resend.Emails.send({
-                "from": "onboarding@resend.dev",
+                "from": EMAIL_FROM,
                 "to": [user.email],
                 "subject": "Reset your ClassMate password",
                 "html": f"""
@@ -6301,7 +6326,7 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
                 resend.api_key = RESEND_API_KEY
                 type_label = {"bug": "Bug Report", "feature": "Feature Request", "general": "General Feedback"}.get(payload.feedback_type, payload.feedback_type)
                 resend.Emails.send({
-                    "from": "onboarding@resend.dev",
+                    "from": EMAIL_FROM,
                     "to": [FEEDBACK_EMAIL],
                     "subject": f"[ClassMate Feedback] {type_label} from {current_user.email}",
                     "html": (
@@ -6982,6 +7007,213 @@ def survey_results(survey_key: str = CURRENT_SURVEY, current_user: User = Depend
             "dismissed": sum(1 for r in rows if r.dismissed and not r.answers),
             "responses": [{"email": r.user_email, "at": r.created_at.isoformat() if r.created_at else None, "answers": r.answers} for r in answered],
         }
+    finally:
+        db.close()
+
+
+# ── Support inbox (Resend inbound) ─────────────────────────────────────────
+# Mail to hello@tryclassmate.com arrives at Resend (MX records), which POSTs an `email.received`
+# webhook here. We save it, attach who the sender is (plan, LMS health), and forward a copy to the
+# founder's own inbox (SUPPORT_FORWARD_TO). Replies can be sent from the API as hello@, which is what
+# lets an assistant draft and send answers later. Nothing is ever auto-sent to a student.
+
+RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET", "")
+WEBHOOK_TOLERANCE_SECONDS = 5 * 60
+
+
+def _verify_resend_signature(body: bytes, headers) -> bool:
+    """Resend signs webhooks with Svix: HMAC-SHA256 of "<id>.<timestamp>.<body>" using the
+    base64 key after "whsec_"; the svix-signature header holds space-separated "v1,<sig>" values."""
+    if not RESEND_WEBHOOK_SECRET:
+        return False
+    msg_id, ts, sigs = headers.get("svix-id"), headers.get("svix-timestamp"), headers.get("svix-signature")
+    if not (msg_id and ts and sigs):
+        return False
+    try:
+        if abs(time.time() - int(ts)) > WEBHOOK_TOLERANCE_SECONDS:
+            return False
+        key = base64.b64decode(RESEND_WEBHOOK_SECRET.split("_", 1)[-1])
+    except (ValueError, TypeError):
+        return False
+    expected = base64.b64encode(hmac.new(key, f"{msg_id}.{ts}.".encode() + body, hashlib.sha256).digest()).decode()
+    return any(hmac.compare_digest(expected, s.split(",", 1)[-1]) for s in sigs.split())
+
+
+def _bare_address(value) -> str:
+    """'Jane <jane@x.edu>' -> 'jane@x.edu'."""
+    value = (value[0] if isinstance(value, list) and value else value) or ""
+    m = re.search(r"<([^>]+)>", value)
+    return (m.group(1) if m else value).strip().lower()
+
+
+def _fetch_received_email(email_id: str) -> dict:
+    """The webhook only carries metadata; the body comes from Resend's received-emails API."""
+    try:
+        r = httpx.get(f"https://api.resend.com/emails/receiving/{email_id}",
+                      headers={"Authorization": f"Bearer {RESEND_API_KEY}"}, timeout=15.0)
+        if r.status_code == 200:
+            return r.json()
+        logger.warning(f"[Inbox] Fetching {email_id} returned {r.status_code}")
+    except httpx.HTTPError as e:
+        logger.warning(f"[Inbox] Fetching {email_id} failed: {e}")
+    return {}
+
+
+def _forward_to_founder(row: "InboundEmail") -> None:
+    to = os.getenv("SUPPORT_FORWARD_TO", "")
+    if not (to and RESEND_API_KEY):
+        return
+    try:
+        resend.api_key = RESEND_API_KEY
+        resend.Emails.send({
+            "from": EMAIL_FROM,
+            "to": [to],
+            "reply_to": row.from_addr,
+            "subject": f"[ClassMate support] {row.subject or '(no subject)'}",
+            "html": (
+                f"<p><b>From:</b> {html.escape(row.from_addr)} &nbsp; <b>To:</b> {html.escape(row.to_addr or '')}</p>"
+                f"<pre style='white-space:pre-wrap;font-family:inherit'>{html.escape(row.text or '')}</pre>"
+                f"<hr><p style='color:#999;font-size:12px'>Inbox id {row.id}</p>"
+            ),
+        })
+    except Exception as e:
+        logger.warning(f"[Inbox] Forward failed for {row.id}: {e}")
+
+
+@app.post("/webhooks/resend", tags=["support"], summary="Resend inbound-email webhook", include_in_schema=False)
+async def resend_webhook(request: Request):
+    body = await request.body()
+    if not _verify_resend_signature(body, request.headers):
+        raise HTTPException(status_code=401, detail="Bad signature")
+    event = json.loads(body or b"{}")
+    if event.get("type") != "email.received":
+        return {"ignored": event.get("type")}
+    data = event.get("data") or {}
+    email_id = data.get("email_id") or data.get("id")
+    if not email_id:
+        return {"ignored": "no email id"}
+    sender = _bare_address(data.get("from"))
+    if sender and sender == _bare_address(EMAIL_FROM):
+        return {"ignored": "own sender"}  # never loop on our own mail
+
+    db = SessionLocal()
+    try:
+        if db.query(InboundEmail.id).filter(InboundEmail.resend_id == email_id).first():
+            return {"duplicate": True}
+        full = _fetch_received_email(email_id)
+        text = full.get("text") or ""
+        if not text and full.get("html"):
+            text = re.sub(r"<[^>]+>", " ", full["html"])
+        to = data.get("to") or full.get("to")
+        profile = db.query(UserProfile).filter(func.lower(UserProfile.email) == sender).first() if sender else None
+        row = InboundEmail(
+            resend_id=email_id,
+            message_id=data.get("message_id") or full.get("message_id"),
+            from_addr=sender or "unknown",
+            to_addr=", ".join(to) if isinstance(to, list) else (to or None),
+            subject=(data.get("subject") or full.get("subject") or "")[:500],
+            text=text[:50_000],
+            user_id=profile.user_id if profile else None,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        _forward_to_founder(row)
+        return {"saved": row.id}
+    finally:
+        db.close()
+
+
+def _sender_context(db, user_id: str | None) -> dict | None:
+    """What support needs to answer well: plan, how they pay, and whether their LMS link works."""
+    if not user_id:
+        return None
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if not profile:
+        return None
+    lms = db.query(LMSConnection).filter(LMSConnection.user_id == user_id).all()
+    return {
+        "name": profile.full_name,
+        "school": profile.school_name,
+        "tier": _effective_tier(profile),
+        "billing_source": _billing_source(profile),
+        "joined": profile.created_at.isoformat() if profile.created_at else None,
+        "lms": [{"provider": c.provider, "status": _lms_status(c), "last_synced": c.last_synced.isoformat() if c.last_synced else None} for c in lms],
+    }
+
+
+def _require_founder(current_user: User) -> None:
+    if (current_user.email or "").lower() not in ADMIN_EMAILS:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+
+@app.get("/admin/inbox", tags=["admin"], summary="Support emails, newest first, with who sent them (founder only)")
+def admin_inbox(status: str = "new", limit: int = 50, current_user: User = Depends(get_current_user)):
+    _require_founder(current_user)
+    db = SessionLocal()
+    try:
+        q = db.query(InboundEmail)
+        if status != "all":
+            q = q.filter(InboundEmail.status == status)
+        rows = q.order_by(InboundEmail.received_at.desc()).limit(min(limit, 200)).all()
+        return {"emails": [{
+            "id": r.id, "from": r.from_addr, "to": r.to_addr, "subject": r.subject, "text": r.text,
+            "status": r.status, "received_at": r.received_at.isoformat() if r.received_at else None,
+            "reply_text": r.reply_text, "account": _sender_context(db, r.user_id),
+        } for r in rows]}
+    finally:
+        db.close()
+
+
+class InboxReply(BaseModel):
+    text: str = Field(..., min_length=1, max_length=20_000)
+
+
+@app.post("/admin/inbox/{email_id}/reply", tags=["admin"], summary="Reply to a support email as hello@ (founder only)")
+def admin_inbox_reply(email_id: str, payload: InboxReply, current_user: User = Depends(get_current_user)):
+    _require_founder(current_user)
+    if not RESEND_API_KEY:
+        raise HTTPException(status_code=503, detail="Email isn't configured")
+    db = SessionLocal()
+    try:
+        row = db.query(InboundEmail).filter(InboundEmail.id == email_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Not found")
+        subject = row.subject or ""
+        headers = {"In-Reply-To": row.message_id, "References": row.message_id} if row.message_id else {}
+        try:
+            resend.api_key = RESEND_API_KEY
+            resend.Emails.send({
+                "from": f"ClassMate <{SUPPORT_EMAIL}>",
+                "to": [row.from_addr],
+                "subject": subject if subject.lower().startswith("re:") else f"Re: {subject}".strip(),
+                "text": payload.text,
+                **({"headers": headers} if headers else {}),
+            })
+        except Exception as e:
+            logger.error(f"[Inbox] Reply to {row.id} failed: {e}")
+            raise HTTPException(status_code=502, detail="Sending failed")
+        row.reply_text, row.replied_at, row.status = payload.text, datetime.utcnow(), "replied"
+        db.commit()
+        return {"replied": True}
+    finally:
+        db.close()
+
+
+class InboxStatus(BaseModel):
+    status: str = Field(..., pattern="^(new|replied|archived)$")
+
+
+@app.post("/admin/inbox/{email_id}/status", tags=["admin"], summary="Mark a support email new/replied/archived (founder only)")
+def admin_inbox_status(email_id: str, payload: InboxStatus, current_user: User = Depends(get_current_user)):
+    _require_founder(current_user)
+    db = SessionLocal()
+    try:
+        updated = db.query(InboundEmail).filter(InboundEmail.id == email_id).update({"status": payload.status})
+        db.commit()
+        if not updated:
+            raise HTTPException(status_code=404, detail="Not found")
+        return {"status": payload.status}
     finally:
         db.close()
 
