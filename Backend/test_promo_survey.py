@@ -100,11 +100,20 @@ def test_survey_flow():
     assert client.get("/me/survey", headers=h).json()["show"] is False, "brand-new signups aren't asked"
     _age(uid, 10)
     assert client.get("/me/survey", headers=h).json()["show"] is True
+    sent, orig = [], (main.RESEND_API_KEY, main.FEEDBACK_EMAIL, main.resend.Emails.send)
+    main.RESEND_API_KEY, main.FEEDBACK_EMAIL, main.resend.Emails.send = "re_test", "founder@example.com", lambda p: sent.append(p)
+    try:
+        r = client.post("/me/survey", json={"answers": {"disappointed": "very", "uses": ["Calendar", "Reminders"], "missing": "phone <reminders>", "call": "yes", "contact": "555-0100"}}, headers=h)
+        assert r.json() == {"saved": True}, r.text
+        assert len(sent) == 1 and sent[0]["to"] == ["founder@example.com"], sent
+        assert "Calendar, Reminders" in sent[0]["html"] and "phone &lt;reminders&gt;" in sent[0]["html"], sent[0]["html"]
+        assert client.get("/me/survey", headers=h).json()["show"] is False
+        # A later "dismiss" never erases an answer, and doesn't email again
+        client.post("/me/survey", json={"dismissed": True}, headers=h)
+        assert len(sent) == 1
+    finally:
+        main.RESEND_API_KEY, main.FEEDBACK_EMAIL, main.resend.Emails.send = orig
     r = client.post("/me/survey", json={"answers": {"disappointed": "very", "missing": "phone reminders", "call": "yes", "contact": "555-0100"}}, headers=h)
-    assert r.json() == {"saved": True}, r.text
-    assert client.get("/me/survey", headers=h).json()["show"] is False
-    # A later "dismiss" never erases an answer
-    client.post("/me/survey", json={"dismissed": True}, headers=h)
 
     uid2, h2 = _user()
     _age(uid2, 10)

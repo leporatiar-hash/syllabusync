@@ -41,6 +41,7 @@ import logging
 import stripe as stripe_lib
 import schools
 import hmac
+import html
 import resend
 import httpx
 from icalendar import Calendar as ICalCalendar
@@ -7084,15 +7085,41 @@ def submit_survey(request: Request, payload: SurveySubmit, current_user: User = 
         if row is None:
             row = SurveyResponse(user_id=current_user.id, survey_key=payload.survey_key, user_email=current_user.email)
             db.add(row)
+        first_answer = payload.answers is not None and not row.answers
         if payload.answers is not None:
             row.answers = payload.answers
             row.dismissed = False
         elif payload.dismissed and not row.answers:
             row.dismissed = True
         db.commit()
+        if first_answer:
+            _email_survey_response(current_user.email, payload.survey_key, payload.answers)
         return {"saved": True}
     finally:
         db.close()
+
+
+def _email_survey_response(student_email: str | None, survey_key: str, answers: dict):
+    """Email each new survey response to the founder (FEEDBACK_EMAIL), like the feedback button does."""
+    if not (RESEND_API_KEY and FEEDBACK_EMAIL):
+        return
+    rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0;color:#64748b;vertical-align:top'>{html.escape(str(k))}</td>"
+        f"<td style='padding:4px 0'>{html.escape(', '.join(map(str, v)) if isinstance(v, list) else str(v))}</td></tr>"
+        for k, v in (answers or {}).items()
+    )
+    try:
+        resend.api_key = RESEND_API_KEY
+        resend.Emails.send({
+            "from": EMAIL_FROM,
+            "to": [FEEDBACK_EMAIL],
+            "subject": f"[ClassMate survey] New response from {student_email or 'a student'}",
+            "html": f"<p>A student answered the {html.escape(survey_key)} survey.</p><table>{rows}</table>"
+                    f"<p style='color:#999;font-size:12px'>All responses: GET /admin/survey-responses</p>",
+            **({"reply_to": student_email} if student_email else {}),
+        })
+    except Exception as e:
+        logger.warning(f"[Survey] Email notification failed: {e}")
 
 
 @app.get("/admin/survey-responses", tags=["admin"], summary="All answers to a feedback survey (founder only)")
