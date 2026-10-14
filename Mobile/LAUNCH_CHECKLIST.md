@@ -22,16 +22,16 @@ Everything below needs the Apple Developer account unless marked "(now)".
 
 ## 2. In-app purchase products (App Store Connect → Subscriptions)
 
-Prices decided 2026-10-04 (the web's Stripe prices, still $5/$40, need raising to match before launch):
+Prices decided 2026-10-13, the same as the web (`Frontend/lib/pricing.ts`):
 
 | Product ID | Type | Price | Intro offer |
 |---|---|---|---|
-| `classmate_pro_monthly` | Auto-renewable, group "ClassMate Pro" | $9.99 | none |
-| `classmate_pro_yearly` | Auto-renewable, same group | $59.99 | 2-week free trial |
+| `classmate_pro_monthly` | Auto-renewable, group "ClassMate Pro", 1 month | $4.99 | none |
+| `classmate_pro_semester` | Auto-renewable, same group, **6 months** ("Semester Pass") | $19.99 | 2-week free trial |
 
 - [ ] Both products need a display name, description, and review screenshot (the paywall).
-- [ ] The founding-member $15 one-time stays **web-only** for v1.
-- [ ] Introductory offer on yearly: 2-week free trial (the paywall reads eligibility from RevenueCat).
+- [ ] Founding member is retired (existing grants are still honored); nothing one-time in the app.
+- [ ] Introductory offer on the Semester Pass: 2-week free trial (the paywall reads eligibility from RevenueCat).
 
 ## 3. RevenueCat
 
@@ -39,7 +39,8 @@ Prices decided 2026-10-04 (the web's Stripe prices, still $5/$40, need raising t
 - [ ] Upload the **In-App Purchase key (.p8)** from App Store Connect → Users and Access → Integrations.
 - [ ] Import both products. Create the entitlement **`pro`** (must match `PRO_ENTITLEMENT` in `src/lib/config.ts`)
       and attach both products to it.
-- [ ] Create the offering `default` with monthly and yearly packages, and design the paywall in the Paywalls
+- [ ] Create the offering `default` with a monthly package and a **six-month** package (the paywall looks up
+      `PACKAGE_TYPE.SIX_MONTH`), and design the paywall in the Paywalls
       editor. Keep the auto-included Terms/Privacy links, because Apple requires them on the paywall.
 - [ ] Copy the **public iOS SDK key** (`appl_...`) into `eas.json` → each build profile's
       `env.EXPO_PUBLIC_REVENUECAT_IOS_KEY`. Until it's set, the app hides all upgrade UI.

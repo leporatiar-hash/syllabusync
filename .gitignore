@@ -32,3 +32,6 @@ next-env.d.ts
 .claude/
 syllabusync_code.zip
 .vercel
+
+# Daily health voicemails (may mention students)
+ops/health/

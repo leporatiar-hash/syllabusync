@@ -2,18 +2,18 @@ import type { Metadata } from 'next'
 import HomeGate from './HomeGate'
 
 export const metadata: Metadata = {
-  title: 'ClassMate — The AI that knows your entire semester',
-  description: "Upload your syllabus once. Ask anything — deadlines, policies, what's due this week.",
+  title: 'ClassMate: never get caught off guard by a due date',
+  description: "Every deadline from your LMS and syllabi in one calendar, with a heads-up when a professor moves one. Free for students.",
   openGraph: {
-    title: 'ClassMate — The AI that knows your entire semester',
-    description: "Upload your syllabus once. Ask anything — deadlines, policies, what's due this week.",
+    title: 'ClassMate: never get caught off guard by a due date',
+    description: "Every deadline from your LMS and syllabi in one calendar, with a heads-up when a professor moves one. Free for students.",
     siteName: 'ClassMate',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'ClassMate — The AI that knows your entire semester',
-    description: "Upload your syllabus once. Ask anything — deadlines, policies, what's due this week.",
+    title: 'ClassMate: never get caught off guard by a due date',
+    description: "Every deadline from your LMS and syllabi in one calendar, with a heads-up when a professor moves one. Free for students.",
   },
 }
 

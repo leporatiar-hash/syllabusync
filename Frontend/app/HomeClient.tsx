@@ -351,7 +351,7 @@ export default function HomeClient() {
           <div className="mb-8 flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
             <span className="text-sm text-slate-600">
               <span className="font-medium text-slate-800">ClassMate Pro is free for everyone through {promoEndLabel(promoUntil)}.</span>
-              {' '}Unlimited study tools and more AI chat, no card needed.
+              {' '}Due-date change alerts, early reminders and unlimited study tools, no card needed.
             </span>
           </div>
         ) : !isPro ? (

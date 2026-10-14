@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
-import { BookOpen, Check, GraduationCap, MessageCircle, Sparkles, X, type LucideIcon } from 'lucide-react-native';
+import { BellRing, CalendarClock, CalendarDays, Check, Sparkles, X, type LucideIcon } from 'lucide-react-native';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -17,21 +17,22 @@ import { purchasesConfigured, purchasesEnabled, restorePurchases } from '@/lib/p
 import type { Subscription } from '@/lib/types';
 
 /**
- * Pro unlocks AI only; reminders, calendar and LMS sync are free for everyone (decided 2026-10-04).
- * Numbers mirror Backend/main.py: FREE_AI_GENERATION_LIMIT=50/month, FREE_CHAT_MESSAGE_LIMIT=20/week,
- * PRO_CHAT_MESSAGE_LIMIT=50/week. Keep this copy in sync if those change: Apple rejects paywalls that oversell.
+ * Pro = "never caught off guard" (decided 2026-10-13). Free keeps LMS sync, the calendar and a reminder
+ * the day before each deadline. Pro adds change alerts, 3-day and exam-week heads-ups, the Sunday plan
+ * and unlimited study tools. Mirrors _build_user_reminders in Backend/main.py and FREE_AI_GENERATION_LIMIT;
+ * keep this copy in sync: Apple rejects paywalls that oversell.
  */
 const BENEFITS: { icon: LucideIcon; title: string; body: string; color: string; bg: string }[] = [
-  { icon: GraduationCap, title: 'Ace the next exam', body: 'Turn your notes and slides into flashcards and a practice quiz in seconds', color: '#5B8DEF', bg: '#E0EAFF' },
-  { icon: MessageCircle, title: 'A tutor that knows your classes', body: 'Ask about your syllabus, deadlines and notes. ChatGPT can’t see any of that.', color: '#A78BFA', bg: '#F3E8FF' },
-  { icon: BookOpen, title: 'Skip the 40-page reading', body: 'Get the key points in 2 minutes, right before class', color: '#38BDF8', bg: '#E0F2FE' },
+  { icon: BellRing, title: 'Know the moment a date moves', body: 'When a professor changes a due date or posts something new, you hear about it that night.', color: '#5B8DEF', bg: '#E0EAFF' },
+  { icon: CalendarClock, title: 'Heads-up before it’s urgent', body: '3 days before every assignment and a week before every exam, not just the night before.', color: '#A78BFA', bg: '#F3E8FF' },
+  { icon: CalendarDays, title: 'Your Sunday game plan', body: 'Every Sunday night: the week ahead, your busiest day and any exams.', color: '#38BDF8', bg: '#E0F2FE' },
 ];
 
 // The limits answer "what exactly do I get" in the small print; the tiles sell the outcome.
-const FREE_LINE = 'Pro: unlimited flashcards, quizzes & summaries, 50 AI chats a week. Reminders & LMS sync are always free.';
+const FREE_LINE = 'Also in Pro: unlimited flashcards, quizzes & summaries. Free always includes LMS sync, your calendar and a reminder the night before.';
 
 // Shown only when the store can't return products (Expo Go / before App Store Connect is set up).
-const FALLBACK = { annual: '$59.99', monthly: '$9.99', trialDays: 14 };
+const FALLBACK = { semester: '$19.99', monthly: '$4.99', trialDays: 14 };
 
 export type PaywallReason = 'onboarding' | 'limit' | 'upgrade' | 'home_banner';
 
@@ -40,7 +41,7 @@ const Ctx = createContext<PaywallCtx>({ openPaywall: async () => false });
 export const usePaywall = () => useContext(Ctx);
 
 const HEADLINES: Record<PaywallReason, string> = {
-  onboarding: 'Study smarter with Pro',
+  onboarding: 'Never get caught off guard',
   limit: 'Keep the momentum going',
   upgrade: 'ClassMate Pro',
   home_banner: 'ClassMate Pro',
@@ -89,9 +90,9 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
   const { refreshMe } = useAuth();
   const [state, setState] = useState<{ reason: PaywallReason; message?: string } | null>(null);
   const resolver = useRef<((v: boolean) => void) | null>(null);
-  const [packages, setPackages] = useState<{ annual?: PurchasesPackage; monthly?: PurchasesPackage }>({});
+  const [packages, setPackages] = useState<{ semester?: PurchasesPackage; monthly?: PurchasesPackage }>({});
   const [eligible, setEligible] = useState(true);
-  const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
+  const [plan, setPlan] = useState<'semester' | 'monthly'>('semester');
   const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
 
   // Load products once the paywall opens (cheap after the first call; RevenueCat caches offerings).
@@ -101,12 +102,13 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
       try {
         const offerings = await Purchases.getOfferings();
         const pkgs = offerings.current?.availablePackages ?? [];
-        const annual = pkgs.find((p) => p.packageType === PACKAGE_TYPE.ANNUAL);
+        // Semester Pass = a 6-month auto-renewing subscription in App Store Connect
+        const semester = pkgs.find((p) => p.packageType === PACKAGE_TYPE.SIX_MONTH);
         const monthly = pkgs.find((p) => p.packageType === PACKAGE_TYPE.MONTHLY);
-        setPackages({ annual, monthly });
-        if (annual) {
-          const res = await Purchases.checkTrialOrIntroductoryPriceEligibility([annual.product.identifier]);
-          setEligible(res[annual.product.identifier]?.status !== INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_INELIGIBLE);
+        setPackages({ semester, monthly });
+        if (semester) {
+          const res = await Purchases.checkTrialOrIntroductoryPriceEligibility([semester.product.identifier]);
+          setEligible(res[semester.product.identifier]?.status !== INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_INELIGIBLE);
         }
       } catch {}
     })();
@@ -123,7 +125,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
     // Only open where purchasing can work (or in dev, to preview the design).
     if (!purchasesEnabled && !__DEV__) return Promise.resolve(false);
     track('paywall_viewed', { reason });
-    setPlan('annual');
+    setPlan('semester');
     setState({ reason, message });
     return new Promise<boolean>((resolve) => (resolver.current = resolve));
   }, []);
@@ -141,7 +143,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
   };
 
   const buy = async () => {
-    const pkg = plan === 'annual' ? packages.annual : packages.monthly;
+    const pkg = plan === 'semester' ? packages.semester : packages.monthly;
     track('paywall_cta_clicked', { reason: state?.reason ?? null, plan });
     if (!pkg) {
       Alert.alert('Not available yet', 'Purchases will work once the App Store listing is live.');
@@ -150,7 +152,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
     setBusy('buy');
     try {
       await Purchases.purchasePackage(pkg);
-      track('subscription_purchased', { plan, trial: !!trialLabel(packages.annual, eligible) && plan === 'annual' });
+      track('subscription_purchased', { plan, trial: !!trialLabel(packages.semester, eligible) && plan === 'semester' });
       await waitForPro();
       await refreshMe();
       close(true);
@@ -178,18 +180,19 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const annualPrice = packages.annual?.product.priceString ?? FALLBACK.annual;
+  const semesterPrice = packages.semester?.product.priceString ?? FALLBACK.semester;
   const monthlyPrice = packages.monthly?.product.priceString ?? FALLBACK.monthly;
-  const annualPerMonth = packages.annual?.product.pricePerMonthString ?? '$5.00';
-  const savings = packages.annual && packages.monthly
-    ? Math.round((1 - packages.annual.product.price / (packages.monthly.product.price * 12)) * 100)
-    : 50;
-  const trial = packages.annual ? trialLabel(packages.annual, eligible) : eligible ? `${FALLBACK.trialDays / 7}-week` : null;
-  const showTrial = plan === 'annual' && !!trial;
-  const cta = showTrial ? `Start ${trial} free trial` : `Subscribe for ${plan === 'annual' ? `${annualPrice}/year` : `${monthlyPrice}/month`}`;
+  const semesterPerMonth = packages.semester?.product.pricePerMonthString ?? '$3.33';
+  const savings = packages.semester && packages.monthly
+    ? Math.round((1 - packages.semester.product.price / (packages.monthly.product.price * 6)) * 100)
+    : 33;
+  const trial = packages.semester ? trialLabel(packages.semester, eligible) : eligible ? `${FALLBACK.trialDays / 7}-week` : null;
+  const showTrial = plan === 'semester' && !!trial;
+  const planPrice = plan === 'semester' ? `${semesterPrice} every 6 months` : `${monthlyPrice}/month`;
+  const cta = showTrial ? `Start ${trial} free trial` : `Subscribe for ${plan === 'semester' ? `${semesterPrice}` : `${monthlyPrice}/month`}`;
   const fineprint = showTrial
-    ? `Free for ${trial!.replace('-', ' ')}${trial!.endsWith('week') ? 's' : ''}, then ${annualPrice}/year. Cancel anytime in Settings before the trial ends and you won’t be charged.`
-    : `${plan === 'annual' ? `${annualPrice}/year` : `${monthlyPrice}/month`}, renews automatically. Cancel anytime in Settings.`;
+    ? `Free for ${trial!.replace('-', ' ')}${trial!.endsWith('week') ? 's' : ''}, then ${semesterPrice} every 6 months. Cancel anytime in Settings before the trial ends and you won’t be charged.`
+    : `${planPrice}, renews automatically. Cancel anytime in Settings.`;
 
   return (
     <Ctx.Provider value={{ openPaywall }}>
@@ -228,7 +231,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
             </View>
 
             <View style={{ paddingHorizontal: 20, gap: 14, marginTop: 26 }}>
-              <PlanCard selected={plan === 'annual'} onPress={() => setPlan('annual')} title="Annual" price={`${annualPrice}/yr`} sub={`Just ${annualPerMonth}/mo${trial ? ` · ${trial} free trial` : ''}`} badge={savings > 0 ? `Save ${savings}%` : undefined} />
+              <PlanCard selected={plan === 'semester'} onPress={() => setPlan('semester')} title="Semester Pass" price={`${semesterPrice}/6 mo`} sub={`Just ${semesterPerMonth}/mo${trial ? ` · ${trial} free trial` : ''}`} badge={savings > 0 ? `Save ${savings}%` : undefined} />
               <PlanCard selected={plan === 'monthly'} onPress={() => setPlan('monthly')} title="Monthly" price={`${monthlyPrice}/mo`} sub="Cancel anytime" />
             </View>
           </ScrollView>

@@ -58,12 +58,16 @@ export default function UpgradePage() {
     }
   }
 
+  // Reminders mirror _build_user_reminders in Backend/main.py; they're push notifications, so they
+  // arrive through the iPhone app. Study-tool limits mirror FREE_AI_GENERATION_LIMIT / chat limits.
   const features = [
-    { label: 'Courses', free: 'Unlimited', pro: 'Unlimited' },
-    { label: 'Calendar & Deadlines', free: 'Full access', pro: 'Full access' },
-    { label: 'Canvas / iCal Sync', free: 'Full access', pro: 'Full access' },
-    { label: 'AI Study Tools (Flashcards, Quizzes, Summaries)', free: '50/month', pro: 'Unlimited' },
-    { label: 'AI Course Chat', free: '20 msgs/week', pro: '50 msgs/week' },
+    { label: 'Courses, calendar & LMS sync', free: 'Full access', pro: 'Full access' },
+    { label: 'Reminder the night before', free: 'Included', pro: 'Included' },
+    { label: 'Alert when a professor changes a due date', free: '—', pro: 'Included' },
+    { label: '3-day and exam-week heads-ups', free: '—', pro: 'Included' },
+    { label: 'Sunday game plan', free: '—', pro: 'Included' },
+    { label: 'Flashcards, quizzes & summaries', free: '50/month', pro: 'Unlimited' },
+    { label: 'Course chat', free: '20 msgs/week', pro: '50 msgs/week' },
   ]
 
   return (
@@ -76,10 +80,11 @@ export default function UpgradePage() {
             ClassMate Pro
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
-            Unlock the full ClassMate experience
+            Never get caught off guard
           </h1>
           <p className="mt-3 text-slate-500 max-w-md mx-auto">
-            Unlimited AI-powered study tools. Flashcards, quizzes, and summaries with no limits.
+            Pro watches your LMS for you: you hear when a due date moves, get a heads-up days before
+            things are due, and start every week with a plan.
           </p>
         </div>
 
@@ -186,7 +191,7 @@ export default function UpgradePage() {
                 <span className="font-medium text-slate-700">{f.label}</span>
                 <span className="text-center text-slate-500">{f.free}</span>
                 <span className="text-center font-semibold text-[#5B8DEF]">
-                  {f.pro === 'Unlimited' ? (
+                  {f.pro === 'Unlimited' || f.pro === 'Included' ? (
                     <span className="inline-flex items-center gap-1">
                       <Check size={14} />
                       {f.pro}
@@ -198,6 +203,7 @@ export default function UpgradePage() {
               </div>
             ))}
           </div>
+          <p className="mt-4 text-xs text-slate-400">Reminders and alerts are push notifications in the ClassMate iPhone app.</p>
         </div>
 
       </div>

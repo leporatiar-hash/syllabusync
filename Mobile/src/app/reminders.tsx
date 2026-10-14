@@ -4,16 +4,18 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Bell, CalendarDays, Clock, GraduationCap } from 'lucide-react-native';
+import { Bell, BellRing, CalendarDays, Clock, GraduationCap } from 'lucide-react-native';
 
 import { Card, GradientButton, IconSquare, OutlineButton, T } from '@/components/web';
 import { C, Spacing } from '@/constants/theme';
 import { registerForPush, REMINDERS_ASKED_KEY } from '@/lib/notifications';
 
+// Mirrors _build_user_reminders in Backend/main.py: the night-before reminder is free, the rest is Pro.
 const ITEMS = [
-  { icon: Clock, title: '3 days and 1 day before', body: 'Every assignment, quiz, and project.' },
-  { icon: GraduationCap, title: 'A week before exams', body: 'Enough time to actually study.' },
-  { icon: CalendarDays, title: 'Sunday night brief', body: 'Your week at a glance.' },
+  { icon: Clock, title: 'The night before', body: 'Every assignment, quiz, and project.', pro: false },
+  { icon: BellRing, title: 'When a due date changes', body: 'Your professor moves it, you hear about it.', pro: true },
+  { icon: GraduationCap, title: '3 days ahead, and a week before exams', body: 'Enough time to actually study.', pro: true },
+  { icon: CalendarDays, title: 'Sunday game plan', body: 'Your week at a glance.', pro: true },
 ];
 
 /** Explains reminders before the iOS permission prompt (which can only be shown once). */
@@ -38,7 +40,14 @@ export default function Reminders() {
           <View key={it.title} style={{ flexDirection: 'row', gap: Spacing.three, alignItems: 'center' }}>
             <IconSquare icon={it.icon} bg="#EEF2FF" fg={C.brand} size={36} radius={10} />
             <View style={{ flex: 1 }}>
-              <T size={14} weight="semibold" color={C.slate900}>{it.title}</T>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <T size={14} weight="semibold" color={C.slate900} style={{ flexShrink: 1 }}>{it.title}</T>
+                {it.pro ? (
+                  <View style={{ backgroundColor: '#EEF2FF', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 1 }}>
+                    <T size={10} weight="bold" color={C.brand}>PRO</T>
+                  </View>
+                ) : null}
+              </View>
               <T size={12} color={C.slate500}>{it.body}</T>
             </View>
           </View>

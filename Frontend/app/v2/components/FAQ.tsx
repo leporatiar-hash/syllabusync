@@ -1,27 +1,33 @@
+import { PRICING } from '../../../lib/pricing'
+
 const faqs = [
   {
-    q: 'Can I cancel anytime?',
-    a: "Yes — Pro is billed monthly or yearly with no long-term commitment. Cancel anytime from your account settings and you'll drop back to the free plan at the end of your billing period.",
+    q: 'Does it work with my school?',
+    a: "Most likely. ClassMate works with any school on Canvas or Brightspace (D2L), including OAKS at the College of Charleston. Pick your school and we'll find your LMS. You can also add syllabi as PDF or Word files.",
   },
   {
-    q: 'How does the free tier work?',
-    a: 'The free plan includes unlimited courses, syllabus deadline extraction, Canvas + iCal sync, a full calendar view, 50 AI generations a month, and AI chat with 20 messages per week. Pro raises the AI generation limit to unlimited and the chat limit to 50 messages/week.',
+    q: 'What happens when a professor changes a due date?',
+    a: "Your LMS is the source of truth, so ClassMate checks it every few hours and updates your calendar on its own. With Pro, you also get a notification that night saying what moved and when it's due now.",
   },
   {
-    q: 'Does it work with Canvas or OAKS?',
-    a: 'Yes — connect Canvas (or OAKS) directly for automatic assignment and due-date sync. ClassMate also supports iCal, Google Calendar, and Outlook Calendar feeds, or you can just upload a syllabus PDF.',
+    q: "What's free and what's Pro?",
+    a: 'Free: all your classes and due dates from your LMS, syllabus reading, the calendar, a reminder the night before each deadline, and 50 study-tool generations a month. Pro adds change alerts, heads-ups 3 days ahead and a week before exams, a Sunday game plan, and unlimited study tools.',
   },
   {
-    q: 'What file types can I upload?',
-    a: 'Syllabi can be uploaded as PDF or Word (.docx). For other study materials — notes, slides, readings — you can also upload text files and images (PNG/JPG).',
+    q: 'How much is Pro, and can I cancel?',
+    a: `${PRICING.monthly.label}${PRICING.monthly.per}, or ${PRICING.semester.label} for a ${PRICING.semester.name} that renews ${PRICING.semester.per}. Cancel anytime in Settings and keep Pro until the end of what you paid for. Not happy? Email us within 14 days for a full refund, no questions asked.`,
+  },
+  {
+    q: 'Can my parents pay for it, or use a 529 plan?',
+    a: "Yes. Receipts list ClassMate as educational software used by the student, which many 529 plans accept. Check with your plan or a tax professional; this isn't tax advice.",
   },
   {
     q: 'Is my data private?',
-    a: "Yes. We don't sell your data and we don't train AI models on your notes. Files are encrypted at rest and in transit, and you can delete your account and data at any time.",
+    a: "Yes. We never see your school password, your calendar link is stored encrypted, we don't sell your data or show ads, and you can delete your account and everything in it anytime.",
   },
   {
-    q: 'Do I need to download anything?',
-    a: 'No — ClassMate runs entirely in your browser. No app install required.',
+    q: 'Is there an app?',
+    a: 'ClassMate works in any browser today. The iPhone app, with one-tap LMS sign-in and push reminders, is coming soon.',
   },
 ]
 

@@ -20,11 +20,11 @@ export default function Hero() {
           {/* Left: copy */}
           <div>
             <h1 className="text-5xl md:text-6xl font-bold text-slate-900 leading-tight mb-6">
-              The AI that knows your entire semester.
+              Never get caught off guard by a due date.
             </h1>
             <p className="text-lg text-slate-600 mb-8 leading-relaxed max-w-lg">
-              Upload your syllabus once. Ask anything — deadlines, policies, what&apos;s due this week.
-              ClassMate answers from your actual courses.
+              ClassMate pulls every deadline from your LMS and your syllabi into one calendar, reminds you
+              before things are due, and tells you when a professor moves a date.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4">
@@ -33,7 +33,7 @@ export default function Hero() {
                 className="px-8 py-4 text-base font-semibold text-white rounded-xl shadow-lg hover:shadow-xl hover:opacity-90 transition-all"
                 style={{ background: BRAND }}
               >
-                Start Free Today
+                Start free
               </button>
               <button
                 onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
@@ -42,7 +42,7 @@ export default function Hero() {
                 See How It Works
               </button>
             </div>
-            <p className="text-sm text-slate-400 mt-3">Works in your browser — no download needed</p>
+            <p className="text-sm text-slate-400 mt-3">Works with Canvas and Brightspace (D2L). In your browser today; iPhone app coming soon.</p>
           </div>
 
           {/* Right: interactive chat demo */}
