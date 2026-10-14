@@ -6,7 +6,7 @@ export default function Footer() {
           <img src="/brand/logo-inverted.svg" alt="" className="h-7 w-7 shrink-0" />
           <div>
             <span className="font-bold block">ClassMate</span>
-            <span className="text-xs text-slate-400">The AI that knows your entire semester.</span>
+            <span className="text-xs text-slate-400">Never get caught off guard by a due date.</span>
           </div>
         </div>
         <div className="flex gap-6 text-sm text-slate-400">

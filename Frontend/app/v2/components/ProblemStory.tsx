@@ -78,9 +78,9 @@ export default function ProblemStory() {
             </div>
 
             <p className="text-lg md:text-xl text-slate-600 leading-relaxed max-w-[55ch]">
-              ClassMate fixes this with <span className="font-medium text-slate-900">one upload</span>. Drop
-              your syllabi in, and every deadline, policy, and detail becomes something you can{' '}
-              <span className="font-medium text-slate-900">just ask</span> about.
+              ClassMate fixes this by <span className="font-medium text-slate-900">connecting to your LMS once</span>.
+              Every deadline lands in one calendar, your syllabi fill in the rest, and when a professor moves
+              a date, <span className="font-medium text-slate-900">you hear about it</span>.
             </p>
 
             <div className="flex flex-col gap-3 mt-1">
