@@ -873,6 +873,19 @@ class PushNotificationSent(Base):
     sent_at = Column(DateTime, default=datetime.utcnow)
 
 
+class DeadlineChange(Base):
+    """A due date the LMS moved, or a new item it posted, after the student's first sync. Feeds
+    the Pro "your professor changed something" alert; the push ledger keeps each one to one alert."""
+    __tablename__ = "deadline_changes"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, nullable=False, index=True)
+    deadline_id = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # "moved" | "added"
+    old_date = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class RevenueCatWebhookEvent(Base):
     """Ledger of processed RevenueCat webhook event ids, for idempotency (same pattern as
     StripeWebhookEvent — RevenueCat retries deliveries that don't get a 200)."""
@@ -2392,8 +2405,15 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
         target = (today + timedelta(days=n)).isoformat()
         return [d for d in deadlines if d.date == target]
 
+    # Free: the day-before reminder (and setup/reconnect nudges). Pro: everything that keeps you
+    # from being caught off guard: change alerts, 3-day heads-up, exam week, Sunday game plan.
+    pro = _effective_tier(profile) == "pro"
+    if pro and profile.notify_deadlines is not False:
+        out += _change_alerts(db, profile, today, already)
+
     if profile.notify_deadlines is not False:
-        for kind, offset, when in (("day_before", 1, "tomorrow"), ("three_days", 3, "in 3 days")):
+        kinds = (("day_before", 1, "tomorrow"), ("three_days", 3, "in 3 days")) if pro else (("day_before", 1, "tomorrow"),)
+        for kind, offset, when in kinds:
             items = pending(kind, by_offset(offset))
             if not items:
                 continue
@@ -2410,7 +2430,7 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             out.append((kind, {"title": title, "body": body, "data": {"screen": "home", "date": items[0].date}},
                         [f"{profile.user_id}:{d.id}:{kind}" for d in items]))
 
-    if profile.notify_exams is not False:
+    if pro and profile.notify_exams is not False:
         items = pending("exam_week", [d for d in by_offset(7) if _is_exam(d)])
         if items:
             d = items[0]
@@ -2424,7 +2444,7 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
 
     out += _setup_nudges(db, profile, local_now, already)
 
-    if profile.notify_weekly is not False and local_now.weekday() == 6:  # Sunday
+    if pro and profile.notify_weekly is not False and local_now.weekday() == 6:  # Sunday
         iso = today.isocalendar()
         ledger_id = f"{profile.user_id}:weekly:{iso[0]}-W{iso[1]:02d}"
         week = [d for d in deadlines if today.isoformat() < d.date <= horizon]
@@ -2437,6 +2457,71 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             out.append(("weekly", {"title": f"Your week: {_plural(len(week), 'deadline')}", "body": body,
                                    "data": {"screen": "calendar"}}, [ledger_id]))
     return out
+
+
+CHANGE_ALERT_WINDOW = timedelta(days=3)  # an unsent change older than this is no longer news
+CHANGE_ALERT_HORIZON_DAYS = 21  # only items due within three weeks are worth an alert
+
+
+def _record_lms_changes(db, user_id: str, changes: list, today_iso: str):
+    """changes: [(kind, deadline, old_date)] collected during a sync (after flush, so new
+    deadlines have ids). Keeps upcoming items due within the horizon, plus anything moved earlier."""
+    horizon = (date.fromisoformat(today_iso) + timedelta(days=CHANGE_ALERT_HORIZON_DAYS)).isoformat()
+    for kind, d, old_date in changes:
+        if not d.id or d.completed or not d.date or d.date < today_iso:
+            continue
+        if d.date > horizon and not (old_date and d.date < old_date):
+            continue
+        db.add(DeadlineChange(user_id=user_id, deadline_id=d.id, kind=kind, old_date=old_date))
+
+
+def _change_alerts(db, profile, today: date, already: set[str]) -> list:
+    """One push summarizing what the LMS changed since the last alert (Pro)."""
+    uid = profile.user_id
+    rows = (
+        db.query(DeadlineChange)
+        .filter(DeadlineChange.user_id == uid, DeadlineChange.created_at >= datetime.utcnow() - CHANGE_ALERT_WINDOW)
+        .order_by(DeadlineChange.created_at)
+        .all()
+    )
+    fresh = [r for r in rows if f"{uid}:change:{r.id}" not in already]
+    if not fresh:
+        return []
+    latest = {r.deadline_id: r for r in fresh}  # one line per deadline, its newest change
+    live = {d.id: d for d in db.query(Deadline).filter(Deadline.user_id == uid, Deadline.id.in_(list(latest))).all()}
+    items = []
+    for did, r in latest.items():
+        d = live.get(did)
+        if not d or d.completed or d.date < today.isoformat():
+            continue
+        if r.kind == "moved" and (not r.old_date or r.old_date == d.date):
+            continue  # moved back to where it was
+        items.append((r, d))
+    if not items:
+        return []
+    items.sort(key=lambda x: (x[0].kind != "moved", x[1].date))
+    ledger = [f"{uid}:change:{r.id}" for r in fresh]
+
+    def course(d):
+        return (d.course.code or d.course.name) if d.course else "Your LMS"
+
+    if len(items) == 1:
+        r, d = items[0]
+        t = f" · {format_time_12h(d.time)}" if d.time else ""
+        if r.kind == "moved":
+            title = f"Due date changed: {d.title or 'Untitled'}"
+            body = f"{course(d)} · now {parse_ymd_label(d.date)}{t} (was {parse_ymd_label(r.old_date)})"
+        else:
+            title = f"New from your LMS: {d.title or 'Untitled'}"
+            body = f"{course(d)} · due {parse_ymd_label(d.date)}{t}"
+    else:
+        title = f"{_plural(len(items), 'update')} from your LMS"
+        parts = [
+            f"{d.title or 'Untitled'} moved to {parse_ymd_label(d.date)}" if r.kind == "moved" else f"{d.title or 'Untitled'} added"
+            for r, d in items[:3]
+        ]
+        body = "; ".join(parts) + (f"; +{len(items) - 3} more" if len(items) > 3 else "")
+    return [("change", {"title": title, "body": body, "data": {"screen": "home", "date": items[0][1].date}}, ledger)]
 
 
 def _setup_nudges(db, profile, local_now: datetime, already: set[str]) -> list:
@@ -6435,6 +6520,8 @@ def sync_canvas(connection, user_id: str, db):
     base = connection.instance_url.rstrip("/")
     headers = {"Authorization": f"Bearer {token}"}
     user_tz = _user_timezone(db, user_id)
+    first_sync = connection.last_synced is None  # everything is "new" on the first sync: no alerts
+    changes: list = []
 
     # Load user's ClassMate courses for auto-matching
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
@@ -6512,6 +6599,8 @@ def sync_canvas(connection, user_id: str, db):
                         ).first()
 
                         if existing:
+                            if existing.date != deadline_date:
+                                changes.append(("moved", existing, existing.date))
                             existing.title = assignment.get("name", "Untitled")
                             existing.date = deadline_date
                             existing.time = deadline_time
@@ -6532,6 +6621,8 @@ def sync_canvas(connection, user_id: str, db):
                                 external_id=ext_id,
                             )
                             db.add(deadline)
+                            if not first_sync:
+                                changes.append(("added", deadline, None))
                         synced += 1
 
                 except Exception as e:
@@ -6539,6 +6630,7 @@ def sync_canvas(connection, user_id: str, db):
                     errors.append(f"Error syncing course {course_name}: {str(e)}")
 
             db.flush()
+            _record_lms_changes(db, user_id, changes, datetime.now(user_tz).date().isoformat())
             canvas_accounts = db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "canvas").count()
             if complete and seen_ext_ids and canvas_accounts <= 1:
                 _apply_lms_source_of_truth(db, user_id, "canvas", seen_ext_ids, lms_course_ids,
@@ -6790,6 +6882,8 @@ def sync_ical(connection, user_id: str, db):
     synced = 0
     errors = []
     user_tz = _user_timezone(db, user_id)
+    first_sync = connection.last_synced is None  # everything is "new" on the first sync: no alerts
+    changes: list = []
 
     try:
         with httpx.Client(timeout=30.0) as http_client:
@@ -6866,6 +6960,8 @@ def sync_ical(connection, user_id: str, db):
                 ).first()
 
                 if existing:
+                    if existing.date != deadline_date:
+                        changes.append(("moved", existing, existing.date))
                     existing.title = summary
                     existing.date = deadline_date
                     existing.time = deadline_time
@@ -6886,9 +6982,12 @@ def sync_ical(connection, user_id: str, db):
                         external_id=ext_id,
                     )
                     db.add(deadline)
+                    if not first_sync:
+                        changes.append(("added", deadline, None))
                 synced += 1
 
             db.flush()
+            _record_lms_changes(db, user_id, changes, datetime.now(user_tz).date().isoformat())
             # Removal is only safe when this feed is the student's only iCal feed (external ids
             # don't record which feed they came from) and it actually returned events.
             ical_feeds = db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "ical").count()

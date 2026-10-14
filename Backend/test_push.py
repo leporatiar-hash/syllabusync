@@ -18,6 +18,8 @@ Covers:
   - delete-account removes tokens
   - setup nudges: "connect your LMS" a day after signup and again at day 4 (then never);
     once connected, one "add your syllabi" listing courses without one
+  - free tier gets only the day-before reminder; Pro adds 3-day, exam week, Sunday plan, changes
+  - change alerts: a moved due date or new LMS item is announced once; several are grouped
 """
 import os
 import tempfile
@@ -30,6 +32,8 @@ os.environ["OPENAI_API_KEY"] = "sk-test"
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
 os.environ["JWT_SECRET"] = "test-jwt-secret-for-push"
 os.environ.pop("RESEND_API_KEY", None)
+# Most tests exercise the full Pro reminder set; test_free_tier_* turns the promo off.
+os.environ["PROMO_PRO_UNTIL"] = "2099-12-31"
 
 from starlette.testclient import TestClient  # noqa: E402
 
@@ -286,6 +290,78 @@ def test_setup_nudges():
     _age(uid2, 2)
     _run(SUNDAY_7PM_NY + timedelta(minutes=90))
     assert _mine(token2) == []
+
+
+def test_free_tier_gets_day_before_only():
+    uid, h, token = _user()
+    client.put("/me/notification-settings", json={"deadlines": True, "exams": True, "weekly": True}, headers=h)
+    _deadline(h, 1, "Tomorrow thing")
+    _deadline(h, 3, "Three-day thing")
+    _deadline(h, 7, "Big Exam", "Exam")
+    os.environ.pop("PROMO_PRO_UNTIL", None)
+    try:
+        _run()
+    finally:
+        os.environ["PROMO_PRO_UNTIL"] = "2099-12-31"
+    assert [m["title"] for m in _mine(token)] == ["Due tomorrow: Tomorrow thing"], [m["title"] for m in _mine(token)]
+
+
+def _change(uid, deadline_id, kind, old_days=None):
+    db = main.SessionLocal()
+    try:
+        d = db.query(main.Deadline).filter(main.Deadline.id == deadline_id).first()
+        old = (TODAY + timedelta(days=old_days)).isoformat() if old_days is not None else None
+        main._record_lms_changes(db, uid, [(kind, d, old)], TODAY.isoformat())
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_change_alerts():
+    uid, h, token = _user()
+    client.put("/me/notification-settings", json={"deadlines": True, "exams": False, "weekly": False}, headers=h)
+    c = _course(h)
+    moved = _deadline(h, 5, "Essay 2", course_id=c, time="23:59")
+    _change(uid, moved, "moved", old_days=2)
+    _run()
+    msgs = [m for m in _mine(token) if "Essay 2" in m["title"]]
+    assert len(msgs) == 1 and msgs[0]["title"] == "Due date changed: Essay 2", _mine(token)
+    assert msgs[0]["body"] == "FINC 303 · now Fri, Oct 9 · 11:59 PM (was Tue, Oct 6)", msgs[0]["body"]
+    before = len(_mine(token))
+    _run(SUNDAY_7PM_NY + timedelta(minutes=15))
+    assert len(_mine(token)) == before, "each change is announced once"
+
+    a = _deadline(h, 4, "Quiz 4", course_id=c)
+    b = _deadline(h, 6, "Lab 3", course_id=c)
+    _change(uid, a, "added")
+    _change(uid, b, "moved", old_days=8)
+    _change(uid, b, "moved", old_days=6)  # moved back where it was: not news
+    _deadline(h, 60, "Far away")  # beyond the horizon: never recorded
+    _run(SUNDAY_7PM_NY + timedelta(minutes=30))
+    last = _mine(token)[-1]
+    assert last["title"] == "New from your LMS: Quiz 4", last
+
+    # Several real changes are grouped into one notification
+    x = _deadline(h, 2, "Reading A", course_id=c)
+    y = _deadline(h, 9, "Reading B", course_id=c)
+    _change(uid, x, "moved", old_days=4)
+    _change(uid, y, "added")
+    _run(SUNDAY_7PM_NY + timedelta(minutes=45))
+    last = _mine(token)[-1]
+    assert last["title"] == "2 updates from your LMS" and last["body"] == "Reading A moved to Tue, Oct 6; Reading B added", last
+
+    # Free users don't get change alerts
+    uid2, h2, token2 = _user()
+    z = _deadline(h2, 5, "Paper")
+    _change(uid2, z, "moved", old_days=3)
+    os.environ.pop("PROMO_PRO_UNTIL", None)
+    try:
+        _run(SUNDAY_7PM_NY + timedelta(minutes=50))
+    finally:
+        os.environ["PROMO_PRO_UNTIL"] = "2099-12-31"
+    assert not any("changed" in m["title"] for m in _mine(token2))
+    # Mute this user so their pending alert doesn't fire during later tests (which run as Pro)
+    client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h2)
 
 
 if __name__ == "__main__":

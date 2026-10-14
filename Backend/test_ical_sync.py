@@ -24,6 +24,7 @@ Covers:
   - LOCATION identity extraction and name cleaning
 """
 import os
+from datetime import datetime, timedelta
 import tempfile
 
 # Env vars must be set before importing main -- it reads them at import time.
@@ -445,6 +446,40 @@ def test_dead_link_detected_and_replaced():
     check("deadlines carry over, no duplicates", before == after == 8, f"{before} -> {after}")
 
 
+def _utc_stamp(days_from_now: int) -> str:
+    """An iCal UTC timestamp N days out at 03:59Z (11:59 PM Eastern the night before)."""
+    return (datetime.utcnow() + timedelta(days=days_from_now)).strftime("%Y%m%dT035900Z")
+
+
+def test_change_alerts_recorded():
+    user_id, _ = make_user("changes")
+    loc = "LOCATION:2026 Fall Investment Analysis (FINC-400-02)"
+    _set_feed([_event("5001", "Essay - Due", loc, dtstart=_utc_stamp(6)),
+               _event("5002", "Far Project - Due", loc, dtstart=_utc_stamp(40))])
+    try:
+        run_sync(user_id)
+
+        def rows():
+            db = main.SessionLocal()
+            try:
+                return [(r.kind, r.old_date is not None) for r in db.query(main.DeadlineChange).filter_by(user_id=user_id).all()]
+            finally:
+                db.close()
+
+        check("first sync: nothing is news", rows() == [], str(rows()))
+        # Professor moves the essay earlier, pushes the far project further out, and posts a quiz
+        _set_feed([_event("5001", "Essay - Due", loc, dtstart=_utc_stamp(3)),
+                   _event("5002", "Far Project - Due", loc, dtstart=_utc_stamp(45)),
+                   _event("5003", "Quiz 2 - Due", loc, dtstart=_utc_stamp(4))])
+        run_sync(user_id)
+        check("moved essay + new quiz recorded; far-off move ignored",
+              sorted(rows()) == [("added", False), ("moved", True)], str(rows()))
+        run_sync(user_id)
+        check("unchanged resync records nothing new", len(rows()) == 2, str(rows()))
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
@@ -458,6 +493,7 @@ if __name__ == "__main__":
         test_lms_changes_flow_through()
         test_syllabus_deadlines_give_way_to_lms()
         test_dead_link_detected_and_replaced()
+        test_change_alerts_recorded()
         print("\nAll iCal sync tests passed.")
     finally:
         try:
