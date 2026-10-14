@@ -29,6 +29,7 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 import json
+import sys
 import uuid
 import io
 import os
@@ -48,11 +49,21 @@ from icalendar import Calendar as ICalCalendar
 from cryptography.fernet import Fernet
 import sentry_sdk
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging. Railway marks everything on stderr as an error, so only WARNING and above go
+# there; INFO goes to stdout. That keeps Railway's error filter meaningful for monitoring.
+_log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+_info_handler = logging.StreamHandler(sys.stdout)
+_info_handler.setLevel(logging.INFO)
+_info_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+_error_handler = logging.StreamHandler(sys.stderr)
+_error_handler.setLevel(logging.WARNING)
+for _h in (_info_handler, _error_handler):
+    _h.setFormatter(_log_format)
+logging.basicConfig(level=logging.INFO, handlers=[_info_handler, _error_handler])
+# httpx logs every request URL at INFO, and LMS calendar-feed URLs carry the student's secret token
+# (the same links we encrypt at rest). Keep those out of the logs.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
