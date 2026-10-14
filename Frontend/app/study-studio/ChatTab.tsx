@@ -88,18 +88,7 @@ function ChatComposer({
         </div>
       )}
 
-      <div className="flex items-end gap-1 rounded-3xl border border-slate-200 bg-white px-2 py-1.5 transition-colors focus-within:border-[#5B4EE8]">
-        <button
-          onClick={onAttachClick}
-          disabled={disabled}
-          className="flex-shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40"
-          title="Attach a file"
-        >
-          <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-          </svg>
-        </button>
-
+      <div className="rounded-[24px] border border-slate-200 bg-white px-3 pb-2 pt-3 shadow-[0_2px_14px_rgba(15,23,42,0.07)] transition-colors focus-within:border-slate-300">
         <textarea
           ref={textareaRef}
           rows={1}
@@ -109,32 +98,58 @@ function ChatComposer({
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          className="max-h-32 flex-1 resize-none bg-transparent py-1.5 text-[15px] text-slate-800 outline-none placeholder-slate-400"
+          className="block max-h-48 min-h-[28px] w-full resize-none bg-transparent px-1.5 text-[15px] leading-6 text-slate-800 outline-none placeholder-slate-400"
         />
-
-        <button
-          onClick={sending ? onStop : onSubmit}
-          disabled={!sending && !canSend}
-          aria-label={sending ? 'Stop generating' : 'Send message'}
-          className="flex flex-shrink-0 items-center justify-center rounded-full transition-colors"
-          style={{
-            width: 32,
-            height: 32,
-            background: sending ? '#1E293B' : canSend ? BRAND : '#EDEDF2',
-            color: sending || canSend ? '#fff' : '#9CA3AF',
-          }}
-        >
-          {sending ? (
-            <Square className="h-3.5 w-3.5" fill="currentColor" />
-          ) : (
-            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" strokeWidth={2.4} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+        <div className="mt-2 flex items-center justify-between">
+          <button
+            onClick={onAttachClick}
+            disabled={disabled}
+            className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
+            title="Attach notes or slides to make flashcards or a quiz"
+          >
+            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" strokeWidth={1.6} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
             </svg>
-          )}
-        </button>
+            <span className="hidden sm:inline">Attach</span>
+          </button>
+          <button
+            onClick={sending ? onStop : onSubmit}
+            disabled={!sending && !canSend}
+            aria-label={sending ? 'Stop generating' : 'Send message'}
+            className="flex flex-shrink-0 items-center justify-center rounded-xl transition-colors"
+            style={{
+              width: 34,
+              height: 34,
+              background: sending ? '#1E293B' : canSend ? BRAND : '#EDEDF2',
+              color: sending || canSend ? '#fff' : '#9CA3AF',
+            }}
+          >
+            {sending ? (
+              <Square className="h-3.5 w-3.5" fill="currentColor" />
+            ) : (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.4} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0-6 6m6-6 6 6" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   )
+}
+
+/** Sidebar sections like Claude's: Today / Yesterday / Previous 7 days / Older (local time). */
+function groupConversations(convs: Conversation[]): [string, Conversation[]][] {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const day = 86400000
+  const groups: Record<string, Conversation[]> = { Today: [], Yesterday: [], 'Previous 7 days': [], Older: [] }
+  for (const c of convs) {
+    const t = new Date(c.created_at).getTime()
+    const key = t >= start.getTime() ? 'Today' : t >= start.getTime() - day ? 'Yesterday' : t >= start.getTime() - 7 * day ? 'Previous 7 days' : 'Older'
+    groups[key].push(c)
+  }
+  return Object.entries(groups).filter(([, g]) => g.length > 0)
 }
 
 export default function ChatTab({ onViewLibrary, triggerProactive = false, initialPrompt }: ChatTabProps) {
@@ -201,7 +216,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
         const data = await res.json()
         if (data.skipped) return
         const newConv = { id: data.conversation_id, title: data.conversation_title, created_at: new Date().toISOString() }
-        setConversations(prev => [newConv, ...prev])
+        setConversations(prev => [newConv, ...prev.filter(c => c.id !== newConv.id)])  // today's briefing may already be listed
         setActiveConversation(data.conversation_id)
         setMessages([data.message])
         setShowSidebar(false)
@@ -469,6 +484,11 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
     fileInputRef.current?.click()
   }
 
+  const greeting = () => {
+    const h = new Date().getHours()
+    return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  }
+
   const formatTime = (dateStr: string) => {
     const d = new Date(dateStr)
     const now = new Date()
@@ -490,15 +510,17 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
   return (
     <div className="flex h-full w-full overflow-hidden bg-white">
       {/* Sidebar — collapsible on every breakpoint via the header's panel toggle */}
-      <div className={`${showSidebar ? 'flex' : 'hidden'} w-full md:w-72 flex-col border-r border-slate-200 bg-slate-50/50`}>
-        <div className="p-3">
+      <div className={`${showSidebar ? 'flex' : 'hidden'} w-full md:w-64 flex-col border-r border-slate-100 bg-[#F8F9FB]`}>
+        <div className="p-2.5">
           <button
             onClick={createConversation}
             disabled={limitReached}
-            style={{ background: BRAND }}
-            className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200/60 disabled:opacity-50"
           >
-            + New Chat
+            <span className="flex h-6 w-6 items-center justify-center rounded-full text-white" style={{ background: BRAND }}>
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+            </span>
+            New chat
           </button>
         </div>
 
@@ -512,18 +534,21 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
               No conversations yet. Start a new chat!
             </p>
           ) : (
-            conversations.map(conv => (
+            groupConversations(conversations).map(([label, group]) => (
+              <div key={label} className="mb-3">
+                <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+                {group.map(conv => (
               <button
                 key={conv.id}
                 onClick={() => loadMessages(conv.id)}
+                title={formatTime(conv.created_at)}
                 style={activeConversation === conv.id ? { background: BRAND_SOFT_BG, color: BRAND_SOFT_TEXT } : undefined}
-                className={`group mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-                  activeConversation === conv.id ? '' : 'text-slate-600 hover:bg-slate-100'
+                className={`group flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors ${
+                  activeConversation === conv.id ? '' : 'text-slate-600 hover:bg-slate-200/60'
                 }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{conv.title}</p>
-                  <p className="text-xs text-slate-400">{formatTime(conv.created_at)}</p>
+                  <p className="truncate">{conv.title}</p>
                 </div>
                 <button
                   onClick={(e) => deleteConversation(conv.id, e)}
@@ -534,6 +559,8 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                   </svg>
                 </button>
               </button>
+                ))}
+              </div>
             ))
           )}
         </div>
@@ -559,7 +586,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
         {/* Header — panel toggle collapses the sidebar on every breakpoint now,
             and Library lives here (not just in the sidebar) so it stays
             reachable even when the sidebar is collapsed. */}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-3" style={{ height: 56 }}>
+        <div className="flex shrink-0 items-center justify-between px-3" style={{ height: 52 }}>
           <button
             onClick={() => setShowSidebar(s => !s)}
             className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100"
@@ -606,13 +633,15 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
         {!activeConversation ? (
           /* Empty state */
           <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 text-center">
-            <div className="w-full max-w-sm">
-              <Mark size={44} radius={14} fontSize={22} />
-              <h3 className="mt-4 text-xl font-semibold text-slate-900" style={{ letterSpacing: '-0.02em' }}>
-                How can I help you study?
-              </h3>
-              <p className="mt-1.5 text-sm text-slate-500">
-                Ask anything about your courses, or tap a prompt below to get started.
+            <div className="w-full max-w-2xl">
+              <div className="flex items-center justify-center gap-3">
+                <Mark size={36} radius={11} fontSize={18} />
+                <h3 className="text-3xl font-semibold text-slate-900" style={{ letterSpacing: '-0.025em' }}>
+                  {greeting()}
+                </h3>
+              </div>
+              <p className="mt-2 text-sm text-slate-500">
+                Ask about your deadlines, syllabi and notes, or turn them into flashcards and quizzes.
               </p>
 
               <div className="mt-6">
@@ -627,7 +656,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                   onRemoveAttachment={() => setAttachedFile(null)}
                   onAttachClick={handleAttachClickInEmptyState}
                   textareaRef={textareaRef}
-                  placeholder="Message ClassMate"
+                  placeholder="What's on your mind?"
                   disabled={limitReached}
                   autoFocus
                 />
@@ -656,7 +685,8 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
         ) : (
           <>
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="flex-1 overflow-y-auto">
+             <div className="mx-auto w-full max-w-3xl px-4 pb-6 pt-4 md:px-6">
               {loadingMessages ? (
                 <div className="flex justify-center py-8">
                   <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#5B4EE8] border-t-transparent" />
@@ -667,12 +697,11 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                 </div>
               ) : (
                 messages.map(msg => (
-                  <div key={msg.id} className={`mb-5 flex ${msg.role === 'user' ? 'justify-end' : 'items-start gap-2.5'}`}>
-                    {msg.role === 'assistant' && <Mark size={23} radius={7} />}
-                    <div className={msg.role === 'user' ? 'flex max-w-[80%] flex-col items-end' : 'flex min-w-0 max-w-[85%] flex-col items-start'}>
+                  <div key={msg.id} className={`group/msg mb-7 flex ${msg.role === 'user' ? 'justify-end' : 'items-start gap-3'}`}>
+                    {msg.role === 'assistant' && <div className="mt-0.5"><Mark size={24} radius={7} /></div>}
+                    <div className={msg.role === 'user' ? 'flex max-w-[80%] flex-col items-end' : 'flex min-w-0 flex-1 flex-col items-start'}>
                       <div
-                        className={`text-sm leading-relaxed text-slate-800 ${msg.role === 'user' ? 'rounded-2xl px-4 py-3' : ''}`}
-                        style={msg.role === 'user' ? { background: BRAND_SOFT_BG, borderTopRightRadius: 6 } : undefined}
+                        className={`text-[15px] leading-7 text-slate-800 ${msg.role === 'user' ? 'rounded-2xl bg-slate-100 px-4 py-2.5 text-slate-900' : ''}`}
                       >
                         {msg.role === 'user' ? (
                           <div className="whitespace-pre-wrap">
@@ -707,24 +736,23 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                         ) : (
                           <ReactMarkdown
                             components={{
-                              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                              p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
                               strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
-                              h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-bold text-slate-900 first:mt-0">{children}</h1>,
-                              h2: ({ children }) => <h2 className="mb-2 mt-3 text-base font-bold text-slate-900 first:mt-0">{children}</h2>,
-                              h3: ({ children }) => <h3 className="mb-1 mt-3 text-sm font-bold text-slate-800 first:mt-0">{children}</h3>,
-                              ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
-                              ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
-                              li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                              code: ({ children }) => <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-xs text-slate-800">{children}</code>,
-                              hr: () => <hr className="my-2 border-slate-300" />,
+                              h1: ({ children }) => <h1 className="mb-2 mt-5 text-lg font-semibold text-slate-900 first:mt-0">{children}</h1>,
+                              h2: ({ children }) => <h2 className="mb-2 mt-5 text-base font-semibold text-slate-900 first:mt-0">{children}</h2>,
+                              h3: ({ children }) => <h3 className="mb-1.5 mt-4 text-[15px] font-semibold text-slate-900 first:mt-0">{children}</h3>,
+                              ul: ({ children }) => <ul className="mb-3 ml-5 list-disc space-y-1 marker:text-slate-400">{children}</ul>,
+                              ol: ({ children }) => <ol className="mb-3 ml-5 list-decimal space-y-1 marker:text-slate-400">{children}</ol>,
+                              li: ({ children }) => <li className="pl-1">{children}</li>,
+                              code: ({ children }) => <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[13px] text-slate-800">{children}</code>,
+                              hr: () => <hr className="my-4 border-slate-200" />,
                             }}
                           >
                             {msg.content}
                           </ReactMarkdown>
                         )}
                       </div>
-                      <div className="mt-1 flex items-center gap-2">
-                        <p className="text-xs text-slate-400">{formatTime(msg.created_at)}</p>
+                      <div className="mt-1.5 flex items-center gap-2 opacity-60 transition-opacity group-hover/msg:opacity-100">
                         {msg.role === 'assistant' && msg.content && msg.id !== streamingMsgId && (
                           <button
                             onClick={() => copyMessage(msg.id, msg.content)}
@@ -834,11 +862,12 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
               )}
 
               <div ref={messagesEndRef} />
+             </div>
             </div>
 
             {/* Input area */}
             {!limitReached && (
-              <div className="border-t border-slate-200 px-4 py-3">
+              <div className="mx-auto w-full max-w-3xl px-4 pb-3 pt-1 md:px-6">
                 <ChatComposer
                   value={input}
                   onChange={setInput}
@@ -850,7 +879,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                   onRemoveAttachment={() => setAttachedFile(null)}
                   onAttachClick={() => fileInputRef.current?.click()}
                   textareaRef={textareaRef}
-                  placeholder="Ask a question or attach a file to create flashcards/quiz..."
+                  placeholder="Reply to ClassMate..."
                 />
                 <p className="mt-2 text-center text-[11px] text-slate-400">
                   ClassMate can make mistakes — check important dates.

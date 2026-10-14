@@ -7045,7 +7045,7 @@ CURRENT_SURVEY = "fall-2026"
 # Only existing users are asked: accounts at least this old, so brand-new signups aren't greeted
 # with a survey before they've used anything.
 SURVEY_MIN_ACCOUNT_AGE = timedelta(days=3)
-ADMIN_EMAILS = {"leporatiar@g.cofc.edu"}
+ADMIN_EMAILS = {"leporatiar@g.cofc.edu", "leporati@gmail.com"}
 
 
 class SurveySubmit(BaseModel):
@@ -7488,7 +7488,10 @@ def _match_course_from_message(db, user_id: str, message: str) -> "Course | None
     return courses[0]
 
 
-MAX_SYLLABUS_CONTEXT_TOTAL = 8000  # Max chars of raw syllabus text across all courses
+MAX_SYLLABUS_CONTEXT_TOTAL = 16000  # Max chars of raw syllabus text across all courses (split per course)
+MIN_SYLLABUS_PER_COURSE = 2500  # every course gets at least this much, so policies for course #3 aren't crowded out
+# Chat runs on the same model family as syllabus reading (better at following the data and dates).
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4.1-mini")
 MAX_NOTES_CONTEXT_TOTAL = 8000  # Max chars of the student's own notes across all courses
 MAX_NOTE_CONTEXT_EACH = 2500  # Max chars taken from any single note
 MAX_NOTES_CONSIDERED = 60  # Most-recently-edited notes considered before ranking by relevance
@@ -7629,22 +7632,29 @@ def _build_chat_context(db, user_id: str, message: str | None = None) -> str:
                     if val:
                         parts.append(f"  {key}: {str(val)[:500]}")
 
-    # Deadlines — all incomplete, ordered by date. No lower bound so past-semester deadlines
-    # are still visible to the model. Upper bound prevents far-future noise.
-    today = date.today()
-    one_year_out = today + timedelta(days=365)
-    deadlines = (
+    # Deadlines: everything upcoming first (what students actually ask about), then the last two
+    # weeks for "what did I miss" questions. Ordering oldest-first with a cap used to crowd out
+    # this week's work for students whose LMS feed carries hundreds of past items.
+    today = datetime.now(_user_timezone(db, user_id)).date()  # the student's date, not the server's (UTC)
+    not_done = or_(Deadline.completed == False, Deadline.completed.is_(None))  # noqa: E712
+    upcoming = (
         db.query(Deadline)
-        .filter(
-            Deadline.user_id == user_id,
-            Deadline.completed == False,
-            Deadline.date <= one_year_out.isoformat(),
-        )
+        .filter(Deadline.user_id == user_id, not_done,
+                Deadline.date >= today.isoformat(), Deadline.date <= (today + timedelta(days=120)).isoformat())
         .order_by(Deadline.date)
-        .limit(80)
+        .limit(120)
         .all()
     )
-    parts.append(f"\n## Deadlines by Course (today: {today.isoformat()})")
+    recent_past = (
+        db.query(Deadline)
+        .filter(Deadline.user_id == user_id, not_done,
+                Deadline.date < today.isoformat(), Deadline.date >= (today - timedelta(days=14)).isoformat())
+        .order_by(Deadline.date.desc())
+        .limit(20)
+        .all()
+    )
+    deadlines = list(reversed(recent_past)) + upcoming
+    parts.append(f"\n## Deadlines by Course (today: {today.strftime('%A')}, {today.isoformat()})")
     if deadlines:
         by_course: dict[str, list] = {}
         for d in deadlines:
@@ -7658,7 +7668,7 @@ def _build_chat_context(db, user_id: str, message: str | None = None) -> str:
                 status = "[past]" if d.date < today.isoformat() else "[upcoming]"
                 parts.append(f"- {d.date}{time_str} {status} — {d.title} ({d.type or 'deadline'}) [id:{d.id}]")
     else:
-        parts.append("(no deadlines recorded — student has not uploaded a syllabus or added any deadlines)")
+        parts.append("(no deadlines recorded — student has not connected their LMS, uploaded a syllabus, or added any deadlines)")
 
     # Summaries as course material context (truncated to budget)
     summaries = (
@@ -7709,12 +7719,24 @@ def _build_chat_context(db, user_id: str, message: str | None = None) -> str:
     courses_with_syllabus = [c for c in courses if c.syllabus_text]
     if courses_with_syllabus:
         parts.append("\n## Syllabus Details (Use for exact grading, policies, and assignment-specific questions)")
+        msg = (message or "").lower()
+
+        def mentioned(c):
+            return any(t and t.lower() in msg for t in (c.code, c.name, (c.code or "").replace(" ", "")))
+
+        # Courses the student named get read first and in full budget order; everyone gets a fair share.
+        courses_with_syllabus.sort(key=lambda c: not mentioned(c))
         syllabus_budget = MAX_SYLLABUS_CONTEXT_TOTAL
-        for c in courses_with_syllabus:
+        share = max(MIN_SYLLABUS_PER_COURSE, MAX_SYLLABUS_CONTEXT_TOTAL // len(courses_with_syllabus))
+        for i, c in enumerate(courses_with_syllabus):
             if syllabus_budget <= 0:
                 break
             label = c.code or c.name
-            excerpt = c.syllabus_text[:syllabus_budget]
+            # Leave a minimum slice for every course still to come; a named course may take the rest
+            available = syllabus_budget - (len(courses_with_syllabus) - i - 1) * MIN_SYLLABUS_PER_COURSE
+            cap = available if mentioned(c) else min(share, available)
+            cap = max(cap, min(MIN_SYLLABUS_PER_COURSE, syllabus_budget))
+            excerpt = c.syllabus_text[:cap]
             parts.append(f"\n### {label} Syllabus\n{excerpt}")
             syllabus_budget -= len(excerpt)
 
@@ -7953,9 +7975,17 @@ def _execute_chat_tool(tool_name: str, args: dict, user_id: str, db) -> dict:
     return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
 
-CHAT_SYSTEM_PROMPT = """You are ClassMate AI, a personal academic assistant. You have access to the student's courses, upcoming deadlines, and course materials provided below.
+CHAT_SYSTEM_PROMPT = """You are ClassMate, a student's personal academic assistant. You can see their courses, deadlines (synced from their school's LMS and their syllabi), syllabi, notes and study materials below.
 
-YOUR PRIMARY JOB: TEACH the student. Answer questions by pulling SPECIFIC information directly from their course materials. Don't just tell them what to study — actually explain it.
+How to write:
+- Talk like a sharp, friendly classmate who has their whole semester in front of them. Plain, warm, direct.
+- Lead with the answer. Short questions get short answers (1-3 sentences). Only go long when they ask you to explain or teach something.
+- Use lists only for real lists (deadlines, steps). No headings on short answers. No filler like "Great question!".
+- Dates: say the weekday and date ("Thu, Oct 16") and how soon ("tomorrow", "in 3 days"), using today's date from the Deadlines section.
+- Never invent a deadline, date, grade, policy or professor detail. If it isn't in the data below, say so.
+- Due dates come from their LMS and syllabus. If a student says a date is wrong, trust their LMS and offer to fix it with the calendar tools.
+
+When they want to learn something, TEACH: answer by pulling SPECIFIC information from their course materials. Don't just tell them what to study; explain it.
 
 Teaching Guidelines:
 1. **Teach, don't redirect**: When they ask about a topic, explain it thoroughly. Use clear language, step-by-step breakdowns, and helpful analogies.
@@ -8252,7 +8282,7 @@ Return ONLY a valid JSON array with exactly {num_cards} flashcards:
 Focus on key concepts, definitions, important facts, and formulas. Make questions clear and answers concise."""
 
                             fc_response = await client.chat.completions.create(
-                                model="gpt-4o-mini",
+                                model=CHAT_MODEL,
                                 messages=[
                                     {"role": "system", "content": fc_prompt},
                                     {"role": "user", "content": f"Generate flashcards from this material:\n\n{text_for_gen}"}
@@ -8287,7 +8317,7 @@ Return ONLY a valid JSON object:
 Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Test understanding, not memorization."""
 
                             q_response = await client.chat.completions.create(
-                                model="gpt-4o-mini",
+                                model=CHAT_MODEL,
                                 messages=[
                                     {"role": "system", "content": q_prompt},
                                     {"role": "user", "content": f"Generate a quiz from this material:\n\n{text_for_gen}"}
@@ -8369,7 +8399,7 @@ Focus on key concepts, definitions, important facts, and formulas. Make question
                                 fc_prompt = _notes_generation_prompt("flashcards", num_cards, user_course, message_content or "", notes_text)
 
                             fc_response = await client.chat.completions.create(
-                                model="gpt-4o-mini",
+                                model=CHAT_MODEL,
                                 messages=[{"role": "user", "content": fc_prompt}],
                                 temperature=0.3,
                                 max_tokens=4000,
@@ -8411,7 +8441,7 @@ Generate exactly {num_questions} questions with 4 options each (A, B, C, D). Tes
                                 q_prompt = _notes_generation_prompt("quiz", num_questions, user_course, message_content or "", notes_text)
 
                             q_response = await client.chat.completions.create(
-                                model="gpt-4o-mini",
+                                model=CHAT_MODEL,
                                 messages=[{"role": "user", "content": q_prompt}],
                                 temperature=0.4,
                                 max_tokens=4000,
@@ -8495,7 +8525,7 @@ Course context:
 Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, definitions, and important facts. Be specific and detailed enough to study from."""
 
                                 sum_response = await client.chat.completions.create(
-                                    model="gpt-4o-mini",
+                                    model=CHAT_MODEL,
                                     messages=[{"role": "user", "content": sum_prompt}],
                                     temperature=0.3,
                                     max_tokens=1500,
@@ -8589,7 +8619,7 @@ Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, de
 
                 try:
                     stream = await client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model=CHAT_MODEL,
                         messages=_openai_messages,
                         tools=DEADLINE_TOOLS,
                         tool_choice="auto",
@@ -8654,7 +8684,7 @@ Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, de
 
                         followup_msgs = _openai_messages + [assistant_tool_msg] + tool_result_msgs
                         stream2 = await client.chat.completions.create(
-                            model="gpt-4o-mini",
+                            model=CHAT_MODEL,
                             messages=followup_msgs,
                             max_tokens=500,
                             temperature=0.7,
@@ -8765,8 +8795,34 @@ async def generate_proactive_message(
             if used >= limit:
                 return {"skipped": True}
 
-        today = date.today()
+        today = datetime.now(_user_timezone(db, current_user.id)).date()
         seven_days = today + timedelta(days=7)
+
+        # One briefing per day: reopening chat (new tab, new session) returns today's instead of
+        # piling up "Daily Briefing" conversations in the sidebar.
+        title = f"Daily Briefing — {today.strftime('%b %d')}"
+        existing = (
+            db.query(ChatConversation)
+            .filter(ChatConversation.user_id == current_user.id, ChatConversation.title == title,
+                    ChatConversation.created_at >= datetime.utcnow() - timedelta(hours=36))
+            .order_by(ChatConversation.created_at.desc())
+            .first()
+        )
+        if existing:
+            first = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.conversation_id == existing.id)
+                .order_by(ChatMessage.created_at)
+                .first()
+            )
+            if first:
+                return {
+                    "conversation_id": existing.id,
+                    "conversation_title": existing.title,
+                    "existing": True,
+                    "message": {"id": first.id, "role": first.role, "content": first.content,
+                                "created_at": first.created_at.isoformat(), "created_study_set": None},
+                }
 
         # Upcoming deadlines in the next 7 days
         deadlines = (
@@ -8839,7 +8895,7 @@ async def generate_proactive_message(
         user_name = profile.full_name.strip() if profile and profile.full_name and profile.full_name.strip() else None
         name_line = f"Student's name: {user_name}" if user_name else "Student's name: (not set — do not use 'Your Name' or any placeholder)"
 
-        prompt = f"""You are ClassMate AI. Write a brief, specific opening message for a student starting their study session.
+        prompt = f"""You are ClassMate. Write a brief, specific opening message for a student starting their study session.
 
 Student situation:
 {name_line}
@@ -8850,6 +8906,7 @@ Rules:
 - ONLY use course names and deadline titles that appear verbatim in the data above — do NOT invent or assume any course names
 - If the student's name is set, use it naturally once (e.g., "Good luck today, Alex!") — never output a placeholder like "Your Name"
 - If the student's name is not set, address them naturally without a name (e.g., "You have a quiz coming up…")
+- Lead with what's due soonest (today/tomorrow first). Mention study materials only if something is due within 2 days
 - If there are no deadlines, offer to help them study or create materials for their actual courses listed above
 - If the student has no courses yet, invite them to add their first course
 - End with one specific actionable offer
@@ -8857,7 +8914,7 @@ Rules:
 - Output only the message text, no quotes or formatting"""
 
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=CHAT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.7,
@@ -8865,10 +8922,7 @@ Rules:
         message_text = response.choices[0].message.content.strip().strip('"')
 
         # Create conversation and save proactive message (not billed to usage)
-        conv = ChatConversation(
-            user_id=current_user.id,
-            title=f"Daily Briefing — {today.strftime('%b %d')}",
-        )
+        conv = ChatConversation(user_id=current_user.id, title=title)
         db.add(conv)
         db.flush()
 

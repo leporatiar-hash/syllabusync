@@ -13,6 +13,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // The homepage and /v2 render their own full nav + footer (built for the
   // logged-out marketing page), so the global chrome would otherwise double up.
   const isStandalonePage = pathname === '/' || pathname?.startsWith('/v2')
+  // Chat is a full-height app surface (like Claude): no footer under it, and the floating buttons
+  // would cover the composer and sidebar.
+  const isChat = pathname?.startsWith('/chat')
 
   const buildId = process.env.NEXT_PUBLIC_BUILD_ID || 'dev'
   const buildTimestamp = new Date().toISOString()
@@ -39,9 +42,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         </div>
       </header>
       {children}
-      <FeedbackButton />
-      <TalkToClassMateButton />
-      <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
+      {!isChat && <FeedbackButton />}
+      {!isChat && <TalkToClassMateButton />}
+      {!isChat && <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>&copy; {new Date().getFullYear()} ClassMate</span>
           <div className="flex items-center gap-4">
@@ -60,7 +63,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             <AuthDebug />
           </div>
         )}
-      </footer>
+      </footer>}
       <MobileTabBar />
     </>
   )
