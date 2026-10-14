@@ -765,6 +765,20 @@ class Feedback(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SurveyResponse(Base):
+    """In-depth feedback survey answers (one row per user per survey). `answers` is the raw form;
+    `dismissed` rows record a "not now" so the survey isn't shown again."""
+    __tablename__ = "survey_responses"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    survey_key = Column(String, nullable=False, index=True)
+    user_id = Column(String, nullable=False, index=True)
+    user_email = Column(String, nullable=True)
+    answers = Column(JSON, nullable=True)
+    dismissed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ValuePromptResponse(Base):
     """Answer to the one-question 'what's the one thing you'd hate to lose about
     ClassMate?' ask, shown once ever after 3+ sessions or 7 days of account age."""
@@ -1156,6 +1170,7 @@ class SubscriptionOut(BaseModel):
     billing_source: str | None = Field(None, description="Where Pro access comes from: 'stripe', 'app_store', 'founding', or null if not paying")
     iap_expires_at: str | None = Field(None, description="ISO 8601 timestamp when App Store Pro access lapses unless renewed; null if none")
     is_trial: bool = Field(False, description="True while the App Store subscription is in its free-trial period (iap_expires_at is when the trial ends and billing starts)")
+    promo_until: str | None = Field(None, description="YYYY-MM-DD through which everyone gets Pro free (null when no promo is running)")
 
 
 class UserMeResponse(BaseModel):
@@ -1610,7 +1625,11 @@ PLAN_CONFIG = {
     "founding": {"env_var": "STRIPE_PRICE_FOUNDING", "mode": "payment"},
     "monthly": {"env_var": "STRIPE_PRICE_MONTHLY", "mode": "subscription"},
     "yearly": {"env_var": "STRIPE_PRICE_YEARLY", "mode": "subscription"},
+    # $29.99 every 6 months ("Semester Pass"). Monthly is $4.99 (STRIPE_PRICE_MONTHLY points at it).
+    "semester": {"env_var": "STRIPE_PRICE_SEMESTER", "mode": "subscription"},
 }
+# No longer sold (Oct 2026). Kept in PLAN_CONFIG so webhooks for past purchases still resolve.
+RETIRED_PLANS = {"founding", "yearly"}
 
 
 def _resolve_plan_price_id(plan: str) -> str:
@@ -1636,6 +1655,21 @@ def _require_admin(current_user: User) -> None:
     since it's already the project's one privileged-access list — no separate roles table."""
     if not current_user.email or current_user.email.lower() not in ALWAYS_PRO_EMAILS:
         raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _promo_until() -> datetime | None:
+    """Everyone gets Pro until this date (PROMO_PRO_UNTIL=YYYY-MM-DD on Railway; inclusive, end of
+    that day UTC). Unset = no promo. Fall 2026: free Pro until the end of the semester."""
+    raw = (os.getenv("PROMO_PRO_UNTIL") or "").strip()
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d") + timedelta(days=1) if raw else None
+    except ValueError:
+        return None
+
+
+def _promo_active() -> bool:
+    until = _promo_until()
+    return bool(until and datetime.utcnow() < until)
 
 
 def _founding_member_active(profile) -> bool:
@@ -1665,7 +1699,10 @@ def _effective_tier(profile) -> str:
         return "pro"
     if _iap_active(profile):
         return "pro"
-    return profile.subscription_tier if profile else "free"
+    paid = profile.subscription_tier if profile else "free"
+    if paid != "pro" and _promo_active():
+        return "pro"
+    return paid
 
 
 def _iap_active(profile) -> bool:
@@ -1686,6 +1723,8 @@ def _billing_source(profile) -> str | None:
         return "app_store" if profile.iap_store == "APP_STORE" else (profile.iap_store or "app_store").lower()
     if _founding_member_active(profile):
         return "founding"
+    if _promo_active():
+        return "promo"
     return None
 
 
@@ -3813,12 +3852,12 @@ def record_referral(current_user: User = Depends(get_current_user), referral_cod
 # ── Subscription / Stripe endpoints ──
 
 class CheckoutRequest(BaseModel):
-    plan: str = Field(description="Billing interval: 'monthly', 'yearly', or the one-time 'founding' purchase")
+    plan: str = Field(description="Billing interval: 'monthly' ($4.99) or 'semester' ($29.99 every 6 months)")
 
     @validator("plan")
     def plan_must_be_valid(cls, v):
-        if v not in ("monthly", "yearly", "founding"):
-            raise ValueError("plan must be 'monthly', 'yearly', or 'founding'")
+        if v not in ("monthly", "semester", "yearly", "founding"):
+            raise ValueError("plan must be 'monthly' or 'semester'")
         return v
 
 
@@ -3857,6 +3896,7 @@ def get_subscription(current_user: User = Depends(get_current_user)):
         return {
             "tier": tier,
             "is_pro": tier == "pro",
+            "promo_until": os.getenv("PROMO_PRO_UNTIL", "").strip() if _promo_active() else None,
             "is_founding_member": _founding_member_active(profile),
             "founding_member_expires_at": (
                 profile.founding_member_expires_at.isoformat()
@@ -4137,8 +4177,8 @@ def create_checkout_session(
                 if not profile:
                     raise HTTPException(status_code=500, detail="Unable to create user profile")
 
-        if payload.plan == "founding" and _founding_member_active(profile):
-            raise HTTPException(status_code=400, detail="You're already a founding member")
+        if payload.plan in RETIRED_PLANS:
+            raise HTTPException(status_code=400, detail="That plan is no longer offered. Choose monthly or the Semester Pass.")
         if payload.plan != "founding" and _iap_active(profile):
             raise HTTPException(status_code=400, detail="You already have Pro through the App Store. Manage it in your iPhone's Settings → Subscriptions.")
 
@@ -6758,6 +6798,81 @@ def sync_all_connections(user_id: str, db):
         all_errors.extend(errs)
 
     return total_synced, all_errors
+
+
+# ── Feedback survey ────────────────────────────────────────────────────────
+
+CURRENT_SURVEY = "fall-2026"
+# Only existing users are asked: accounts at least this old, so brand-new signups aren't greeted
+# with a survey before they've used anything.
+SURVEY_MIN_ACCOUNT_AGE = timedelta(days=3)
+ADMIN_EMAILS = {"leporatiar@g.cofc.edu"}
+
+
+class SurveySubmit(BaseModel):
+    survey_key: str = Field(CURRENT_SURVEY, max_length=40)
+    dismissed: bool = False
+    answers: dict | None = None
+
+    @validator("answers")
+    def answers_size(cls, v):
+        if v is not None and len(json.dumps(v)) > 8000:
+            raise ValueError("answers too long")
+        return v
+
+
+@app.get("/me/survey", tags=["user"], summary="Whether to show the current feedback survey")
+def survey_status(current_user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        answered = db.query(SurveyResponse.id).filter(
+            SurveyResponse.user_id == current_user.id, SurveyResponse.survey_key == CURRENT_SURVEY
+        ).first()
+        user = db.query(User).filter(User.id == current_user.id).first()
+        old_enough = bool(user and user.created_at and datetime.utcnow() - user.created_at >= SURVEY_MIN_ACCOUNT_AGE)
+        return {"survey_key": CURRENT_SURVEY, "show": bool(old_enough and not answered)}
+    finally:
+        db.close()
+
+
+@app.post("/me/survey", tags=["user"], summary="Submit (or dismiss) the feedback survey")
+@limiter.limit("10/minute")
+def submit_survey(request: Request, payload: SurveySubmit, current_user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        row = db.query(SurveyResponse).filter(
+            SurveyResponse.user_id == current_user.id, SurveyResponse.survey_key == payload.survey_key
+        ).first()
+        if row is None:
+            row = SurveyResponse(user_id=current_user.id, survey_key=payload.survey_key, user_email=current_user.email)
+            db.add(row)
+        if payload.answers is not None:
+            row.answers = payload.answers
+            row.dismissed = False
+        elif payload.dismissed and not row.answers:
+            row.dismissed = True
+        db.commit()
+        return {"saved": True}
+    finally:
+        db.close()
+
+
+@app.get("/admin/survey-responses", tags=["admin"], summary="All answers to a feedback survey (founder only)")
+def survey_results(survey_key: str = CURRENT_SURVEY, current_user: User = Depends(get_current_user)):
+    if (current_user.email or "").lower() not in ADMIN_EMAILS:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    db = SessionLocal()
+    try:
+        rows = db.query(SurveyResponse).filter(SurveyResponse.survey_key == survey_key).order_by(SurveyResponse.created_at).all()
+        answered = [r for r in rows if r.answers]
+        return {
+            "survey_key": survey_key,
+            "answered": len(answered),
+            "dismissed": sum(1 for r in rows if r.dismissed and not r.answers),
+            "responses": [{"email": r.user_email, "at": r.created_at.isoformat() if r.created_at else None, "answers": r.answers} for r in answered],
+        }
+    finally:
+        db.close()
 
 
 # ── Schools ("Where do you go?") ───────────────────────────────────────────
