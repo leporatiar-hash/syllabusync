@@ -9,7 +9,6 @@ import CredibilityStrip from './components/CredibilityStrip'
 const ProblemStory = dynamic(() => import('./components/ProblemStory'))
 const HowItWorks = dynamic(() => import('./components/HowItWorks'))
 const Pricing = dynamic(() => import('./components/Pricing'))
-const Testimonials = dynamic(() => import('./components/Testimonials'))
 const FAQ = dynamic(() => import('./components/FAQ'))
 const FinalCTA = dynamic(() => import('./components/FinalCTA'))
 const Footer = dynamic(() => import('./components/Footer'))
@@ -23,7 +22,6 @@ export default function V2LandingPage() {
       <ProblemStory />
       <HowItWorks />
       <Pricing />
-      <Testimonials />
       <FAQ />
       <FinalCTA />
       <Footer />
