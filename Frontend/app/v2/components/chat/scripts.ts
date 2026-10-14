@@ -28,38 +28,52 @@ export const introExchange = {
   },
 }
 
+// Hero demo: the push alert that opens it, then the first question. (introExchange above is
+// still used by the how-it-works "Ask anything" scene.)
+export const heroAlert = {
+  title: 'Due date changed: Essay 2',
+  body: 'ENGL 110 · now Fri, 11:59 PM (was Tue)',
+}
+
+export const heroExchange = {
+  question: 'What changed in my classes this week?',
+  answer: {
+    kind: 'deadlines' as const,
+    intro: 'Your professors updated 2 things in your LMS. Your calendar is already fixed:',
+    items: [
+      { course: 'ENGL 110', title: 'Essay 2', when: 'Fri · was Tue' },
+      { course: 'BIO 101', title: 'Quiz 4', when: 'New · Thu' },
+    ],
+  },
+}
+
 export const suggestions: Suggestion[] = [
+  {
+    id: 'due-tomorrow',
+    question: "What's due tomorrow?",
+    answer: {
+      kind: 'deadlines',
+      intro: "Two things. I'll remind you again tonight:",
+      items: [
+        { course: 'FINC 400', title: 'Problem Set 6', when: '11:59 PM' },
+        { course: 'BIO 101', title: 'Lab report', when: '9:00 AM' },
+      ],
+    },
+  },
+  {
+    id: 'plan-week',
+    question: 'Plan my week',
+    answer: {
+      kind: 'text',
+      text: 'You have 6 deadlines this week and Thursday is the busiest: Quiz 4 and the ENTR 360 pitch draft. Start the pitch Tuesday night, since Essay 2 moved to Friday and frees up Wednesday.',
+    },
+  },
   {
     id: 'late-policy',
     question: 'Can I still submit the BIO lab late?',
     answer: {
       kind: 'text',
-      text: "Checking your BIO 101 syllabus — yes, but with a penalty. Your professor's late policy allows submissions up to 48 hours late for a 10% deduction per day. After that, it needs prior approval. Want me to draft a quick email to your professor?",
-    },
-  },
-  {
-    id: 'due-this-week',
-    question: "What's due this week?",
-    answer: {
-      kind: 'deadlines',
-      intro: "Here's everything on your plate this week:",
-      items: [
-        { course: 'FINC 400', title: 'Problem Set 6', when: 'Wed' },
-        { course: 'ENTR 360', title: 'Pitch deck draft', when: 'Thu' },
-        { course: 'BIO 101', title: 'Lab report', when: 'Fri' },
-      ],
-    },
-  },
-  {
-    id: 'flashcards',
-    question: 'Make me flashcards for Chapter 4',
-    answer: {
-      kind: 'flashcards',
-      intro: 'Done! I pulled the key terms from your BIO 101 Chapter 4 notes — here\'s a preview:',
-      cards: [
-        { front: 'Mitosis', back: 'Cell division that produces two genetically identical daughter cells.' },
-        { front: 'Homeostasis', back: "The body's ability to maintain stable internal conditions despite external change." },
-      ],
+      text: "Checking your BIO 101 syllabus: yes, with a penalty. Late work is accepted up to 48 hours late for 10% off per day. After that it needs prior approval. Want me to draft an email to your professor?",
     },
   },
 ]

@@ -51,7 +51,7 @@ export default function Hero() {
               <ChatWidget variant="interactive" />
             </PhoneFrame>
             <p className="mt-4 text-center text-xs text-slate-400">
-              Interactive preview — real answers come from your syllabus.
+              Interactive preview. Real alerts come from your LMS; answers come from your syllabi.
             </p>
           </div>
         </div>

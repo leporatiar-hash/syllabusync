@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePrefersReducedMotion } from '../../../../hooks/usePrefersReducedMotion'
-import { introExchange, suggestions as allSuggestions, type Suggestion, type ScriptedAnswer } from './scripts'
+import { heroAlert, heroExchange as introExchange, suggestions as allSuggestions, type Suggestion, type ScriptedAnswer } from './scripts'
 import TypingIndicator from './TypingIndicator'
 import FlashcardPreview from './FlashcardPreview'
 import { BRAND } from '../tokens'
@@ -58,7 +58,7 @@ function ChatHeader() {
         CM
       </div>
       <div>
-        <p className="text-sm font-semibold text-slate-900">ClassMate AI</p>
+        <p className="text-sm font-semibold text-slate-900">ClassMate</p>
         <p className="text-[11px] text-slate-400 flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
           Online
@@ -93,12 +93,42 @@ function AiBubble({ answer, animate }: { answer: ScriptedAnswer; animate: boolea
 
 const INTRO_ID = 'intro'
 
+/** iOS-style push banner that opens the demo: the thing ClassMate Pro actually sends. */
+function AlertBanner({ visible }: { visible: boolean }) {
+  return (
+    <div
+      aria-hidden={!visible}
+      className={`pointer-events-none absolute inset-x-2 top-2 z-10 transition-all duration-500 ${
+        visible ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0'
+      }`}
+    >
+      <div className="flex items-start gap-2.5 rounded-2xl border border-white/60 bg-white/90 px-3 py-2.5 shadow-lg backdrop-blur">
+        <div
+          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white"
+          style={{ background: BRAND }}
+        >
+          CM
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">ClassMate</p>
+            <p className="text-[11px] text-slate-400">now</p>
+          </div>
+          <p className="truncate text-xs font-semibold text-slate-900">{heroAlert.title}</p>
+          <p className="truncate text-xs text-slate-600">{heroAlert.body}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ChatWidget({ variant = 'interactive' }: { variant?: 'interactive' | 'static' }) {
   const reducedMotion = usePrefersReducedMotion()
   const [messages, setMessages] = useState<Msg[]>([])
   const [typing, setTyping] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [usedIds, setUsedIds] = useState<Set<string>>(new Set())
+  const [alertVisible, setAlertVisible] = useState(false)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -120,6 +150,10 @@ export default function ChatWidget({ variant = 'interactive' }: { variant?: 'int
     setMessages([])
     setShowSuggestions(false)
     setUsedIds(new Set())
+    setAlertVisible(false)
+    // The alert drops in first, then the student asks about it.
+    schedule(() => setAlertVisible(true), 400)
+    schedule(() => setAlertVisible(false), 3600)
     schedule(() => {
       setMessages([{ id: `${INTRO_ID}-q`, role: 'user', text: introExchange.question }])
       schedule(() => {
@@ -130,7 +164,7 @@ export default function ChatWidget({ variant = 'interactive' }: { variant?: 'int
           schedule(() => setShowSuggestions(true), 500)
         }, 1300)
       }, 500)
-    }, 400)
+    }, 3900)
   }, [schedule])
 
   useEffect(() => {
@@ -185,14 +219,15 @@ export default function ChatWidget({ variant = 'interactive' }: { variant?: 'int
   const allUsed = usedIds.size === allSuggestions.length
 
   return (
-    <div className="flex h-full flex-col bg-white">
+    <div className="relative flex h-full flex-col bg-white">
+      <AlertBanner visible={alertVisible} />
       <ChatHeader />
 
       <div
         ref={scrollRef}
         role="log"
         aria-live="polite"
-        aria-label="ClassMate AI demo conversation"
+        aria-label="ClassMate demo conversation"
         className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-smooth bg-[#F9FAFB] p-4"
       >
         {messages.map((m) =>
