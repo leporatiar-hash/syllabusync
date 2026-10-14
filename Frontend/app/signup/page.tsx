@@ -1,12 +1,11 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import posthog from 'posthog-js'
 import { authClient } from '../../lib/authClient'
 import { useAuth } from '../../lib/useAuth'
-import { API_URL } from '../../hooks/useAuthFetch'
 
 
 function SignupContent() {
@@ -25,8 +24,11 @@ function SignupContent() {
 
   const referralSourceOptions = ['ChatGPT', 'Google', 'A friend', 'Professor / class', 'TikTok / social', 'Other']
 
+  // Already signed in: go to the dashboard. Not right after creating the account, though; that
+  // navigation goes to the setup intro and this effect would race it.
+  const justSignedUp = useRef(false)
   useEffect(() => {
-    if (!loading && user) {
+    if (!loading && user && !justSignedUp.current) {
       router.replace('/home')
     }
   }, [loading, user, router])
@@ -68,18 +70,12 @@ function SignupContent() {
       return
     }
 
+    justSignedUp.current = true
     posthog.capture('user_signed_up')
     refreshUser()
 
-    // Fire-and-forget background tasks
-    if (accessToken) {
-      fetch(`${API_URL}/me/complete-onboarding`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }).catch(() => {})
-    }
-
-    router.push('/home')
+    // New signups get the short setup intro; it marks onboarding complete when they finish or skip.
+    router.replace(accessToken ? '/welcome' : '/home')
   }
 
   return (
