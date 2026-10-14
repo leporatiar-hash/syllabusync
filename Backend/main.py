@@ -224,6 +224,28 @@ def decrypt_token(encrypted: str) -> str:
     return fernet.decrypt(encrypted.encode()).decode()
 
 
+# LMS calendar-feed links work like passwords (anyone with the link can read that student's
+# calendar), so they're encrypted at rest with the same key as Canvas tokens. "enc:" marks a
+# sealed value; rows from before encryption (or a server without ENCRYPTION_KEY) are plain.
+_FEED_PREFIX = "enc:"
+
+
+def _seal_feed(url: str) -> str:
+    return _FEED_PREFIX + fernet.encrypt(url.encode()).decode() if fernet else url
+
+
+def _open_feed(stored: str | None) -> str | None:
+    """The real feed URL, or None if it's sealed and can't be decrypted (key missing/changed)."""
+    if not stored or not stored.startswith(_FEED_PREFIX):
+        return stored
+    if not fernet:
+        return None
+    try:
+        return fernet.decrypt(stored[len(_FEED_PREFIX):].encode()).decode()
+    except Exception:
+        return None
+
+
 def _raise_if_openai_error(e: Exception) -> None:
     """If *e* is a known OpenAI SDK error, raise an HTTPException with a
     clear, user-facing message and log it so Railway picks it up.
@@ -2085,6 +2107,31 @@ ensure_iap_columns()
 ensure_notification_pref_columns()
 ensure_lms_health_columns()
 ensure_school_columns()
+
+
+def encrypt_existing_feed_urls():
+    """One-time (idempotent) pass: encrypt any calendar-feed links still stored in plain text."""
+    if not fernet:
+        return
+    db = SessionLocal()
+    try:
+        rows = db.query(LMSConnection).filter(LMSConnection.provider == "ical").all()
+        n = 0
+        for c in rows:
+            if c.ical_url and not c.ical_url.startswith(_FEED_PREFIX):
+                c.ical_url = _seal_feed(c.ical_url)
+                n += 1
+        if n:
+            db.commit()
+            logger.info(f"[Migration] Encrypted {n} stored calendar-feed links")
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"[Migration] Feed encryption pass skipped: {e}")
+    finally:
+        db.close()
+
+
+encrypt_existing_feed_urls()
 ensure_naming_style_column()
 ensure_note_columns()
 Base.metadata.create_all(bind=engine)
@@ -6678,8 +6725,15 @@ def sync_ical(connection, user_id: str, db):
 
     try:
         with httpx.Client(timeout=30.0) as http_client:
+            feed_url = _open_feed(connection.ical_url)
+            if not feed_url:
+                # A key problem on our side, not a dead link: log loudly, don't blame the student
+                logger.error(f"[LMS] Can't decrypt feed for connection {connection.id}; check ENCRYPTION_KEY")
+                errors.append("Feed link unreadable on the server")
+                _record_lms_health(db, connection, False, "feed decrypt failed", network=True)
+                return synced, errors
             try:
-                resp = http_client.get(connection.ical_url)
+                resp = http_client.get(feed_url)
             except Exception as e:
                 errors.append(f"Failed to fetch iCal feed: {e}")
                 _record_lms_health(db, connection, False, f"network: {e}", network=True)
@@ -7100,12 +7154,11 @@ def connect_ical(
     try:
         user_id = current_user.id
 
-        # Check for duplicate
-        existing = db.query(LMSConnection).filter(
+        # Check for duplicate (stored links are encrypted, so compare decrypted values)
+        existing = next((c for c in db.query(LMSConnection).filter(
             LMSConnection.user_id == user_id,
             LMSConnection.provider == "ical",
-            LMSConnection.ical_url == ical_url,
-        ).first()
+        ).all() if _open_feed(c.ical_url) == ical_url), None)
         if existing:
             raise HTTPException(status_code=400, detail="This iCal feed is already connected")
 
@@ -7118,7 +7171,7 @@ def connect_ical(
         connection = LMSConnection(
             user_id=user_id,
             provider="ical",
-            ical_url=ical_url,
+            ical_url=_seal_feed(ical_url),
         )
         db.add(connection)
         db.commit()
