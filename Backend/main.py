@@ -6564,17 +6564,25 @@ def sync_canvas(connection, user_id: str, db):
                     logger.info(f"[LMS] Auto-created course: {clean_code} — {course_name}")
 
                 try:
-                    assignments_resp = client.get(
-                        f"{base}/api/v1/courses/{course_id}/assignments",
-                        params={"order_by": "due_at", "per_page": 100},
-                        headers=headers,
-                    )
-                    if assignments_resp.status_code != 200:
+                    # Canvas pages at 100; follow the Link: rel="next" header to get every assignment
+                    assignments: list = []
+                    page_url, page_params, failed = f"{base}/api/v1/courses/{course_id}/assignments", {"order_by": "due_at", "per_page": 100}, False
+                    for _ in range(20):
+                        assignments_resp = client.get(page_url, params=page_params, headers=headers)
+                        if assignments_resp.status_code != 200:
+                            failed = True
+                            break
+                        assignments.extend(assignments_resp.json())
+                        nxt = assignments_resp.links.get("next", {}).get("url")
+                        if not nxt:
+                            break
+                        page_url, page_params = nxt, None
+                    if failed:
                         errors.append(f"Failed to fetch assignments for course {course_name}")
                         complete = False
                         continue
 
-                    for assignment in assignments_resp.json():
+                    for assignment in assignments:
                         due_at = assignment.get("due_at")
                         if not due_at:
                             continue
@@ -6780,13 +6788,18 @@ def _apply_lms_source_of_truth(db, user_id: str, source: str, seen_ext_ids: set[
       exams to the LMS.
     Only call with a non-empty feed, so a failed or empty fetch can never wipe a student's list."""
     not_done = or_(Deadline.completed == False, Deadline.completed.is_(None))  # noqa: E712
-    gone = db.query(Deadline).filter(
-        Deadline.user_id == user_id,
-        Deadline.source == source,
-        Deadline.date >= today_iso,
-        not_done,
-    ).all()
-    doomed = [d for d in gone if d.external_id not in seen_ext_ids]
+    doomed = []
+    # Mirroring LMS deletions is OFF by default (2026-10-14): feeds can omit real items (Canvas
+    # pages, iCal date windows), and the first prod run deleted real homework and an exam. A
+    # missing item is not proof it was deleted. Re-enable only with proof of completeness.
+    if os.getenv("LMS_MIRROR_DELETIONS", "").lower() in ("1", "true", "yes"):
+        gone = db.query(Deadline).filter(
+            Deadline.user_id == user_id,
+            Deadline.source == source,
+            Deadline.date >= today_iso,
+            not_done,
+        ).all()
+        doomed = [d for d in gone if d.external_id not in seen_ext_ids]
     removed = len(doomed)
 
     replaced = 0

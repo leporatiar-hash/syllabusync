@@ -336,7 +336,12 @@ def test_lms_changes_flow_through():
         # Professor moves Problem Set 5, deletes Draft and Done already, and the past quiz ages out
         moved = _event("3001", "Problem Set 5 (extended) - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20261124T045900Z")
         _set_feed([moved])
+        # Default: an item missing from the feed is NOT deleted (feeds can omit real items)
         run_sync(user_id)
+        check("missing item kept unless deletion mirroring is on", _deadline(user_id, "3003") is not None)
+        os.environ["LMS_MIRROR_DELETIONS"] = "1"
+        run_sync(user_id)
+        os.environ.pop("LMS_MIRROR_DELETIONS", None)
         ps5 = _deadline(user_id, "3001")
         check("moved due date updates", ps5 and (ps5.date, ps5.title) == ("2026-11-23", "Problem Set 5 (extended) - Due"),
               str(ps5 and (ps5.date, ps5.title)))
