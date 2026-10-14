@@ -131,7 +131,7 @@ export default function UpgradePage() {
               >
                 {checkoutLoading === 'monthly' ? 'Loading...' : 'Upgrade to Pro'}
               </button>
-              <p className="mt-2 text-center text-xs text-slate-400">Cancel anytime.</p>
+              <p className="mt-2 text-center text-xs text-slate-400">Renews monthly at {PRICING.monthly.label}. Cancel anytime.</p>
             </div>
 
             {/* Semester Pass */}
@@ -154,8 +154,16 @@ export default function UpgradePage() {
               >
                 {checkoutLoading === 'semester' ? 'Loading...' : `Get the ${PRICING.semester.name}`}
               </button>
-              <p className="mt-2 text-center text-xs text-slate-400">Renews every 6 months. Cancel anytime.</p>
+              <p className="mt-2 text-center text-xs text-slate-400">Renews every 6 months at {PRICING.semester.label}. Cancel anytime.</p>
             </div>
+          </div>
+        )}
+
+        {(!isPro || onPromo) && (
+          <div className="mb-10 space-y-1 text-center text-sm text-slate-500">
+            <p><span className="font-medium text-slate-700">Not happy?</span> Full refund within 14 days, no questions asked. Cancel anytime in Settings.</p>
+            <p>May be paid with 529 college savings (educational software used by the student). Check with your plan.</p>
+            <p>Can&apos;t afford it right now? Email <a href="mailto:hello@tryclassmate.com" className="font-medium text-[#5B8DEF]">hello@tryclassmate.com</a>. We&apos;d rather you have it.</p>
           </div>
         )}
 

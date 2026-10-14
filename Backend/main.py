@@ -1650,6 +1650,51 @@ PLAN_CONFIG = {
     # $29.99 every 6 months ("Semester Pass"). Monthly is $4.99 (STRIPE_PRICE_MONTHLY points at it).
     "semester": {"env_var": "STRIPE_PRICE_SEMESTER", "mode": "subscription"},
 }
+PLAN_TERMS = {
+    "monthly": "Renews automatically every month until you cancel. Cancel anytime in ClassMate Settings. Full refund within 14 days, no questions asked.",
+    "semester": "Renews automatically every 6 months until you cancel. Cancel anytime in ClassMate Settings. Full refund within 14 days, no questions asked.",
+}
+PLAN_LABELS = {"monthly": ("ClassMate Pro, monthly", "every month"), "semester": ("ClassMate Pro Semester Pass", "every 6 months")}
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "hello@tryclassmate.com")
+
+
+def _subscription_description(profile) -> str:
+    """'Educational software subscription: ClassMate Pro, used by <name>, <school>' (for 529 records)."""
+    who = ", ".join(x for x in [(profile.full_name or "").strip() if profile else "", (profile.school_name or "").strip() if profile else ""] if x)
+    return "Educational software subscription: ClassMate Pro" + (f", used by {who}" if who else "")
+
+
+def _send_subscription_confirmation(profile, plan: str, amount_cents: int | None):
+    """Receipt-style confirmation: what they bought, when it renews, how to cancel, refunds, 529."""
+    if not RESEND_API_KEY or not profile or not profile.email:
+        return
+    name, cadence = PLAN_LABELS.get(plan, ("ClassMate Pro", "each billing period"))
+    price = f"${amount_cents / 100:.2f}" if amount_cents else "your plan price"
+    frontend_url = os.getenv("FRONTEND_URL", "https://www.tryclassmate.com")
+    try:
+        resend.api_key = RESEND_API_KEY
+        resend.Emails.send({
+            "from": "onboarding@resend.dev",
+            "to": [profile.email],
+            "subject": f"You're on {name}",
+            "html": f"""
+            <p>Thanks for supporting ClassMate. Here are the details, in plain English:</p>
+            <ul>
+              <li><b>Plan:</b> {name}, {price} {cadence}</li>
+              <li><b>Renews:</b> automatically {cadence} until you cancel</li>
+              <li><b>Cancel anytime:</b> <a href="{frontend_url}/settings">ClassMate Settings</a> &rarr; Manage Subscription</li>
+              <li><b>Refunds:</b> not happy? Email <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a> within 14 days for a full refund, no questions asked</li>
+            </ul>
+            <p><b>Paying with a 529 plan?</b> ClassMate is educational software used by the student, which may be a qualified
+            529 expense. Your Stripe receipt lists it as "{_subscription_description(profile)}". Check with your plan or a
+            tax professional; this isn't tax advice.</p>
+            <p>Can't afford it right now? Reply to this email. We'd rather you have it.</p>
+            """,
+        })
+    except Exception as e:
+        logger.error(f"[Stripe] Confirmation email failed for {profile.user_id}: {e}")
+
+
 # No longer sold (Oct 2026). Kept in PLAN_CONFIG so webhooks for past purchases still resolve.
 RETIRED_PLANS = {"founding", "yearly"}
 
@@ -4266,6 +4311,13 @@ def create_checkout_session(
                     line_items=[{"price": price_id, "quantity": 1}],
                     client_reference_id=current_user.id,
                     metadata={"user_id": current_user.id, "plan": payload.plan},
+                    # Shown on Stripe receipts and the billing portal: a "529-ready" description
+                    subscription_data={
+                        "description": _subscription_description(profile),
+                        "metadata": {"user_id": current_user.id, "plan": payload.plan},
+                    },
+                    # Plain-language renewal terms right above the Pay button (auto-renewal laws)
+                    custom_text={"submit": {"message": PLAN_TERMS.get(payload.plan, "Renews automatically. Cancel anytime in ClassMate Settings.")}},
                     success_url=f"{frontend_url}/settings?checkout=success",
                     cancel_url=f"{frontend_url}/settings?checkout=canceled",
                 )
@@ -4382,6 +4434,7 @@ async def stripe_webhook(request: Request):
                 profile.subscription_status = "active"
                 db.commit()
                 logger.info(f"[Stripe] User {profile.user_id} upgraded to pro")
+                _send_subscription_confirmation(profile, (session_obj.get("metadata") or {}).get("plan", ""), session_obj.get("amount_total"))
             else:
                 logger.warning(f"[Stripe] checkout.session.completed for event {event['id']}: no matching user profile")
 

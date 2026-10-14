@@ -119,6 +119,43 @@ def test_survey_flow():
     assert client.post("/me/survey", json={"answers": {"x": "y" * 9000}}, headers=h).status_code == 422
 
 
+def test_checkout_terms_529_description_and_confirmation_email():
+    uid, h = _user()
+    client.post("/me/profile", json={"full_name": "Alex Smith", "school_name": "College of Charleston"}, headers=h)
+    captured, sent = {}, []
+
+    class _S:
+        url = "https://checkout.stripe.test/s"
+
+    def fake_create(**kw):
+        captured.update(kw)
+        return _S()
+
+    orig = (main.stripe_lib.checkout.Session.create, main.stripe_lib.Customer.create, main.RESEND_API_KEY, main.resend.Emails.send)
+    main.stripe_lib.checkout.Session.create = fake_create
+    main.stripe_lib.Customer.create = lambda **kw: type("C", (), {"id": "cus_test"})()
+    os.environ["STRIPE_PRICE_SEMESTER"] = "price_semester_test"
+    try:
+        r = client.post("/create-checkout-session", json={"plan": "semester"}, headers=h)
+        assert r.status_code == 200, r.text
+        assert captured["subscription_data"]["description"] == "Educational software subscription: ClassMate Pro, used by Alex Smith, College of Charleston", captured
+        assert "every 6 months" in captured["custom_text"]["submit"]["message"] and "refund" in captured["custom_text"]["submit"]["message"]
+        # Confirmation email
+        main.RESEND_API_KEY = "re_test"
+        main.resend.Emails.send = lambda payload: sent.append(payload)
+        db = main.SessionLocal()
+        try:
+            p = db.query(main.UserProfile).filter(main.UserProfile.user_id == uid).first()
+            main._send_subscription_confirmation(p, "semester", 1999)
+        finally:
+            db.close()
+        html = sent[0]["html"]
+        assert "$19.99 every 6 months" in html and "Manage Subscription" in html and "14 days" in html and "529" in html, html
+    finally:
+        main.stripe_lib.checkout.Session.create, main.stripe_lib.Customer.create, main.RESEND_API_KEY, main.resend.Emails.send = orig
+        os.environ.pop("STRIPE_PRICE_SEMESTER", None)
+
+
 if __name__ == "__main__":
     main.Base.metadata.create_all(bind=main.engine)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
