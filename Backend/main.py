@@ -27,6 +27,7 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 import json
+import sys
 import uuid
 import io
 import os
@@ -43,10 +44,21 @@ from cryptography.fernet import Fernet
 import sentry_sdk
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Railway marks everything on stderr as an error, so only WARNING and above go there; INFO goes
+# to stdout. That keeps Railway's error filter meaningful for monitoring.
+_log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+_info_handler = logging.StreamHandler(sys.stdout)
+_info_handler.setLevel(logging.INFO)
+_info_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+_error_handler = logging.StreamHandler(sys.stderr)
+_error_handler.setLevel(logging.WARNING)
+for _h in (_info_handler, _error_handler):
+    _h.setFormatter(_log_format)
+logging.basicConfig(level=logging.INFO, handlers=[_info_handler, _error_handler])
+# httpx logs every request URL at INFO, and LMS calendar-feed URLs carry the student's secret token.
+# Keep those out of the logs.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -188,6 +200,9 @@ async def timeout_middleware(request: Request, call_next):
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
+# Who our emails come from. Must be on a domain verified in Resend (tryclassmate.com is); the old
+# onboarding@resend.dev test sender only delivers to the Resend account owner, so student emails bounced.
+EMAIL_FROM = os.getenv("EMAIL_FROM", "ClassMate <noreply@tryclassmate.com>")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
 
@@ -2674,7 +2689,7 @@ def auth_forgot_password(payload: AuthForgotPasswordRequest, db=Depends(get_db))
         try:
             resend.api_key = RESEND_API_KEY
             resend.Emails.send({
-                "from": "onboarding@resend.dev",
+                "from": EMAIL_FROM,
                 "to": [user.email],
                 "subject": "Reset your ClassMate password",
                 "html": f"""
@@ -5298,7 +5313,7 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
                 resend.api_key = RESEND_API_KEY
                 type_label = {"bug": "Bug Report", "feature": "Feature Request", "general": "General Feedback"}.get(payload.feedback_type, payload.feedback_type)
                 resend.Emails.send({
-                    "from": "onboarding@resend.dev",
+                    "from": EMAIL_FROM,
                     "to": [FEEDBACK_EMAIL],
                     "subject": f"[ClassMate Feedback] {type_label} from {current_user.email}",
                     "html": (
