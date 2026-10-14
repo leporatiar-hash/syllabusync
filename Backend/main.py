@@ -29,6 +29,7 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 import json
+from contextvars import ContextVar
 import sys
 import uuid
 import io
@@ -218,6 +219,163 @@ async def timeout_middleware(request: Request, call_next):
 
 # Initialize OpenAI client
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ── AI spending caps ───────────────────────────────────────────────────────
+# Every OpenAI call in this file goes through `client`, so its completions are wrapped once: each
+# call is checked against the signed-in user's daily/monthly budget (by plan) and a site-wide daily
+# ceiling, and its real token cost is recorded. Feature limits (chat messages, generations) are the
+# product limits; these are the safety net so no account, script or bug can run up the bill.
+# Backstop outside the code: set a monthly budget in the OpenAI dashboard.
+_ai_user: ContextVar[str | None] = ContextVar("ai_user", default=None)
+
+# $ per 1M tokens (input, output). Unknown models are priced high on purpose.
+AI_PRICES = {"gpt-4o-mini": (0.15, 0.60), "gpt-4.1-mini": (0.40, 1.60), "gpt-4.1-nano": (0.10, 0.40),
+             "gpt-4.1": (2.00, 8.00), "gpt-4o": (2.50, 10.00)}
+_AI_PRICE_UNKNOWN = (2.50, 10.00)
+
+
+def _usd_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, default))
+    except ValueError:
+        return default
+
+
+AI_LIMITS = {  # USD per user
+    "pro": {"day": _usd_env("AI_PRO_DAILY_USD", 0.50), "month": _usd_env("AI_PRO_MONTHLY_USD", 3.00)},
+    "free": {"day": _usd_env("AI_FREE_DAILY_USD", 0.20), "month": _usd_env("AI_FREE_MONTHLY_USD", 1.00)},
+}
+AI_GLOBAL_DAILY_USD = _usd_env("AI_GLOBAL_DAILY_USD", 20.0)
+
+
+def _ai_cost_microusd(model: str | None, usage) -> tuple[int, int, int]:
+    if not usage:
+        return 0, 0, 0
+    tin, tout = getattr(usage, "prompt_tokens", 0) or 0, getattr(usage, "completion_tokens", 0) or 0
+    pin, pout = AI_PRICES.get(next((m for m in AI_PRICES if (model or "").startswith(m)), ""), _AI_PRICE_UNKNOWN)
+    return tin, tout, round(tin * pin + tout * pout)  # $/1M tokens * tokens = micro-dollars
+
+
+def _record_ai_usage(user_id: str | None, model: str | None, usage):
+    tin, tout, cost = _ai_cost_microusd(model, usage)
+    if not (tin or tout):
+        return
+    day = datetime.utcnow().strftime("%Y-%m-%d")
+    uid = user_id or ""
+    db = SessionLocal()
+    try:
+        row = db.query(AiUsage).filter(AiUsage.id == f"{uid}:{day}").first()
+        if row is None:
+            row = AiUsage(id=f"{uid}:{day}", user_id=uid, day=day, calls=0, input_tokens=0, output_tokens=0, cost_microusd=0)
+            db.add(row)
+        row.calls += 1
+        row.input_tokens += tin
+        row.output_tokens += tout
+        row.cost_microusd += cost
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"[AI budget] Couldn't record usage: {e}")
+    finally:
+        db.close()
+
+
+def _check_ai_budget(user_id: str | None):
+    """Raise 429 (with a friendly message) if this call would go over a cap. Never blocks on its own errors."""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        day, month = now.strftime("%Y-%m-%d"), now.strftime("%Y-%m")
+        site_today = db.query(func.coalesce(func.sum(AiUsage.cost_microusd), 0)).filter(AiUsage.day == day).scalar() or 0
+        if site_today >= AI_GLOBAL_DAILY_USD * 1e6:
+            logger.error(f"[AI budget] Site-wide daily AI budget reached (${site_today / 1e6:.2f}); AI paused until midnight UTC")
+            raise HTTPException(status_code=429, detail={
+                "error": "limit_reached", "limit_type": "ai_budget",
+                "message": "ClassMate's AI is taking a short break. Try again tomorrow; your calendar and reminders still work.",
+            })
+        if not user_id:
+            return
+        profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        limits = AI_LIMITS["pro" if profile and _effective_tier(profile) == "pro" else "free"]
+        rows = db.query(AiUsage.day, AiUsage.cost_microusd).filter(AiUsage.user_id == user_id, AiUsage.day.like(f"{month}-%")).all()
+        spent_today = sum(c for d, c in rows if d == day)
+        spent_month = sum(c for _, c in rows)
+        if spent_today >= limits["day"] * 1e6 or spent_month >= limits["month"] * 1e6:
+            which = "today's" if spent_today >= limits["day"] * 1e6 else "this month's"
+            resets = "tomorrow" if which == "today's" else "next month"
+            logger.warning(f"[AI budget] User {user_id} hit {which} AI budget (today ${spent_today / 1e6:.2f}, month ${spent_month / 1e6:.2f})")
+            raise HTTPException(status_code=429, detail={
+                "error": "limit_reached", "limit_type": "ai_budget",
+                "message": f"You've reached {which} AI limit. It resets {resets}. "
+                           "Your calendar, reminders and LMS sync keep working.",
+            })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[AI budget] Check failed, allowing call: {e}")
+    finally:
+        db.close()
+
+
+class _MeteredStream:
+    """Passes stream chunks through; records the usage chunk OpenAI sends last (and hides it)."""
+
+    def __init__(self, stream, model, user_id):
+        self._stream, self._model, self._user = stream, model, user_id
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        async for chunk in self._stream:
+            if getattr(chunk, "usage", None) is not None:
+                _record_ai_usage(self._user, self._model, chunk.usage)
+            if getattr(chunk, "choices", None):
+                yield chunk
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+class _BudgetedCompletions:
+    def __init__(self, inner):
+        self._inner = inner
+
+    async def create(self, **kwargs):
+        user_id = _ai_user.get()
+        _check_ai_budget(user_id)
+        model = kwargs.get("model")
+        if kwargs.get("stream"):
+            kwargs.setdefault("stream_options", {"include_usage": True})
+            return _MeteredStream(await self._inner.create(**kwargs), model, user_id)
+        response = await self._inner.create(**kwargs)
+        _record_ai_usage(user_id, model, getattr(response, "usage", None))
+        return response
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+client.chat.completions = _BudgetedCompletions(client.chat.completions)
+
+
+@app.middleware("http")
+async def ai_user_middleware(request: Request, call_next):
+    """Remember who is signed in for this request, so AI calls are charged to the right budget."""
+    user_id = None
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        try:
+            claims = jwt.decode(auth[7:], JWT_SECRET, algorithms=[NATIVE_JWT_ALGORITHM])
+            if claims.get("type") == "access":
+                user_id = claims.get("sub")
+        except Exception:
+            pass
+    token = _ai_user.set(user_id)
+    try:
+        return await call_next(request)
+    finally:
+        _ai_user.reset(token)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
 # Who our emails come from. Must be on a domain verified in Resend (tryclassmate.com is); the old
@@ -800,6 +958,20 @@ class Feedback(Base):
     feedback_type = Column(String, nullable=False)
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AiUsage(Base):
+    """What each user's AI calls cost, per UTC day (user_id "" = no signed-in user). Feeds the
+    per-user and site-wide spending caps in _check_ai_budget."""
+    __tablename__ = "ai_usage"
+
+    id = Column(String, primary_key=True)  # f"{user_id}:{YYYY-MM-DD}"
+    user_id = Column(String, nullable=False, index=True)
+    day = Column(String, nullable=False, index=True)
+    calls = Column(Integer, default=0)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    cost_microusd = Column(Integer, default=0)  # millionths of a dollar
 
 
 class SurveyResponse(Base):

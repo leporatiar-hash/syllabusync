@@ -829,11 +829,11 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                 <div className="mb-4 flex justify-start">
                   <div className="max-w-[80%] rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
                     <p className="text-sm font-semibold text-amber-900">
-                      {isPro
+                      {isPro || !limitMessage.includes('chat messages')
                         ? limitMessage
-                        : `You've used your ${chatMessagesMax} free messages this week. Upgrade to Pro for 50 messages/week, proactive deadline nudges, and unlimited study material generation.`}
+                        : `You've used your ${chatMessagesMax} free messages this week. Upgrade to Pro for 50 messages a week, due-date change alerts and unlimited study tools.`}
                     </p>
-                    {!isPro && (
+                    {!isPro && limitMessage.includes('chat messages') && (
                       <Link
                         href="/upgrade"
                         style={{ background: BRAND }}
