@@ -535,12 +535,6 @@ function SettingsPageContent() {
               >
                 Upgrade to Pro
               </Link>
-              <Link
-                href="/founding"
-                className="text-sm font-semibold text-amber-600 hover:text-amber-700"
-              >
-                or become a Founding Member — $15 once
-              </Link>
             </div>
           </div>
         )}

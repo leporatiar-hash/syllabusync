@@ -2,18 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import posthog from 'posthog-js'
 import { useAuth } from '../../lib/useAuth'
 import { API_URL, useAuthFetch } from '../../hooks/useAuthFetch'
 import { useSubscription } from '../../hooks/useSubscription'
 import { Sparkles, Check } from 'lucide-react'
+import { PRICING, promoEndLabel } from '../../lib/pricing'
 
 export default function UpgradePage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const { fetchWithAuth } = useAuthFetch()
-  const { isPro, loading: subLoading } = useSubscription()
+  const { isPro, promoUntil, loading: subLoading } = useSubscription()
+  // During the free-Pro promo everyone is Pro, but nobody has paid: show the plans for later.
+  const onPromo = !!promoUntil
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
 
   useEffect(() => {
@@ -33,7 +35,7 @@ export default function UpgradePage() {
     return null
   }
 
-  const handleCheckout = async (plan: 'monthly' | 'yearly') => {
+  const handleCheckout = async (plan: 'monthly' | 'semester') => {
     posthog.capture('upgrade_clicked', { plan })
     setCheckoutLoading(plan)
     try {
@@ -81,8 +83,20 @@ export default function UpgradePage() {
           </p>
         </div>
 
+        {/* Free Pro for everyone right now */}
+        {onPromo && (
+          <div className="rounded-2xl border border-[#C7D2FE] bg-[#EEF2FF] p-6 text-center mb-8">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Pro is free for everyone through {promoEndLabel(promoUntil)}
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              You already have every Pro feature. No card needed. After {promoEndLabel(promoUntil)}, keep it with a plan below.
+            </p>
+          </div>
+        )}
+
         {/* Already pro */}
-        {isPro && (
+        {isPro && !onPromo && (
           <div className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center mb-8">
             <h3 className="text-lg font-semibold text-green-800">
               You&apos;re already on Pro!
@@ -100,15 +114,15 @@ export default function UpgradePage() {
         )}
 
         {/* Pricing cards */}
-        {!isPro && (
+        {(!isPro || onPromo) && (
           <div className="grid gap-4 md:grid-cols-2 mb-10">
             {/* Monthly */}
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-slate-900">Monthly</h3>
               <p className="mt-1 text-sm text-slate-500">Flexibility to cancel anytime</p>
               <div className="mt-4">
-                <span className="text-3xl font-bold text-slate-900">$5.00</span>
-                <span className="text-slate-400 text-sm">/month</span>
+                <span className="text-3xl font-bold text-slate-900">{PRICING.monthly.label}</span>
+                <span className="text-slate-400 text-sm">{PRICING.monthly.per}</span>
               </div>
               <button
                 onClick={() => handleCheckout('monthly')}
@@ -120,26 +134,27 @@ export default function UpgradePage() {
               <p className="mt-2 text-center text-xs text-slate-400">Cancel anytime.</p>
             </div>
 
-            {/* Yearly */}
+            {/* Semester Pass */}
             <div className="relative rounded-2xl border-2 border-[#5B8DEF] bg-white p-6 shadow-sm">
-              <div className="absolute -top-3 right-4 rounded-full bg-[#5B8DEF] px-3 py-0.5 text-xs font-bold text-white">
-                Save 33%
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900">Yearly</h3>
-              <p className="mt-1 text-sm text-slate-500">Best value for the school year</p>
+              {PRICING.semester.amount < PRICING.monthly.amount * 6 - 0.5 && (
+                <div className="absolute -top-3 right-4 rounded-full bg-[#5B8DEF] px-3 py-0.5 text-xs font-bold text-white">
+                  Save {Math.round((1 - PRICING.semester.amount / (PRICING.monthly.amount * 6)) * 100)}%
+                </div>
+              )}
+              <h3 className="text-lg font-semibold text-slate-900">{PRICING.semester.name}</h3>
+              <p className="mt-1 text-sm text-slate-500">Covers a full semester</p>
               <div className="mt-4">
-                <span className="text-3xl font-bold text-slate-900">$40.00</span>
-                <span className="text-slate-400 text-sm">/year</span>
+                <span className="text-3xl font-bold text-slate-900">{PRICING.semester.label}</span>
+                <span className="text-slate-400 text-sm"> {PRICING.semester.per}</span>
               </div>
-              <p className="mt-1 text-xs text-slate-400">~$3.33/month</p>
               <button
-                onClick={() => handleCheckout('yearly')}
+                onClick={() => handleCheckout('semester')}
                 disabled={!!checkoutLoading}
                 className="mt-5 w-full rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50"
               >
-                {checkoutLoading === 'yearly' ? 'Loading...' : 'Upgrade to Pro'}
+                {checkoutLoading === 'semester' ? 'Loading...' : `Get the ${PRICING.semester.name}`}
               </button>
-              <p className="mt-2 text-center text-xs text-slate-400">Cancel anytime.</p>
+              <p className="mt-2 text-center text-xs text-slate-400">Renews every 6 months. Cancel anytime.</p>
             </div>
           </div>
         )}
@@ -177,14 +192,6 @@ export default function UpgradePage() {
           </div>
         </div>
 
-        {!isPro && (
-          <p className="mt-6 text-center text-sm text-slate-400">
-            Prefer a one-time payment?{' '}
-            <Link href="/founding" className="font-semibold text-amber-600 hover:text-amber-700">
-              Become a Founding Member for $15, once
-            </Link>
-          </p>
-        )}
       </div>
     </main>
   )

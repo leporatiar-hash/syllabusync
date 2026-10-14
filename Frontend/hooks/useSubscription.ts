@@ -13,6 +13,8 @@ export interface SubscriptionInfo {
   chatMessagesMax: number | null // null while /me/subscription hasn't loaded yet
   chatMessagesResetAt: string | null
   upgradePromptDismissedAt: string | null
+  /** YYYY-MM-DD through which Pro is free for everyone; null when no promo is running */
+  promoUntil: string | null
 }
 
 const DEFAULT_SUB: SubscriptionInfo = {
@@ -26,6 +28,7 @@ const DEFAULT_SUB: SubscriptionInfo = {
   chatMessagesMax: null,
   chatMessagesResetAt: null,
   upgradePromptDismissedAt: null,
+  promoUntil: null,
 }
 
 export function useSubscription() {
@@ -51,6 +54,7 @@ export function useSubscription() {
           chatMessagesMax: data.chat_messages_max ?? null,
           chatMessagesResetAt: data.chat_messages_reset_at ?? null,
           upgradePromptDismissedAt: data.upgrade_prompt_dismissed_at ?? null,
+          promoUntil: data.promo_until ?? null,
         })
       }
     } catch {

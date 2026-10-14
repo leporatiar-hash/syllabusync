@@ -114,6 +114,7 @@ class _FakeClient:
     """Stands in for httpx.Client in main: every GET returns the fixture feed."""
     feed = build_feed()
     status = 200
+    raise_network = False
 
     def __init__(self, *args, **kwargs):
         pass
@@ -125,6 +126,8 @@ class _FakeClient:
         return False
 
     def get(self, url, **kwargs):
+        if _FakeClient.raise_network:
+            raise main.httpx.ConnectError("nodename nor servname provided")
         return _FakeResponse(_FakeClient.feed, _FakeClient.status)
 
 
@@ -416,6 +419,13 @@ def test_dead_link_detected_and_replaced():
         _FakeClient.status = 200
         run_sync(user_id)
         check("a good sync clears it", _status(headers) == ["ok"], str(_status(headers)))
+
+        # Network failures (our outage, DNS, timeouts) never mark the student's link broken
+        _FakeClient.raise_network = True
+        for _ in range(5):
+            run_sync(user_id)
+        _FakeClient.raise_network = False
+        check("network errors don't count as a dead link", _status(headers) == ["ok"], str(_status(headers)))
 
         _FakeClient.status = 404
         run_sync(user_id)

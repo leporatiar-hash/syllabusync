@@ -6435,7 +6435,7 @@ def sync_canvas(connection, user_id: str, db):
     except httpx.RequestError as e:
         db.rollback()
         errors.append(f"Canvas sync error: {str(e)}")
-        _record_lms_health(db, connection, False, f"network: {e}")
+        _record_lms_health(db, connection, False, f"network: {e}", network=True)
     except Exception as e:
         db.rollback()
         errors.append(f"Canvas sync error: {str(e)}")
@@ -6643,11 +6643,15 @@ LMS_BROKEN_AFTER = 2
 _LMS_DEAD_STATUSES = {401, 403, 404, 410}
 
 
-def _record_lms_health(db, connection, ok: bool, error: str | None = None, dead: bool = False):
+def _record_lms_health(db, connection, ok: bool, error: str | None = None, dead: bool = False, network: bool = False):
+    """network=True: we couldn't reach the LMS at all (DNS, timeout, our outage). That says nothing
+    about the student's link, so it's logged but never counts toward "stopped syncing"."""
     if ok:
         connection.failure_count = 0
         connection.failing_since = None
         connection.last_error = None
+    elif network:
+        connection.last_error = (error or "network error")[:200]
     else:
         connection.failure_count = (connection.failure_count or 0) + (LMS_BROKEN_AFTER if dead else 1)
         connection.failing_since = connection.failing_since or datetime.utcnow()
@@ -6678,7 +6682,7 @@ def sync_ical(connection, user_id: str, db):
                 resp = http_client.get(connection.ical_url)
             except Exception as e:
                 errors.append(f"Failed to fetch iCal feed: {e}")
-                _record_lms_health(db, connection, False, f"network: {e}")
+                _record_lms_health(db, connection, False, f"network: {e}", network=True)
                 return synced, errors
             if resp.status_code != 200:
                 errors.append(f"Failed to fetch iCal feed: {resp.status_code}")

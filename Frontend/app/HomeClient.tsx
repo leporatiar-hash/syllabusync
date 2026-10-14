@@ -9,10 +9,10 @@ import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 import { useAuth } from '../lib/useAuth'
 import { useSubscription } from '../hooks/useSubscription'
 import UpgradePrompt from '../components/UpgradePrompt'
-import FoundingMemberPrompt from '../components/FoundingMemberPrompt'
 import FeatureDiscoveryPanel from '../components/FeatureDiscoveryPanel'
 import ValuePropPrompt from '../components/ValuePropPrompt'
-import { decideFoundingPrompt } from '../lib/foundingPrompt'
+import FeedbackSurvey from '../components/FeedbackSurvey'
+import { promoEndLabel } from '../lib/pricing'
 import { shouldShowValuePrompt } from '../lib/valuePrompt'
 import { addDays, formatDeadlineDate, localToday } from '../lib/deadlineGroups'
 
@@ -76,12 +76,7 @@ export default function HomeClient() {
   const {
     canGenerate,
     isPro,
-    aiGenerationsUsed,
-    aiGenerationsMax,
-    chatMessagesUsed,
-    chatMessagesMax,
-    upgradePromptDismissedAt,
-    dismissUpgradePrompt,
+    promoUntil,
   } = useSubscription()
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [dueThisWeek, setDueThisWeek] = useState(0)
@@ -97,6 +92,7 @@ export default function HomeClient() {
   const [showGettingStarted, setShowGettingStarted] = useState(false)
   const [featureUsage, setFeatureUsage] = useState<{ used_study_guide: boolean; used_flashcards: boolean; used_chat: boolean; panel_hidden: boolean } | null>(null)
   const [showValuePrompt, setShowValuePrompt] = useState(false)
+  const [showSurvey, setShowSurvey] = useState(false)
 
 
   // Show Getting Started checklist unless dismissed
@@ -229,6 +225,22 @@ export default function HomeClient() {
     loadValuePromptStatus()
   }, [user, fetchWithAuth])
 
+  // In-depth feedback survey for existing users; it replaces the one-question prompt while it runs.
+  useEffect(() => {
+    if (!user) return
+    fetchWithAuth(`${API_URL}/me/survey`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.show) setShowSurvey(true) })
+      .catch(() => {})
+  }, [user, fetchWithAuth])
+
+  const sendSurvey = (body: Record<string, unknown>) =>
+    fetchWithAuth(`${API_URL}/me/survey`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(() => {})
+
   const submitValuePrompt = (answer: string) => {
     setShowValuePrompt(false) // optimistic — shown at most once regardless of network result
     fetchWithAuth(`${API_URL}/me/value-prompt`, {
@@ -272,18 +284,6 @@ export default function HomeClient() {
     courses.length > 0
   )
 
-  const foundingPromptDecision = lmsLoaded
-    ? decideFoundingPrompt({
-        isPro,
-        hasLmsConnection: lmsConnections.length > 0,
-        hasCourses: courses.length > 0,
-        aiGenerationsUsed,
-        aiGenerationsMax,
-        chatMessagesUsed,
-        chatMessagesMax,
-        upgradePromptDismissedAt,
-      })
-    : { show: false as const }
 
   const copyLink = () => {
     if (!referralLink) return
@@ -347,15 +347,18 @@ export default function HomeClient() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB] text-slate-800">
       <div className="mx-auto max-w-6xl px-4 pb-16 pt-10">
-        {!isPro && (
-          <div className="mb-8">
-            {foundingPromptDecision.show ? (
-              <FoundingMemberPrompt reason={foundingPromptDecision.reason} onDismiss={dismissUpgradePrompt} />
-            ) : (
-              <UpgradePrompt variant="promo" />
-            )}
+        {promoUntil ? (
+          <div className="mb-8 flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+            <span className="text-sm text-slate-600">
+              <span className="font-medium text-slate-800">ClassMate Pro is free for everyone through {promoEndLabel(promoUntil)}.</span>
+              {' '}Unlimited study tools and more AI chat, no card needed.
+            </span>
           </div>
-        )}
+        ) : !isPro ? (
+          <div className="mb-8">
+            <UpgradePrompt variant="promo" />
+          </div>
+        ) : null}
 
         {/* Header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -382,7 +385,16 @@ export default function HomeClient() {
           )}
         </header>
 
-        {showValuePrompt && (
+        {showSurvey && (
+          <div className="mt-6">
+            <FeedbackSurvey
+              email={user?.email}
+              onSubmit={(answers) => sendSurvey({ answers })}
+              onDismiss={() => { setShowSurvey(false); sendSurvey({ dismissed: true }) }}
+            />
+          </div>
+        )}
+        {showValuePrompt && !showSurvey && (
           <div className="mt-6">
             <ValuePropPrompt onSubmit={submitValuePrompt} onSkip={skipValuePrompt} />
           </div>
