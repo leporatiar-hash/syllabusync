@@ -30,6 +30,7 @@ export type Subscription = {
   ai_generations_max: number | null;
   chat_messages_used: number;
   chat_messages_max: number | null;
+  promo_until?: string | null;
 };
 
 export type Course = {

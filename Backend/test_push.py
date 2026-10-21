@@ -325,8 +325,9 @@ def test_change_alerts():
     _change(uid, moved, "moved", old_days=2)
     _run()
     msgs = [m for m in _mine(token) if "Essay 2" in m["title"]]
-    assert len(msgs) == 1 and msgs[0]["title"] == "Due date changed: Essay 2", _mine(token)
-    assert msgs[0]["body"] == "FINC 303 · now Fri, Oct 9 · 11:59 PM (was Tue, Oct 6)", msgs[0]["body"]
+    assert len(msgs) == 1 and msgs[0]["title"] == "Essay 2 moved to Fri", _mine(token)
+    assert msgs[0]["body"] == "FINC 303: now due Fri, Oct 9, 11:59 PM (was Tue, Oct 6)", msgs[0]["body"]
+    assert "interruptionLevel" not in msgs[0], "not due soon: a normal notification"
     before = len(_mine(token))
     _run(SUNDAY_7PM_NY + timedelta(minutes=15))
     assert len(_mine(token)) == before, "each change is announced once"
@@ -339,7 +340,7 @@ def test_change_alerts():
     _deadline(h, 60, "Far away")  # beyond the horizon: never recorded
     _run(SUNDAY_7PM_NY + timedelta(minutes=30))
     last = _mine(token)[-1]
-    assert last["title"] == "New from your LMS: Quiz 4", last
+    assert last["title"] == "New in FINC 303: Quiz 4" and last["body"] == "Due Thu, Oct 8, 11:59 PM. It's on your calendar.", last
 
     # Several real changes are grouped into one notification
     x = _deadline(h, 2, "Reading A", course_id=c)
@@ -362,6 +363,56 @@ def test_change_alerts():
     assert not any("changed" in m["title"] for m in _mine(token2))
     # Mute this user so their pending alert doesn't fire during later tests (which run as Pro)
     client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h2)
+
+
+def test_change_alert_accuracy_guards():
+    uid, h, token = _user()
+    c = _course(h)
+    a = _deadline(h, 5, "Real move", course_id=c)
+    far = _deadline(h, 10, "Year fix", course_id=c)
+    loose = _deadline(h, 4, "Boys Soccer")  # no course: not a class deadline
+    db = main.SessionLocal()
+    try:
+        get = lambda i: db.query(main.Deadline).filter(main.Deadline.id == i).first()
+        main._record_lms_changes(db, uid, [("moved", get(far), (main.date.fromisoformat(get(far).date) - main.timedelta(days=364)).isoformat()),
+                                           ("added", get(loose), None)], TODAY.isoformat())
+        db.commit()
+        assert db.query(main.DeadlineChange).filter_by(user_id=uid).count() == 0, "year fixes and non-class events are ignored"
+        many = [_deadline(h, 3 + i, f"Shifted {i}", course_id=c) for i in range(main.CHANGE_BULK_LIMIT + 1)]
+        main._record_lms_changes(db, uid, [("moved", get(i), (main.date.fromisoformat(get(i).date) + main.timedelta(days=1)).isoformat()) for i in many],
+                                 TODAY.isoformat())
+        db.commit()
+        assert db.query(main.DeadlineChange).filter_by(user_id=uid).count() == 0, "a mass shift is a data correction, not news"
+        main._record_lms_changes(db, uid, [("moved", get(a), (TODAY + main.timedelta(days=2)).isoformat())], TODAY.isoformat())
+        db.commit()
+        assert db.query(main.DeadlineChange).filter_by(user_id=uid).count() == 1
+    finally:
+        db.close()
+    client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h)
+
+
+def test_urgent_change_goes_out_in_the_daytime():
+    uid, h, token = _user()
+    client.put("/me/notification-settings", json={"deadlines": True, "exams": False, "weekly": False}, headers=h)
+    c = _course(h)
+    soon = _deadline(h, 1, "Lab write-up", course_id=c, time="09:00")
+    later = _deadline(h, 6, "Paper draft", course_id=c)
+    _change(uid, soon, "moved", old_days=3)   # moved EARLIER, now due tomorrow
+    _change(uid, later, "moved", old_days=8)
+    sunday_10am_ny = SUNDAY_7PM_NY - timedelta(hours=9)
+    _run(sunday_10am_ny)
+    day = _mine(token)
+    assert len(day) == 1 and day[0]["title"] == "Lab write-up is due sooner", day
+    assert day[0]["body"] == "FINC 303: now due Mon, Oct 5, 9:00 AM (was Wed, Oct 7)", day[0]["body"]
+    assert day[0]["interruptionLevel"] == "time-sensitive"
+    _run(sunday_10am_ny + timedelta(minutes=15))
+    assert len(_mine(token)) == 1, "no repeat"
+    _run(SUNDAY_7PM_NY - timedelta(hours=12))  # 7am: quiet hours
+    assert len(_mine(token)) == 1
+    _run(SUNDAY_7PM_NY)  # evening: the non-urgent change (plus the regular reminders) go out
+    evening = [m["title"] for m in _mine(token)[1:]]
+    assert "Paper draft is due sooner" in evening and not any("Lab write-up is due sooner" == t for t in evening), evening
+    client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h)
 
 
 if __name__ == "__main__":

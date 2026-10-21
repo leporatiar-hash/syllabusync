@@ -127,7 +127,7 @@ export default function LmsSignIn() {
   // The celebration already happened here, so skip the connect step's own "synced" card.
   const finish = () => {
     set({ lmsSynced: result?.count ?? 0 });
-    router.replace(answers.mode === 'app' ? '/' : '/onboarding/syllabus');
+    router.replace(answers.mode === 'app' ? '/' : '/onboarding/alerts');
   };
 
   const onMessage = (e: WebViewMessageEvent) => {

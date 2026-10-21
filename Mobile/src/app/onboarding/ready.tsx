@@ -90,7 +90,7 @@ export default function ReadyStep() {
     await SecureStore.setItemAsync(REMINDERS_ASKED_KEY, '1');
     await api('/me/complete-onboarding', { method: 'POST' }).catch(() => {});
     await refreshMe().catch(() => {});
-    if ((courses?.length ?? 0) > 0 || upcoming.length > 0) {
+    if (answers.alertPlan === undefined && ((courses?.length ?? 0) > 0 || upcoming.length > 0)) {
       const line = answers.goals.map((g) => PAYWALL_LINES[g]).find(Boolean);
       await openPaywall('onboarding', line);
     }

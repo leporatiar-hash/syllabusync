@@ -2600,8 +2600,10 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             else:
                 title = f"{_plural(len(items), 'deadline')} due {when}"
                 body = ", ".join(_deadline_label(d) for d in items[:3]) + (f", +{len(items) - 3} more" if len(items) > 3 else "")
-            out.append((kind, {"title": title, "body": body, "data": {"screen": "home", "date": items[0].date}},
-                        [f"{profile.user_id}:{d.id}:{kind}" for d in items]))
+            msg = {"title": title, "body": body, "data": {"screen": "home", "date": items[0].date}}
+            if kind == "day_before":
+                msg["interruptionLevel"] = "time-sensitive"
+            out.append((kind, msg, [f"{profile.user_id}:{d.id}:{kind}" for d in items]))
 
     if pro and profile.notify_exams is not False:
         items = pending("exam_week", [d for d in by_offset(7) if _is_exam(d)])
@@ -2634,22 +2636,44 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
 
 CHANGE_ALERT_WINDOW = timedelta(days=3)  # an unsent change older than this is no longer news
 CHANGE_ALERT_HORIZON_DAYS = 21  # only items due within three weeks are worth an alert
+# A false alarm costs more trust than a missed one. A professor changes a few things at a time; a
+# sync that "changes" many items at once is a data correction (time zones, a fixed feed, newly
+# visible pages), not news. Moves of more than two months are year/feed corrections too.
+CHANGE_BULK_LIMIT = 6
+CHANGE_MAX_MOVE_DAYS = 60
+URGENT_CHANGE_DAYS = 1  # a change to something due today/tomorrow goes out right away (not at 6pm)
+URGENT_SEND_FROM, URGENT_SEND_UNTIL = 8, 22  # ...but never overnight
 
 
 def _record_lms_changes(db, user_id: str, changes: list, today_iso: str):
     """changes: [(kind, deadline, old_date)] collected during a sync (after flush, so new
     deadlines have ids). Keeps upcoming items due within the horizon, plus anything moved earlier."""
     horizon = (date.fromisoformat(today_iso) + timedelta(days=CHANGE_ALERT_HORIZON_DAYS)).isoformat()
+    keep = []
     for kind, d, old_date in changes:
         if not d.id or d.completed or not d.date or d.date < today_iso:
             continue
         if d.date > horizon and not (old_date and d.date < old_date):
             continue
+        if kind == "added" and not d.course_id:
+            continue  # events that aren't for a class (school sports, club calendars) aren't deadlines
+        if kind == "moved" and old_date:
+            try:
+                if abs((date.fromisoformat(d.date) - date.fromisoformat(old_date)).days) > CHANGE_MAX_MOVE_DAYS:
+                    continue
+            except ValueError:
+                continue
+        keep.append((kind, d, old_date))
+    if len(keep) > CHANGE_BULK_LIMIT:
+        logger.info(f"[LMS] {len(keep)} changes in one sync for user {user_id}: treated as a data correction, no alerts")
+        return
+    for kind, d, old_date in keep:
         db.add(DeadlineChange(user_id=user_id, deadline_id=d.id, kind=kind, old_date=old_date))
 
 
-def _change_alerts(db, profile, today: date, already: set[str]) -> list:
-    """One push summarizing what the LMS changed since the last alert (Pro)."""
+def _change_alerts(db, profile, today: date, already: set[str], urgent_only: bool = False) -> list:
+    """One push summarizing what the LMS changed since the last alert (Pro). urgent_only: just the
+    changes to things due today or tomorrow (sent right away, outside the evening window)."""
     uid = profile.user_id
     rows = (
         db.query(DeadlineChange)
@@ -2669,24 +2693,31 @@ def _change_alerts(db, profile, today: date, already: set[str]) -> list:
             continue
         if r.kind == "moved" and (not r.old_date or r.old_date == d.date):
             continue  # moved back to where it was
+        if urgent_only and d.date > (today + timedelta(days=URGENT_CHANGE_DAYS)).isoformat():
+            continue
         items.append((r, d))
     if not items:
         return []
     items.sort(key=lambda x: (x[0].kind != "moved", x[1].date))
-    ledger = [f"{uid}:change:{r.id}" for r in fresh]
+    # Urgent sends only claim their own rows; everything else waits for the evening summary.
+    claimed = {r.deadline_id for r, _ in items} if urgent_only else None
+    ledger = [f"{uid}:change:{r.id}" for r in fresh if claimed is None or r.deadline_id in claimed]
+    soon = any(d.date <= (today + timedelta(days=URGENT_CHANGE_DAYS)).isoformat() for _, d in items)
 
     def course(d):
         return (d.course.code or d.course.name) if d.course else "Your LMS"
 
     if len(items) == 1:
         r, d = items[0]
-        t = f" · {format_time_12h(d.time)}" if d.time else ""
+        t = f", {format_time_12h(d.time)}" if d.time else ""
+        name = d.title or "Untitled"
         if r.kind == "moved":
-            title = f"Due date changed: {d.title or 'Untitled'}"
-            body = f"{course(d)} · now {parse_ymd_label(d.date)}{t} (was {parse_ymd_label(r.old_date)})"
+            earlier = d.date < r.old_date
+            title = f"{name} is due sooner" if earlier else f"{name} moved to {parse_ymd_label(d.date).split(',')[0]}"
+            body = f"{course(d)}: now due {parse_ymd_label(d.date)}{t} (was {parse_ymd_label(r.old_date)})"
         else:
-            title = f"New from your LMS: {d.title or 'Untitled'}"
-            body = f"{course(d)} · due {parse_ymd_label(d.date)}{t}"
+            title = f"New in {course(d)}: {name}"
+            body = f"Due {parse_ymd_label(d.date)}{t}. It's on your calendar."
     else:
         title = f"{_plural(len(items), 'update')} from your LMS"
         parts = [
@@ -2694,7 +2725,18 @@ def _change_alerts(db, profile, today: date, already: set[str]) -> list:
             for r, d in items[:3]
         ]
         body = "; ".join(parts) + (f"; +{len(items) - 3} more" if len(items) > 3 else "")
-    return [("change", {"title": title, "body": body, "data": {"screen": "home", "date": items[0][1].date}}, ledger)]
+    msg = {"title": title, "body": body, "data": {"screen": "home", "date": items[0][1].date}}
+    if soon:
+        msg["interruptionLevel"] = "time-sensitive"  # gets through Focus for things due today/tomorrow
+    return [("change", msg, ledger)]
+
+
+def _urgent_reminders(db, profile, local_now: datetime) -> list:
+    """Outside the evening window: only Pro change alerts for things due today or tomorrow."""
+    if profile.notify_deadlines is False or _effective_tier(profile) != "pro":
+        return []
+    already = {r[0] for r in db.query(PushNotificationSent.id).filter(PushNotificationSent.user_id == profile.user_id).all()}
+    return _change_alerts(db, profile, local_now.date(), already, urgent_only=True)
 
 
 def _setup_nudges(db, profile, local_now: datetime, already: set[str]) -> list:
@@ -2774,12 +2816,17 @@ def _run_push_reminders(now_utc: datetime | None = None) -> int:
         for user_id, user_tokens in by_user.items():
             try:
                 local = _local_now(user_tokens[0].timezone, now_utc)
-                if not (PUSH_SEND_HOUR <= local.hour < PUSH_SEND_UNTIL_HOUR):
+                evening = PUSH_SEND_HOUR <= local.hour < PUSH_SEND_UNTIL_HOUR
+                daytime = URGENT_SEND_FROM <= local.hour < URGENT_SEND_UNTIL
+                if not (evening or daytime):
                     continue
                 profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
                 if not profile:
                     continue
-                reminders = _build_user_reminders(db, profile, local)
+                if evening:
+                    reminders = _build_user_reminders(db, profile, local)
+                else:
+                    reminders = _urgent_reminders(db, profile, local)
                 for kind, msg, ledger_ids in reminders:
                     messages = [{"to": t.token, "sound": "default", **msg} for t in user_tokens]
                     tickets = _expo_push_send(messages)
