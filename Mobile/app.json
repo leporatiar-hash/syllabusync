@@ -59,6 +59,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "owner": "alexleporatis-team",
+    "extra": {
+      "eas": {
+        "projectId": "122c7ce8-ef87-435e-bb35-62ec6f825e4f"
+      }
     }
   }
 }
