@@ -10,7 +10,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://backend-production-c6a8.up.railway.app",
         "EXPO_PUBLIC_POSTHOG_KEY": "phc_FrW0uqjh8gwUBMhzmetiXLHGUDX4Z15bMZb9BP8yNK6",
-        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_ZuhNgFryIVwnTDLnEAaJWDMSHCY"
       }
     },
     "preview": {
@@ -18,7 +19,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://backend-production-c6a8.up.railway.app",
         "EXPO_PUBLIC_POSTHOG_KEY": "phc_FrW0uqjh8gwUBMhzmetiXLHGUDX4Z15bMZb9BP8yNK6",
-        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_ZuhNgFryIVwnTDLnEAaJWDMSHCY"
       }
     },
     "production": {
@@ -26,13 +28,14 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://backend-production-c6a8.up.railway.app",
         "EXPO_PUBLIC_POSTHOG_KEY": "phc_FrW0uqjh8gwUBMhzmetiXLHGUDX4Z15bMZb9BP8yNK6",
-        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_ZuhNgFryIVwnTDLnEAaJWDMSHCY"
       }
     }
   },
   "submit": {
     "production": {
-      "ios": {}
+      "ios": { "ascAppId": "6825177081" }
     }
   }
 }

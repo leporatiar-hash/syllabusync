@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { T } from '@/components/web';
 import { C, shadowSm } from '@/constants/theme';
 
-export const STEPS = ['name', 'school', 'year', 'goals', 'lms', 'connect', 'syllabus', 'ready'] as const;
+export const STEPS = ['name', 'school', 'year', 'goals', 'lms', 'connect', 'alerts', 'syllabus', 'ready'] as const;
 export type Step = (typeof STEPS)[number];
 
 export type Goal = 'deadlines' | 'exams' | 'overwhelmed' | 'procrastinating' | 'understanding';
@@ -29,6 +29,8 @@ type Answers = {
   lmsHost: string | null;
   lmsName: string | null;
   lmsSynced: number | null;
+  /** What they picked on the alerts step (null = skipped or not asked). */
+  alertPlan?: 'basic' | 'loop' | null;
   mode: 'onboarding' | 'app';
 };
 type Ctx = { answers: Answers; set: (patch: Partial<Answers>) => void };

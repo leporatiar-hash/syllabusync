@@ -110,7 +110,7 @@ export default function ConnectStep() {
 
   if (synced !== null) {
     return (
-      <QuizScreen title="You’re synced." footer={<QuizButton title="Next" onPress={() => (inApp ? router.replace('/') : goTo('syllabus'))} />}>
+      <QuizScreen title="You’re synced." footer={<QuizButton title="Next" onPress={() => (inApp ? router.replace('/') : goTo('alerts'))} />}>
         <Animated.View entering={ZoomIn.springify()} style={[{ alignItems: 'center', backgroundColor: C.white, borderRadius: 28, paddingVertical: 36, gap: 6 }, shadowSm]}>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
             <Check size={36} color={C.green} strokeWidth={3} />

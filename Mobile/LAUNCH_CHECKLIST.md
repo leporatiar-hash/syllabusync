@@ -37,7 +37,7 @@ Prices decided 2026-10-13, the same as the web (`Frontend/lib/pricing.ts`):
 
 - [ ] Create the project and add an iOS app with the bundle ID above.
 - [ ] Upload the **In-App Purchase key (.p8)** from App Store Connect → Users and Access → Integrations.
-- [ ] Import both products. Create the entitlement **`pro`** (must match `PRO_ENTITLEMENT` in `src/lib/config.ts`)
+- [ ] Import both products. Use the entitlement **`classmate_pro`** (must match `PRO_ENTITLEMENT` in `src/lib/config.ts`)
       and attach both products to it.
 - [ ] Create the offering `default` with a monthly package and a **six-month** package (the paywall looks up
       `PACKAGE_TYPE.SIX_MONTH`), and design the paywall in the Paywalls
