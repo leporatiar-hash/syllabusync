@@ -7,7 +7,7 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:800
 export const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY || '';
 
 // The RevenueCat entitlement that unlocks Pro. Must match the dashboard.
-export const PRO_ENTITLEMENT = 'pro';
+export const PRO_ENTITLEMENT = 'classmate_pro';
 
 export const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 
