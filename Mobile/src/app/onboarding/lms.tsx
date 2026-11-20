@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { CircleSlash, Globe, LayoutGrid, Lock, MonitorSmartphone, Palette, Sun } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 
@@ -39,14 +39,34 @@ export default function LmsStep() {
   const [address, setAddress] = useState('');
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // School -> their LMS login, no confirmation in between: once we know the LMS we open its sign-in
+  // straight away. "Found your LMS" (with "That's not it") only shows if they back out of the login.
+  const [leaving, setLeaving] = useState(!!saved && isAuto(saved.provider));
+  const wasAway = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (wasAway.current) setLeaving(false);
+      return () => {
+        wasAway.current = true;
+      };
+    }, []),
+  );
 
   useEffect(() => {
-    if (saved || !domain) return;
+    if (saved) {
+      if (isAuto(saved.provider)) pick(saved, 'auto');
+      return;
+    }
+    if (!domain) return;
     let live = true;
     schoolLms(domain).then((o) => {
       if (!live) return;
       setOptions(o);
       track('lms_detected', { domain, found: o.map((x) => x.provider).join(',') || 'none' });
+      if (o[0] && isAuto(o[0].provider)) {
+        setLeaving(true);
+        pick(o[0], 'auto');
+      }
     });
     return () => {
       live = false;
@@ -61,15 +81,16 @@ export default function LmsStep() {
     if (needSchool) router.replace('/onboarding/school');
   }, [needSchool]);
 
-  const pick = (o: LmsOption) => {
+  function pick(o: LmsOption, how: 'auto' | 'tapped' = 'tapped') {
+    if (how === 'auto') track('lms_detected_opened', { provider: o.provider, host: o.host });
     set({ lms: o.provider, lmsHost: o.host, lmsName: o.name });
     api('/me/profile', { method: 'POST', body: JSON.stringify({ lms_provider: o.provider, lms_host: o.host }) }).catch(() => {});
     // Known Brightspace/Canvas host: go straight to their sign-in page; the feed link is picked up there.
     if (isAuto(o.provider)) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setTimeout(() => router.push('/onboarding/lms-signin'), 200);
+      setTimeout(() => router.push('/onboarding/lms-signin'), how === 'auto' ? 350 : 200);
     } else advance('connect');
-  };
+  }
 
   const chooseManual = (value: Lms) => {
     setError(null);
@@ -100,7 +121,7 @@ export default function LmsStep() {
   };
 
   // 1. Still looking up the school's LMS (or on the way to the school step)
-  if (options === null || needSchool) {
+  if (options === null || needSchool || leaving) {
     return (
       <QuizScreen title="">
         <Animated.View entering={FadeIn.duration(250)} style={{ alignItems: 'center', gap: 18, paddingVertical: 40 }}>

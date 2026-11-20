@@ -23,6 +23,7 @@ export type AnalyticsEvent =
   | 'lms_connect_step'
   | 'lms_detected'
   | 'lms_detected_confirmed'
+  | 'lms_detected_opened'
   | 'lms_address_entered'
   | 'lms_reconnect_tapped'
   | 'syllabus_uploaded'
