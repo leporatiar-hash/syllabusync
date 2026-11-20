@@ -13,7 +13,7 @@ import { checkForcedUpdate } from '@/lib/version';
 SplashScreen.preventAutoHideAsync();
 
 function RootNavigator() {
-  const { ready, me } = useAuth();
+  const { ready, me, unreachable } = useAuth();
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   const [mustUpdate, setMustUpdate] = useState(false);
 
@@ -27,6 +27,7 @@ function RootNavigator() {
 
   if (!ready || !fontsLoaded) return null;
   if (mustUpdate) return <ForceUpdate />;
+  if (!me && unreachable) return <Unreachable />;
 
   const signedIn = !!me;
   return (
@@ -43,6 +44,27 @@ function RootNavigator() {
         <Stack.Screen name="forgot-password" />
       </Stack.Protected>
     </Stack>
+  );
+}
+
+/** Saved login, but the server couldn't be reached at launch. Keeps the user signed in. */
+function Unreachable() {
+  const { retryRestore } = useAuth();
+  const [busy, setBusy] = useState(false);
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', padding: Spacing.five, gap: Spacing.four, backgroundColor: C.pageBg }}>
+      <T size={26} weight="semibold" color={C.slate900}>Can&apos;t reach ClassMate</T>
+      <T size={15} color={C.slate500}>Check your connection. You&apos;re still signed in.</T>
+      <GradientButton
+        title={busy ? 'Trying…' : 'Try again'}
+        size="lg"
+        onPress={async () => {
+          setBusy(true);
+          await retryRestore();
+          setBusy(false);
+        }}
+      />
+    </View>
   );
 }
 
