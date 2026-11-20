@@ -1183,7 +1183,7 @@ class UserProfileRequest(BaseModel):
     major: str | None = Field(None, description="User's major or field of study")
     naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
     school_domain: str | None = Field(None, description="The school's web domain, e.g. 'cofc.edu'")
-    lms_provider: str | None = Field(None, description="'brightspace' or 'canvas'")
+    lms_provider: str | None = Field(None, description="'brightspace', 'canvas' or 'blackboard'")
     lms_host: str | None = Field(None, description="The school's LMS host, e.g. 'lms.cofc.edu'")
 
 
@@ -1370,7 +1370,7 @@ class UserProfileOut(BaseModel):
     major: str | None = Field(None, description="User's major or field of study")
     profile_picture: str | None = Field(None, description="URL to the user's profile picture")
     school_domain: str | None = Field(None, description="The school's web domain, e.g. 'cofc.edu'")
-    lms_provider: str | None = Field(None, description="'brightspace' or 'canvas' when known")
+    lms_provider: str | None = Field(None, description="'brightspace', 'canvas' or 'blackboard' when known")
     lms_host: str | None = Field(None, description="The school's LMS host, e.g. 'lms.cofc.edu'")
     referral_code: str | None = Field(None, description="Unique referral code to share with friends")
     naming_style: str | None = Field(None, description="Default deadline-naming style: 'simple' or 'descriptive'")
@@ -4057,7 +4057,7 @@ def upsert_profile(payload: UserProfileRequest, current_user: User = Depends(get
                     profile.lms_provider = None
                     profile.lms_host = None
                 profile.school_domain = payload.school_domain
-            if payload.lms_provider in ("brightspace", "canvas") and payload.lms_host:
+            if payload.lms_provider in ("brightspace", "canvas", "blackboard") and payload.lms_host:
                 profile.lms_provider = payload.lms_provider
                 profile.lms_host = payload.lms_host
             db.commit()
@@ -7417,7 +7417,7 @@ def suggest_school(current_user: User = Depends(get_current_user)):
     return {"school": schools.school_for_email(current_user.email)}
 
 
-@app.get("/schools/lms", tags=["schools"], summary="Which LMS a school uses (Brightspace / Canvas), best first")
+@app.get("/schools/lms", tags=["schools"], summary="Which LMS a school uses (Brightspace / Canvas / Blackboard), best first")
 @limiter.limit("20/minute")
 async def school_lms(request: Request, domain: str = Query(..., max_length=120), current_user: User = Depends(get_current_user)):
     # Only schools in our directory: never probe arbitrary hosts a client sends.
@@ -7437,7 +7437,7 @@ async def school_lms(request: Request, domain: str = Query(..., max_length=120),
         db.close()
 
 
-@app.post("/schools/lms/identify", tags=["schools"], summary="Check a typed-in LMS address (Brightspace or Canvas)")
+@app.post("/schools/lms/identify", tags=["schools"], summary="Check a typed-in LMS address (Brightspace, Canvas or Blackboard)")
 @limiter.limit("10/minute")
 async def identify_lms(request: Request, payload: LmsIdentifyRequest, current_user: User = Depends(get_current_user)):
     host = schools.host_from_input(payload.url)
@@ -7445,7 +7445,7 @@ async def identify_lms(request: Request, payload: LmsIdentifyRequest, current_us
         raise HTTPException(status_code=400, detail="That doesn't look like a web address.")
     option = await schools.identify(host)
     if not option:
-        raise HTTPException(status_code=400, detail="We couldn't find Canvas or Brightspace at that address.")
+        raise HTTPException(status_code=400, detail="We couldn't find Canvas, Brightspace or Blackboard at that address.")
     return option
 
 

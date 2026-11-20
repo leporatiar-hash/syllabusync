@@ -42,6 +42,7 @@ async def fake_identify(host):
     return dict(IDENTIFY[host]) if host in IDENTIFY else None
 
 
+_REAL_DETECT = schools.detect  # kept for tests that stub the network one level lower
 schools.detect = fake_detect
 schools.identify = fake_identify
 
@@ -187,6 +188,49 @@ def test_canvas_pick_probes():
     assert schools.pick_canvas([], "Auburn University", "auburn.edu", None, "auburn.instructure.com") == ("auburn.instructure.com", "probe")
     assert schools.pick_canvas([_row("Auburn University", "auburn.instructure.com")], "Auburn University", "auburn.edu", None,
                                "auburn.instructure.com", brightspace_found=True)[0] == "auburn.instructure.com"
+
+
+def _detect_with(bs=(), bb=(), canvas_rows=(), own=None, root=None, domain="sc.edu", name="University of South Carolina"):
+    """Run the real detect() with every network probe stubbed."""
+    saved = (schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory, schools._public_host)
+
+    async def is_bs(client, host):
+        return host in bs
+
+    async def is_bb(client, host):
+        return host in bb
+
+    async def is_cv(client, host, follow=False):
+        return own if host.startswith("canvas.") else (root if host.endswith(".instructure.com") else None)
+
+    async def directory(client, term):
+        return list(canvas_rows)
+
+    schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory = is_bs, is_bb, is_cv, directory
+    schools._public_host = lambda h: True
+    try:
+        return [(o["provider"], o["host"]) for o in asyncio.run(_REAL_DETECT(domain, name))]
+    finally:
+        schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory, schools._public_host = saved
+
+
+def test_blackboard_detection():
+    # Blackboard on the school's domain, and the hosted <root>learn.blackboard.com form (Alabama).
+    assert _detect_with(bb={"blackboard.sc.edu"}) == [("blackboard", "blackboard.sc.edu")]
+    assert _detect_with(bb={"ualearn.blackboard.com"}, domain="ua.edu", name="The University of Alabama") == [("blackboard", "ualearn.blackboard.com")]
+    # Mid-migration schools: Canvas/Brightspace lead, Blackboard stays as the alternative.
+    rows = [{"name": "University of South Carolina", "domain": "sc.instructure.com"}]
+    assert _detect_with(bb={"blackboard.sc.edu"}, canvas_rows=rows) == [("canvas", "sc.instructure.com"), ("blackboard", "blackboard.sc.edu")]
+    assert _detect_with(bs={"d2l.sc.edu"}, bb={"blackboard.sc.edu"})[0] == ("brightspace", "d2l.sc.edu")
+    assert _detect_with() == []
+
+
+def test_profile_saves_blackboard():
+    h = _user()
+    r = client.post("/me/profile", json={"school_domain": "sc.edu", "lms_provider": "blackboard", "lms_host": "blackboard.sc.edu"}, headers=h)
+    assert r.status_code == 200, r.text
+    p = client.get("/me", headers=h).json()["profile"]
+    assert p["lms_provider"] == "blackboard" and p["lms_host"] == "blackboard.sc.edu", p
 
 
 if __name__ == "__main__":

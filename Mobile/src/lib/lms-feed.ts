@@ -145,5 +145,55 @@ export const CANVAS_SCRIPT = `(function () {
   check();
 })(); true;`;
 
+/** Blackboard Learn (Original and Ultra). /webapps/calendar/calendarFeed/url returns the feed link
+ *  as plain text: a shared "guest" link when signed out, the student's own once signed in. Signed in
+ *  means the session API knows who we are. */
+export const BLACKBOARD_SCRIPT = `(function () {
+  ${COMMON}
+  if (window.__cmFeedRun) return;
+  var attempts = 0;
+  var text = async function (url) {
+    try {
+      var r = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json, text/plain, */*' } });
+      return { status: r.status, text: await r.text() };
+    } catch (e) { return { status: 0, text: '' }; }
+  };
+  var isGuestFeed = function (u) { return /\\/guest\\//i.test(u || ''); };
+  // Blackboard can hand an anonymous visitor a guest session, so "the API answered" isn't enough:
+  // a real student has a username that isn't "guest".
+  var realUser = function (me) {
+    if (me.status !== 200) return false;
+    try { var u = JSON.parse(me.text); return !!(u && u.id && u.userName && !/^guest$/i.test(u.userName)); } catch (e) { return false; }
+  };
+  var waitMore = function (path) {
+    post({ type: 'page', path: path, signedIn: false });
+    if (attempts < 80) setTimeout(check, 1500);
+  };
+  var check = async function () {
+    attempts++;
+    var path = location.pathname;
+    var me = await text('/learn/api/v1/users/me');
+    if (!realUser(me)) return waitMore(path);
+    var tried = ['me#200'];
+    var url = null, guest = false;
+    var paths = ['/webapps/calendar/calendarFeed/url', '/learn/api/v1/calendars/calendarFeed/url'];
+    for (var i = 0; i < paths.length && !url; i++) {
+      var r = await text(paths[i]);
+      var u = find(r.text);
+      if (isGuestFeed(u)) { guest = true; u = null; }
+      url = u;
+      tried.push(paths[i] + '#' + r.status + ':' + (url ? 'hit' : guest ? 'guest' : 'miss'));
+    }
+    // A guest link means the session isn't the student's yet: keep waiting for sign-in.
+    if (!url && guest) return waitMore(path);
+    if (window.__cmFeedRun) return;
+    window.__cmFeedRun = true;
+    post({ type: 'page', path: path, signedIn: true });
+    if (url) post({ type: 'feed', url: url, source: 'auto', tried: tried });
+    else { post({ type: 'miss', tried: tried, path: path, calendar: /\\/ultra\\//.test(path) ? '/ultra/calendar' : '/webapps/calendar/viewMyBb' }); watchInputs(tried); }
+  };
+  check();
+})(); true;`;
+
 /** Strip the secret token before anything is logged. */
 export const redactFeed = (u: string) => u.replace(/(token|user_)[=_][^&]+/gi, '$1=…');

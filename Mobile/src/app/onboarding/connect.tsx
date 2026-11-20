@@ -38,7 +38,7 @@ export default function ConnectStep() {
   const inApp = answers.mode === 'app';
   const synced = answers.lmsSynced ?? localSynced;
   // We know where they sign in: open it in the app and pick up the calendar link ourselves.
-  const auto = (answers.lms === 'brightspace' || answers.lms === 'canvas') && !!answers.lmsHost;
+  const auto = (answers.lms === 'brightspace' || answers.lms === 'canvas' || answers.lms === 'blackboard') && !!answers.lmsHost;
 
   const connect = async (raw: string) => {
     const link = raw.trim().replace(/^webcal:\/\//i, 'https://');
@@ -66,7 +66,7 @@ export default function ConnectStep() {
     if (!quiet) setError('That doesn’t look like a calendar link. It usually ends in .ics.');
   };
 
-  // OAKS/Canvas: sign in inside ClassMate and the feed link is picked up automatically.
+  // OAKS/Canvas/Blackboard: sign in inside ClassMate and the feed link is picked up automatically.
   // Others: open the LMS; when they close it with the link copied, connect from the clipboard.
   const openLms = async () => {
     if (auto) {

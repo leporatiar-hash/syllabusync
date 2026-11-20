@@ -13,15 +13,23 @@ import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { track } from '@/lib/analytics';
 import { api } from '@/lib/api';
 import { syncLms } from '@/lib/lms-sync';
-import { CANVAS_SCRIPT, D2L_SCRIPT, type FeedMessage, redactFeed } from '@/lib/lms-feed';
-import { confirmLms, lmsBrand, lmsStartUrl } from '@/lib/schools';
+import { BLACKBOARD_SCRIPT, CANVAS_SCRIPT, D2L_SCRIPT, type FeedMessage, redactFeed } from '@/lib/lms-feed';
+import { confirmLms, lmsBrand, type LmsProvider, lmsStartUrl } from '@/lib/schools';
 import type { Course } from '@/lib/types';
 
 /** The school's own LMS (from "Where do you go?"), falling back to OAKS for old sessions. */
+const SCRIPTS = { brightspace: D2L_SCRIPT, canvas: CANVAS_SCRIPT, blackboard: BLACKBOARD_SCRIPT } as const;
+// What to tap on the LMS's own calendar page if we couldn't read the link ourselves.
+const MANUAL_HINT = {
+  brightspace: 'Almost: tap Subscribe on the calendar.',
+  canvas: 'Almost: tap Calendar Feed on the calendar.',
+  blackboard: 'Almost: open the calendar settings and tap Get external calendar link.',
+} as const;
+
 function lmsFor(provider: string | null, host: string | null, name: string | null) {
-  const p = provider === 'canvas' ? 'canvas' : 'brightspace';
+  const p: LmsProvider = provider === 'canvas' || provider === 'blackboard' ? provider : 'brightspace';
   const h = host ?? (p === 'canvas' ? 'canvas.instructure.com' : 'lms.cofc.edu');
-  return { provider: p, host: h, name: name ?? lmsBrand(h, p), start: lmsStartUrl(p, h), script: p === 'canvas' ? CANVAS_SCRIPT : D2L_SCRIPT } as const;
+  return { provider: p, host: h, name: name ?? lmsBrand(h, p), start: lmsStartUrl(p, h), script: SCRIPTS[p], manualHint: MANUAL_HINT[p] } as const;
 }
 
 type Phase = 'signin' | 'looking' | 'connecting' | 'done' | 'manual' | 'error';
@@ -176,7 +184,7 @@ export default function LmsSignIn() {
           busy: false,
         }
       : phase === 'manual'
-        ? { text: 'Almost: tap Subscribe on the calendar.', busy: false }
+        ? { text: lms.manualHint, busy: false }
         : { text: error ?? 'Something went wrong', busy: false };
 
   return (

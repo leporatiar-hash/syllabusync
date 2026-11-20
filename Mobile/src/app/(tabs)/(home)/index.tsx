@@ -153,8 +153,8 @@ export default function Home() {
           <Group>
             <Row
               icon={<IconSquare icon={RefreshCw} bg="#EAF1FF" fg={C.brandSolid} size={36} radius={9} />}
-              title="Connect OAKS or Canvas"
-              subtitle="Every due date, kept right when professors move them"
+              title="Connect your LMS"
+              subtitle="Canvas, Blackboard or Brightspace: every due date, kept up to date"
               onPress={() => connectLms('home_card')}
             />
           </Group>

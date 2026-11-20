@@ -21,19 +21,21 @@ const OPTIONS: { value: Lms; label: string; sublabel?: string; icon: typeof Pale
   { value: 'none', label: 'My classes don’t use one', icon: CircleSlash, color: '#94A3B8', bg: '#F1F5F9' },
 ];
 
-const PROVIDER_LABEL = { brightspace: 'Brightspace', canvas: 'Canvas' } as const;
+const PROVIDER_LABEL = { brightspace: 'Brightspace', canvas: 'Canvas', blackboard: 'Blackboard' } as const;
+const AUTO: readonly string[] = ['brightspace', 'canvas', 'blackboard'];
+const isAuto = (p: string | null | undefined): p is 'brightspace' | 'canvas' | 'blackboard' => !!p && AUTO.includes(p);
 
 export default function LmsStep() {
   const { answers, set } = useQuiz();
   const domain = answers.schoolDomain;
   // A school LMS saved on the profile (reconnecting from the app) needs no detection.
   const saved: LmsOption | null =
-    answers.lmsHost && (answers.lms === 'brightspace' || answers.lms === 'canvas')
+    answers.lmsHost && isAuto(answers.lms)
       ? { provider: answers.lms, host: answers.lmsHost, name: answers.lmsName ?? PROVIDER_LABEL[answers.lms], source: 'profile' }
       : null;
   const [options, setOptions] = useState<LmsOption[] | null>(saved ? [saved] : domain ? null : []);
   const [showAll, setShowAll] = useState(false);
-  const [asking, setAsking] = useState<'brightspace' | 'canvas' | null>(null);
+  const [asking, setAsking] = useState<'brightspace' | 'canvas' | 'blackboard' | null>(null);
   const [address, setAddress] = useState('');
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export default function LmsStep() {
     set({ lms: o.provider, lmsHost: o.host, lmsName: o.name });
     api('/me/profile', { method: 'POST', body: JSON.stringify({ lms_provider: o.provider, lms_host: o.host }) }).catch(() => {});
     // Known Brightspace/Canvas host: go straight to their sign-in page; the feed link is picked up there.
-    if (o.provider === 'brightspace' || o.provider === 'canvas') {
+    if (isAuto(o.provider)) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setTimeout(() => router.push('/onboarding/lms-signin'), 200);
     } else advance('connect');
@@ -71,7 +73,7 @@ export default function LmsStep() {
 
   const chooseManual = (value: Lms) => {
     setError(null);
-    if (value === 'brightspace' || value === 'canvas') {
+    if (isAuto(value)) {
       setAsking(value);
       return;
     }
@@ -111,7 +113,10 @@ export default function LmsStep() {
 
   // 2. They picked Canvas/Brightspace themselves: ask where they sign in
   if (asking) {
-    const example = asking === 'canvas' ? 'canvas.school.edu or school.instructure.com' : 'd2l.school.edu or school.brightspace.com';
+    const example =
+      asking === 'canvas' ? 'canvas.school.edu or school.instructure.com'
+        : asking === 'blackboard' ? 'blackboard.school.edu or school.blackboard.com'
+          : 'd2l.school.edu or school.brightspace.com';
     return (
       <QuizScreen
         title={`Where do you sign in to ${PROVIDER_LABEL[asking]}?`}

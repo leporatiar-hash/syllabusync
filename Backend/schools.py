@@ -106,7 +106,7 @@ def school_for_email(email: str | None) -> dict | None:
 def brand(host: str | None, provider: str | None) -> str:
     if host and host in LMS_BRANDS:
         return LMS_BRANDS[host]
-    return {"brightspace": "Brightspace", "canvas": "Canvas"}.get(provider or "", "your LMS")
+    return {"brightspace": "Brightspace", "canvas": "Canvas", "blackboard": "Blackboard"}.get(provider or "", "your LMS")
 
 
 def lms_option(provider: str, host: str, source: str) -> dict:
@@ -129,6 +129,28 @@ async def _is_brightspace(client: httpx.AsyncClient, host: str) -> bool:
             return False
         data = r.json()
         return isinstance(data, list) and any(isinstance(x, dict) and "ProductCode" in x for x in data)
+    except Exception:
+        return False
+
+
+def _blackboard_candidates(domain: str) -> list[str]:
+    """Most specific first. Hosted Blackboard is usually <name>.blackboard.com (ualearn.blackboard.com)."""
+    root = domain.split(".")[-2] if domain.count(".") >= 1 else domain
+    return [
+        f"blackboard.{domain}", f"bb.{domain}", f"bblearn.{domain}", f"learn.{domain}", f"elearning.{domain}",
+        f"courses.{domain}", f"mycourses.{domain}", f"online.{domain}",
+        f"{root}.blackboard.com", f"{root}learn.blackboard.com", f"{root}-blackboard.blackboard.com",
+    ]
+
+
+async def _is_blackboard(client: httpx.AsyncClient, host: str) -> bool:
+    """Blackboard Learn answers GET /learn/api/public/v1/system/version publicly with its version."""
+    try:
+        r = await client.get(f"https://{host}/learn/api/public/v1/system/version", timeout=PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        return isinstance(data, dict) and isinstance(data.get("learn"), dict)
     except Exception:
         return False
 
@@ -256,11 +278,13 @@ async def detect(domain: str, name: str) -> list[dict]:
     terms = list(dict.fromkeys(t for t in (name, name.split(" - ")[0], root) if t.strip()))
     async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
         bs_hosts = _brightspace_candidates(domain)
+        bb_hosts = _blackboard_candidates(domain)
         results = await asyncio.gather(
             *[_is_brightspace(client, h) for h in bs_hosts],
             *[_canvas_directory(client, t) for t in terms],
             _is_canvas(client, f"canvas.{domain}", follow=True),
             _is_canvas(client, f"{root}.instructure.com"),
+            *[_is_blackboard(client, h) for h in bb_hosts],
         )
     found: list[dict] = []
     for host, ok in zip(bs_hosts, results[: len(bs_hosts)]):
@@ -270,6 +294,8 @@ async def detect(domain: str, name: str) -> list[dict]:
     rest = results[len(bs_hosts):]
     rows = [row for lst in rest[: len(terms)] for row in lst]
     own_host, root_host = rest[len(terms)], rest[len(terms) + 1]
+    bb_found = rest[len(terms) + 2:]
+    blackboard_host = next((h for h, ok in zip(bb_hosts, bb_found) if ok), None)
     if own_host and own_host != f"canvas.{domain}" and not await asyncio.to_thread(_public_host, own_host):
         own_host = None  # a redirect to a private address is never a school's Canvas
     picked = pick_canvas(rows, name, domain, own_host, root_host, brightspace_found=bool(found))
@@ -278,6 +304,10 @@ async def detect(domain: str, name: str) -> list[dict]:
         # An LMS on the school's own domain is the one in use; otherwise put Canvas first.
         own_bs = found and found[0]["host"].endswith("." + domain)
         found = found + [option] if own_bs else [option] + found
+    if blackboard_host:
+        # Schools moving to Canvas/Brightspace often leave Blackboard running for a while, so it
+        # leads only when nothing else turned up.
+        found.append(lms_option("blackboard", blackboard_host, "probe"))
     return found
 
 
@@ -308,15 +338,17 @@ def host_from_input(text: str) -> str | None:
 
 
 async def identify(host: str) -> dict | None:
-    """What LMS runs at a host a student typed in (Brightspace or Canvas), or None."""
+    """What LMS runs at a host a student typed in (Brightspace, Canvas or Blackboard), or None."""
     if not await asyncio.to_thread(_public_host, host):
         return None
     async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
-        bs, cv = await asyncio.gather(_is_brightspace(client, host), _is_canvas(client, host))
+        bs, cv, bb = await asyncio.gather(_is_brightspace(client, host), _is_canvas(client, host), _is_blackboard(client, host))
     if bs:
         return lms_option("brightspace", host, "manual")
     if cv:
         return lms_option("canvas", host, "manual")
+    if bb:
+        return lms_option("blackboard", host, "manual")
     return None
 
 

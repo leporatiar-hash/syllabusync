@@ -4,7 +4,7 @@ import { API_URL } from './config';
 // "Where do you go?" -> which LMS the school uses -> sign in there. Backend: Backend/schools.py.
 
 export type School = { name: string; domain: string };
-export type LmsProvider = 'brightspace' | 'canvas';
+export type LmsProvider = 'brightspace' | 'canvas' | 'blackboard';
 export type LmsOption = { provider: LmsProvider; host: string; name: string; source: string };
 
 export const searchSchools = (q: string) => api<School[]>(`/schools/search?q=${encodeURIComponent(q)}`);
@@ -33,11 +33,15 @@ export function schoolLms(domain: string): Promise<LmsOption[]> {
 /** What students call it (mirrors LMS_BRANDS in Backend/schools.py for profiles saved earlier). */
 export function lmsBrand(host: string | null | undefined, provider: string | null | undefined) {
   if (host === 'lms.cofc.edu') return 'OAKS';
-  return provider === 'brightspace' ? 'Brightspace' : provider === 'canvas' ? 'Canvas' : 'your LMS';
+  return provider === 'brightspace' ? 'Brightspace' : provider === 'canvas' ? 'Canvas' : provider === 'blackboard' ? 'Blackboard' : 'your LMS';
 }
 
 export function lmsStartUrl(provider: LmsProvider, host: string) {
-  return provider === 'brightspace' ? `https://${host}/d2l/home` : `https://${host}/login`;
+  if (provider === 'brightspace') return `https://${host}/d2l/home`;
+  // Blackboard can park visitors in a guest session ("Institution Page", no way to sign in), so start
+  // with its logout address: it ends any guest session and shows the school's real sign-in.
+  if (provider === 'blackboard') return `https://${host}/webapps/login/?action=logout`;
+  return `https://${host}/login`;
 }
 
 /** square: athletics mark or site icon; wide: the official logo. Picked server-side (404 when none). */
