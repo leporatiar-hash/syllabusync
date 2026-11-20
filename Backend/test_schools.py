@@ -192,7 +192,7 @@ def test_canvas_pick_probes():
 
 def _detect_with(bs=(), bb=(), canvas_rows=(), own=None, root=None, domain="sc.edu", name="University of South Carolina"):
     """Run the real detect() with every network probe stubbed."""
-    saved = (schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory, schools._public_host)
+    saved = (schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory, schools._public_host, schools._current_domain)
 
     async def is_bs(client, host):
         return host in bs
@@ -208,10 +208,16 @@ def _detect_with(bs=(), bb=(), canvas_rows=(), own=None, root=None, domain="sc.e
 
     schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory = is_bs, is_bb, is_cv, directory
     schools._public_host = lambda h: True
+
+    async def no_move(d):
+        return None
+
+    schools._current_domain = no_move
     try:
         return [(o["provider"], o["host"]) for o in asyncio.run(_REAL_DETECT(domain, name))]
     finally:
-        schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory, schools._public_host = saved
+        (schools._is_brightspace, schools._is_blackboard, schools._is_canvas, schools._canvas_directory,
+         schools._public_host, schools._current_domain) = saved
 
 
 def test_blackboard_detection():
@@ -223,6 +229,16 @@ def test_blackboard_detection():
     assert _detect_with(bb={"blackboard.sc.edu"}, canvas_rows=rows) == [("canvas", "sc.instructure.com"), ("blackboard", "blackboard.sc.edu")]
     assert _detect_with(bs={"d2l.sc.edu"}, bb={"blackboard.sc.edu"})[0] == ("brightspace", "d2l.sc.edu")
     assert _detect_with() == []
+    # An unlisted <root>.instructure.com never outranks a confirmed Blackboard (UT Dallas).
+    assert _detect_with(bb={"utdallas.blackboard.com"}, root="utdallas.instructure.com", domain="utdallas.edu",
+                        name="University of Texas at Dallas") == [("blackboard", "utdallas.blackboard.com")]
+
+
+def test_state_system_hosts():
+    assert schools._brightspace_candidates("bhsu.edu")[0] == "d2l.sdbor.edu"
+    assert schools._brightspace_candidates("baruch.cuny.edu")[0] == "cuny.brightspace.com"
+    assert "mnsu.learn.minnstate.edu" in schools._brightspace_candidates("mnsu.edu")
+    assert schools._system_brightspace("ucla.edu") == []
 
 
 def test_profile_saves_blackboard():

@@ -113,9 +113,21 @@ def lms_option(provider: str, host: str, source: str) -> dict:
     return {"provider": provider, "host": host, "name": brand(host, provider), "source": source}
 
 
+# State systems that run one Brightspace for every campus (checked live 2026-11-20).
+_SDBOR = {"bhsu.edu", "sdsu.edu", "usd.edu", "dsu.edu", "northern.edu", "sdsmt.edu"}
+
+
+def _system_brightspace(domain: str) -> list[str]:
+    if domain in _SDBOR:
+        return ["d2l.sdbor.edu"]  # South Dakota Board of Regents
+    if domain == "cuny.edu" or domain.endswith(".cuny.edu"):
+        return ["cuny.brightspace.com"]  # City University of New York
+    return []
+
+
 def _brightspace_candidates(domain: str) -> list[str]:
     root = domain.split(".")[-2] if domain.count(".") >= 1 else domain
-    return [
+    return [*_system_brightspace(domain), f"{root}.learn.minnstate.edu",
         f"d2l.{domain}", f"lms.{domain}", f"elearn.{domain}", f"elearning.{domain}",
         f"brightspace.{domain}", f"learn.{domain}", f"mycourses.{domain}", f"online.{domain}",
         f"courses.{domain}", f"{root}.brightspace.com", f"{root}.desire2learn.com", f"{root}.view.usg.edu",
@@ -270,8 +282,36 @@ def pick_canvas(rows: list[dict], name: str, domain: str, own_host: str | None, 
     return host, source
 
 
+async def _current_domain(domain: str) -> str | None:
+    """The .edu a school's old domain now redirects to (utd.edu -> utdallas.edu), if any. Our school
+    list is years old and some schools have moved, so every LMS guess on the old domain misses."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, max_redirects=5, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
+            r = await client.get(f"https://{domain}/", timeout=PROBE_TIMEOUT)
+        host = (r.url.host or "").lower()
+    except Exception:
+        return None
+    parts = host.split(".")
+    if len(parts) < 2 or parts[-1] != "edu":
+        return None
+    new = ".".join(parts[-2:])
+    if new == domain or not await asyncio.to_thread(_public_host, new):
+        return None
+    return new
+
+
 async def detect(domain: str, name: str) -> list[dict]:
-    """Every LMS we can confirm for the school, best first."""
+    """Every LMS we can confirm for the school, best first. If nothing turns up on the school's
+    domain from our list, try the domain it now redirects to."""
+    found = await _detect_on(domain, name)
+    if not found:
+        moved = await _current_domain(domain)
+        if moved:
+            found = await _detect_on(moved, name)
+    return found
+
+
+async def _detect_on(domain: str, name: str) -> list[dict]:
     root = domain.split(".")[-2] if domain.count(".") >= 1 else domain
     # Canvas's directory lists schools under their full name, the part before " - " ("University of
     # Michigan - Ann Arbor"), or the abbreviation students use ("UCLA"), so ask all three.
@@ -298,7 +338,8 @@ async def detect(domain: str, name: str) -> list[dict]:
     blackboard_host = next((h for h, ok in zip(bb_hosts, bb_found) if ok), None)
     if own_host and own_host != f"canvas.{domain}" and not await asyncio.to_thread(_public_host, own_host):
         own_host = None  # a redirect to a private address is never a school's Canvas
-    picked = pick_canvas(rows, name, domain, own_host, root_host, brightspace_found=bool(found))
+    # A confirmed Brightspace or Blackboard outranks a bare, unlisted <root>.instructure.com account.
+    picked = pick_canvas(rows, name, domain, own_host, root_host, brightspace_found=bool(found) or bool(blackboard_host))
     if picked:
         option = lms_option("canvas", picked[0], picked[1])
         # An LMS on the school's own domain is the one in use; otherwise put Canvas first.
