@@ -1,9 +1,10 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { CalendarDays, Check, GraduationCap, Info, NotebookPen, type LucideIcon } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
+import { BackBar } from '@/components/back-bar';
 import { DeadlinesTab } from '@/components/course/deadlines-tab';
 import { InfoTab } from '@/components/course/info-tab';
 import { NotesTab } from '@/components/course/notes-tab';
@@ -54,18 +55,11 @@ export default function CourseScreen() {
 
   return (
     <PageBackground>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 20, paddingBottom: 48 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />} keyboardShouldPersistTaps="handled">
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>
-          <Pressable onPress={() => router.navigate('/')}><T size={14} color={C.slate500}>Home</T></Pressable>
-          <T size={14} color={C.slate500} style={{ paddingHorizontal: 8 }}>/</T>
-          <Pressable onPress={() => router.back()}><T size={14} color={C.slate500}>Courses</T></Pressable>
-          <T size={14} color={C.slate500} style={{ paddingHorizontal: 8 }}>/</T>
-          <T size={14} color={C.slate700} numberOfLines={1} style={{ flexShrink: 1 }}>{data?.name ?? 'Course'}</T>
-        </View>
-
+      <BackBar label="Courses" />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />} keyboardShouldPersistTaps="handled">
         {!data ? <Spinner /> : (
           <>
-            <LinearGradient colors={['#E0EAFF', '#F3E8FF', '#E0F2FE']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[{ marginTop: 20, borderRadius: 24, paddingHorizontal: 24, paddingVertical: 20 }, shadowSm]}>
+            <LinearGradient colors={['#E0EAFF', '#F3E8FF', '#E0F2FE']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[{ marginTop: 4, borderRadius: 24, paddingHorizontal: 24, paddingVertical: 20 }, shadowSm]}>
               <Eyebrow>{data.code || 'Course'}</Eyebrow>
               <T size={24} weight="semibold" color={C.slate900} style={{ marginTop: 4, lineHeight: 31 }}>{data.name}</T>
               <T size={14} color={C.slate600} style={{ marginTop: 4 }}>{data.semester || 'Semester'}</T>

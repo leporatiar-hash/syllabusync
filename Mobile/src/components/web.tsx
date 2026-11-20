@@ -49,7 +49,7 @@ export function Card({ children, style, radius = 16, padding = 16 }: { children:
   );
 }
 
-/** rounded-full bg-gradient-to-r from-[#5B8DEF] to-[#7C9BF6] text-white font-semibold */
+/** Primary button: solid brand pill with white text (iOS-style filled button). Pass `colors` for a gradient. */
 export function GradientButton({
   title,
   onPress,
@@ -58,7 +58,7 @@ export function GradientButton({
   size = 'md',
   icon,
   style,
-  colors = [C.brand, C.brandEnd],
+  colors = [C.brandSolid, C.brandSolid],
 }: {
   title: string;
   onPress: () => void;

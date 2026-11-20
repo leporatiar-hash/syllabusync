@@ -146,6 +146,49 @@ def test_host_parsing():
     assert asyncio.run(asyncio.to_thread(schools._public_host, "localhost")) is False
 
 
+def _row(name, domain):
+    return {"name": name, "domain": domain}
+
+
+def test_canvas_pick_avoids_subunits():
+    # Real rows from Canvas's directory (Nov 2026) that the old "first name containing it" rule got wrong.
+    ucla = [_row("UCLA Extension (University of California, Los Angeles)", "my.uclaextension.edu"), _row("UCLA", "bruinlearn.ucla.edu")]
+    assert schools.pick_canvas(ucla, "University of California, Los Angeles", "ucla.edu", None, None) == ("bruinlearn.ucla.edu", "canvas_search")
+    # Only the Extension entry known: not good enough on its own.
+    assert schools.pick_canvas(ucla[:1], "University of California, Los Angeles", "ucla.edu", None, None) is None
+
+    ut = [
+        _row("Meadows Center and Vaughn Gross Center at The University of Texas at Austin", "nationaldeafcenter.instructure.com"),
+        _row("The University of Texas at Austin High School - Parents/Observers", "uths.instructure.com"),
+        _row("University Of Texas at Austin", "utexas.instructure.com"),
+    ]
+    assert schools.pick_canvas(ut, "The University of Texas at Austin", "utexas.edu", None, None)[0] == "utexas.instructure.com"
+
+    um = [
+        _row("University of Michigan - Center of Academic Innovation", "courses.online.umich.edu"),
+        _row("University of Michigan - Flint", "canvas.flint.umich.edu"),
+        _row("University of Michigan Ann Arbor Catalog", "u-m-canvas.it.umich.edu"),
+        _row("University of Michigan - Ann Arbor", "m.canvas.umich.edu"),
+    ]
+    assert schools.pick_canvas(um, "University of Michigan - Ann Arbor", "umich.edu", None, None)[0] == "m.canvas.umich.edu"
+
+    assert schools.pick_canvas([_row("UC Berkeley - Extension", "onlinelearning.berkeley.edu"), _row("UC Berkeley", "bcourses.berkeley.edu")],
+                               "University of California, Berkeley", "berkeley.edu", None, None)[0] == "bcourses.berkeley.edu"
+    assert schools.pick_canvas([_row("University of Virginia (UVA)", "canvas.its.virginia.edu")],
+                               "University of Virginia, Charlottesville", "virginia.edu", None, None)[0] == "canvas.its.virginia.edu"
+
+
+def test_canvas_pick_probes():
+    # canvas.<domain> answering (after redirects) beats a weak directory match.
+    assert schools.pick_canvas([], "University of California, Los Angeles", "ucla.edu", "bruinlearn.ucla.edu", None) == ("bruinlearn.ucla.edu", "probe")
+    # A bare <root>.instructure.com is a last resort: never over a confirmed Brightspace site...
+    assert schools.pick_canvas([], "University of Georgia", "uga.edu", None, "uga.instructure.com", brightspace_found=True) is None
+    # ...but used when nothing else turned up, or when the directory backs it.
+    assert schools.pick_canvas([], "Auburn University", "auburn.edu", None, "auburn.instructure.com") == ("auburn.instructure.com", "probe")
+    assert schools.pick_canvas([_row("Auburn University", "auburn.instructure.com")], "Auburn University", "auburn.edu", None,
+                               "auburn.instructure.com", brightspace_found=True)[0] == "auburn.instructure.com"
+
+
 if __name__ == "__main__":
     main.Base.metadata.create_all(bind=main.engine)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

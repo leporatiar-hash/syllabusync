@@ -69,7 +69,8 @@ export default function SchoolStep() {
     set({ school: name, schoolDomain: school?.domain ?? null, ...(changed ? { lms: null, lmsHost: null, lmsName: null } : {}) });
     if (school) schoolLms(school.domain); // start LMS detection now; the LMS step picks it up
     api('/me/profile', { method: 'POST', body: JSON.stringify({ school_name: name, school_domain: school?.domain ?? undefined }) }).catch(() => {});
-    advance('year');
+    // From the app's Connect button, the school only matters for finding their LMS.
+    advance(answers.mode === 'app' ? 'lms' : 'year');
   };
 
   const first = answers.firstName.trim();

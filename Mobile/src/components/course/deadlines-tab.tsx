@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Pressable, View } from 'react-native';
 import { Card, Eyebrow, IconSquare, OutlineButton, Pill, T, TypeBadge } from '@/components/web';
 import { C } from '@/constants/theme';
 import { api } from '@/lib/api';
-import { formatDeadlineDate, groupDeadlines, localToday } from '@/lib/dates';
+import { formatDeadlineDate, formatTime, groupDeadlines, localToday } from '@/lib/dates';
 import type { CourseDeadline } from '@/lib/types';
 import { pickAndUploadSyllabus } from '@/lib/upload';
 
@@ -85,7 +85,7 @@ export function DeadlinesTab({
         {d.description ? <T size={14} color={C.slate500} numberOfLines={2} style={{ marginTop: 2 }}>{d.description}</T> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 6, marginTop: 6 }}>
           <T size={12} weight="medium" color={C.slate700}>{formatDeadlineDate(d.date, today)}</T>
-          {d.time ? <T size={12} color={C.slate400}>{d.time}</T> : null}
+          {d.time ? <T size={12} color={C.slate400}>{formatTime(d.time)}</T> : null}
           <TypeBadge type={d.type} />
           {d.saved_to_calendar ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>

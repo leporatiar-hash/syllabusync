@@ -4,7 +4,6 @@ import { BellOff, ChevronDown, ChevronRight, Star } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { ActionSheetIOS, Alert, KeyboardAvoidingView, Linking, Pressable, ScrollView, Switch, View } from 'react-native';
 
-import { AppHeader } from '@/components/app-chrome';
 import { BackBar } from '@/components/back-bar';
 import { WebInput } from '@/components/course-form';
 import { Avatar, Card, GradientButton, OutlineButton, PageBackground, T } from '@/components/web';
@@ -150,7 +149,6 @@ export default function Settings() {
 
   return (
     <PageBackground>
-      <AppHeader />
       <BackBar label="Back" />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 64, gap: 24 }} keyboardShouldPersistTaps="handled">

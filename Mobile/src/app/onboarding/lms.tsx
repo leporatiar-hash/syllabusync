@@ -1,3 +1,4 @@
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { CircleSlash, Globe, LayoutGrid, Lock, MonitorSmartphone, Palette, Sun } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
@@ -51,10 +52,21 @@ export default function LmsStep() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [domain]);
 
+  // Opened from the app with no school on the profile (web signups): ask the school first, so we
+  // can find their LMS instead of making them pick a product and type its web address.
+  const needSchool = answers.mode === 'app' && !saved && !domain;
+  useEffect(() => {
+    if (needSchool) router.replace('/onboarding/school');
+  }, [needSchool]);
+
   const pick = (o: LmsOption) => {
     set({ lms: o.provider, lmsHost: o.host, lmsName: o.name });
     api('/me/profile', { method: 'POST', body: JSON.stringify({ lms_provider: o.provider, lms_host: o.host }) }).catch(() => {});
-    advance('connect');
+    // Known Brightspace/Canvas host: go straight to their sign-in page; the feed link is picked up there.
+    if (o.provider === 'brightspace' || o.provider === 'canvas') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setTimeout(() => router.push('/onboarding/lms-signin'), 200);
+    } else advance('connect');
   };
 
   const chooseManual = (value: Lms) => {
@@ -85,8 +97,8 @@ export default function LmsStep() {
     }
   };
 
-  // 1. Still looking up the school's LMS
-  if (options === null) {
+  // 1. Still looking up the school's LMS (or on the way to the school step)
+  if (options === null || needSchool) {
     return (
       <QuizScreen title="">
         <Animated.View entering={FadeIn.duration(250)} style={{ alignItems: 'center', gap: 18, paddingVertical: 40 }}>

@@ -30,7 +30,7 @@ LMS_BRANDS = {
 }
 
 CANVAS_SEARCH = "https://sso.canvaslms.com/api/v1/accounts/search"
-PROBE_TIMEOUT = 4.0
+PROBE_TIMEOUT = 6.0
 
 _schools: list[dict] | None = None
 _by_domain: dict[str, dict] = {}
@@ -133,54 +133,149 @@ async def _is_brightspace(client: httpx.AsyncClient, host: str) -> bool:
         return False
 
 
-async def _is_canvas(client: httpx.AsyncClient, host: str) -> bool:
-    """Canvas answers an unauthenticated API call with a 401 JSON body naming the problem."""
+async def _is_canvas(client: httpx.AsyncClient, host: str, follow: bool = False) -> str | None:
+    """The Canvas host at `host`, or None. Canvas answers an unauthenticated API call with a 401 JSON
+    body. With follow=True (detection's own guesses only, never typed-in input) redirects are
+    followed and the host students end up on is returned, e.g. canvas.ucla.edu -> bruinlearn.ucla.edu."""
     try:
-        r = await client.get(f"https://{host}/api/v1/users/self", timeout=PROBE_TIMEOUT)
-        return r.status_code == 401 and "unauthenticated" in r.text.lower()
-    except Exception:
-        return False
-
-
-async def _canvas_by_name(client: httpx.AsyncClient, name: str) -> str | None:
-    try:
-        r = await client.get(CANVAS_SEARCH, params={"name": name, "per_page": 20}, timeout=PROBE_TIMEOUT + 2)
-        if r.status_code != 200:
-            return None
-        want = _norm(name)
-        rows = [x for x in r.json() if isinstance(x, dict) and x.get("domain")]
-        exact = [x for x in rows if _norm(x.get("name", "")) == want]
-        close = [x for x in rows if want in _norm(x.get("name", ""))]
-        pick = (exact or close or [None])[0]
-        return pick["domain"].lower() if pick else None
+        r = await client.get(f"https://{host}/api/v1/users/self", timeout=PROBE_TIMEOUT, follow_redirects=follow)
+        if r.status_code == 401 and "unauthenticated" in r.text.lower() and r.url.scheme == "https":
+            return (r.url.host or host).lower()
+        return None
     except Exception:
         return None
+
+
+# Words that mark a directory entry as a sub-unit of the school rather than the main student
+# Canvas: "UCLA Extension", "University of Michigan - Center of Academic Innovation", a lab school...
+_SUBUNIT_WORDS = {
+    "extension", "online", "continuing", "professional", "development", "catalog", "center", "centre",
+    "high", "academy", "parents", "observers", "observer", "sandbox", "test", "training", "innovation",
+    "engineering", "medicine", "medical", "law", "nursing", "dental", "pharmacy", "health", "graduate",
+    "global", "community", "k12", "staff", "faculty", "alumni", "dearborn", "flint", "commons",
+}
+
+
+_FILLER = {"the", "of", "at", "and", "in", "campus", "main"}
+# Short forms schools use in Canvas's directory ("UC Berkeley" for University of California, Berkeley).
+_EXPAND = {"uc": ["university", "california"], "u": ["university"], "univ": ["university"], "st": ["state"]}
+
+
+def _tokens(name: str) -> set[str]:
+    """Meaningful words of a school name: no filler, no "(UVA)"-style abbreviations, short forms expanded."""
+    name = re.sub(r"\([^)]*\)", " ", name)
+    out: set[str] = set()
+    for w in _norm(name).split():
+        if w in _FILLER:
+            continue
+        out.update(_EXPAND.get(w, [w]))
+    return out
+
+
+def _want_tokens(name: str) -> list[set[str]]:
+    """Ways the directory may name the school: the full name, and the part before " - "
+    ("University of Michigan - Ann Arbor")."""
+    variants = [name, name.split(" - ")[0]]
+    return [t for t in dict.fromkeys(frozenset(_tokens(v)) for v in variants) if t]
+
+
+def _score_canvas_row(row: dict, want: list[set[str]], root: str, domain: str) -> int:
+    """How sure we are a Canvas directory entry is the school's main student Canvas (0 = not it)."""
+    toks = _tokens(row.get("name", ""))
+    host = (row.get("domain") or "").lower()
+    if not toks or not host:
+        return 0
+    full = set().union(*want) | {root}
+    if any(toks == w for w in want):
+        score = 100
+    elif toks == {root}:
+        score = 90  # "UCLA" for ucla.edu
+    elif any(w <= toks for w in want):
+        # Every word of the school's name plus extras: "UCLA Extension", "... - Center of Academic Innovation".
+        extra = toks - full
+        score = 50 - 5 * len(extra) - 30 * len(extra & _SUBUNIT_WORDS)
+    elif len(toks) >= 2 and toks <= full:
+        # A shorter form of the name ("University of Virginia" for "..., Charlottesville"); only
+        # trusted together with a host on the school's own domain or <root>.instructure.com.
+        score = 25
+    else:
+        return 0
+    if host == domain or host.endswith("." + domain):
+        score += 40  # on the school's own domain
+    elif host == f"{root}.instructure.com":
+        score += 30
+    elif host.startswith(root):
+        score += 10
+    return max(score, 0)
+
+
+async def _canvas_directory(client: httpx.AsyncClient, term: str) -> list[dict]:
+    try:
+        r = await client.get(CANVAS_SEARCH, params={"name": term, "per_page": 50}, timeout=PROBE_TIMEOUT + 2)
+        if r.status_code != 200:
+            return []
+        return [x for x in r.json() if isinstance(x, dict) and x.get("domain")]
+    except Exception:
+        return []
+
+
+CANVAS_MIN_SCORE = 60
+
+
+def pick_canvas(rows: list[dict], name: str, domain: str, own_host: str | None, root_host: str | None,
+                brightspace_found: bool = False) -> tuple[str, str] | None:
+    """Best Canvas host for a school from directory rows + probes, as (host, source), or None."""
+    root = domain.split(".")[-2] if domain.count(".") >= 1 else domain
+    want = _want_tokens(name)
+    scored: dict[str, int] = {}
+    for row in rows:
+        host = row["domain"].lower()
+        scored[host] = max(scored.get(host, 0), _score_canvas_row(row, want, root, domain))
+    best = max(scored.items(), key=lambda kv: kv[1], default=(None, 0))
+    candidates: list[tuple[int, str, str]] = []
+    if best[0] and best[1] >= CANVAS_MIN_SCORE:
+        candidates.append((best[1], best[0], "canvas_search"))
+    if own_host:
+        # canvas.<domain> answered as Canvas: the school's own address for it, very likely the real one.
+        candidates.append((120, own_host, "probe"))
+    if root_host and (scored.get(root_host, 0) >= CANVAS_MIN_SCORE or not (candidates or brightspace_found)):
+        # Schools keep unused <root>.instructure.com accounts (trials, Catalog), so on its own it is a
+        # last resort, and never outranks a Brightspace site we confirmed.
+        candidates.append((scored.get(root_host, 0) or 65, root_host, "probe"))
+    if not candidates:
+        return None
+    _, host, source = max(candidates, key=lambda c: c[0])
+    return host, source
 
 
 async def detect(domain: str, name: str) -> list[dict]:
     """Every LMS we can confirm for the school, best first."""
     root = domain.split(".")[-2] if domain.count(".") >= 1 else domain
+    # Canvas's directory lists schools under their full name, the part before " - " ("University of
+    # Michigan - Ann Arbor"), or the abbreviation students use ("UCLA"), so ask all three.
+    terms = list(dict.fromkeys(t for t in (name, name.split(" - ")[0], root) if t.strip()))
     async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
         bs_hosts = _brightspace_candidates(domain)
         results = await asyncio.gather(
             *[_is_brightspace(client, h) for h in bs_hosts],
-            _canvas_by_name(client, name.split(" - ")[0]),
+            *[_canvas_directory(client, t) for t in terms],
+            _is_canvas(client, f"canvas.{domain}", follow=True),
             _is_canvas(client, f"{root}.instructure.com"),
-            _is_canvas(client, f"canvas.{domain}"),
         )
     found: list[dict] = []
     for host, ok in zip(bs_hosts, results[: len(bs_hosts)]):
         if ok:
             found.append(lms_option("brightspace", host, "probe"))
             break  # the first (most specific) Brightspace host is the one students use
-    canvas_named, canvas_root, canvas_sub = results[len(bs_hosts):]
-    # Schools often keep an unused <root>.instructure.com account (trials, Canvas Catalog), so a
-    # bare instructure.com host only counts when nothing else turned up.
-    canvas_host = canvas_named or (f"canvas.{domain}" if canvas_sub else None) or (
-        f"{root}.instructure.com" if canvas_root and not found else None)
-    if canvas_host:
-        option = lms_option("canvas", canvas_host, "canvas_search" if canvas_named else "probe")
-        # An LMS on the school's own domain is the one in use; otherwise trust Canvas's directory.
+    rest = results[len(bs_hosts):]
+    rows = [row for lst in rest[: len(terms)] for row in lst]
+    own_host, root_host = rest[len(terms)], rest[len(terms) + 1]
+    if own_host and own_host != f"canvas.{domain}" and not await asyncio.to_thread(_public_host, own_host):
+        own_host = None  # a redirect to a private address is never a school's Canvas
+    picked = pick_canvas(rows, name, domain, own_host, root_host, brightspace_found=bool(found))
+    if picked:
+        option = lms_option("canvas", picked[0], picked[1])
+        # An LMS on the school's own domain is the one in use; otherwise put Canvas first.
         own_bs = found and found[0]["host"].endswith("." + domain)
         found = found + [option] if own_bs else [option] + found
     return found

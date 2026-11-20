@@ -14,7 +14,7 @@ export function AuthShell({ title, subtitle, children }: { title: string; subtit
       <View style={{ paddingTop: insets.top, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: 'rgba(226,232,240,0.7)' }}>
         <View style={{ height: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16 }}>
           <LogoMark size={32} />
-          <T size={16} weight="semibold" color={C.brandText}>ClassMate</T>
+          <T size={17} weight="bold" color={C.slate900} style={{ letterSpacing: -0.3 }}>ClassMate</T>
         </View>
       </View>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>

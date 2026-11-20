@@ -11,7 +11,7 @@ import { C, getCourseColor, normalizeType, typeStyle } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { api } from '@/lib/api';
 import { toYmd } from '@/lib/dates';
-import type { Deadline } from '@/lib/types';
+import type { Course, Deadline } from '@/lib/types';
 
 type CalDeadline = Deadline & { saved_to_calendar?: boolean };
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -72,7 +72,7 @@ export default function Calendar() {
   const dayItems = selected ? byDay.get(selected) ?? [] : [];
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.white }}>
+    <View style={{ flex: 1, backgroundColor: C.white, paddingTop: insets.top }}>
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: C.slate100, paddingHorizontal: 12, paddingVertical: 6 }}>
         {WEEKDAYS.map((w, i) => <T key={i} size={12} weight="medium" color={C.slate500} style={{ flex: 1, textAlign: 'center' }}>{w}</T>)}
       </View>
@@ -87,7 +87,7 @@ export default function Calendar() {
               <T size={11} weight="semibold" color={C.brand}>{bulk ? '…' : `Save (${unsaved.length})`}</T>
             </Pressable>
           ) : null}
-          <Pressable onPress={() => setCreating(true)} accessibilityLabel="Add a task" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' }}>
+          <Pressable onPress={() => setCreating(true)} accessibilityLabel="Add an assignment or to-do" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' }}>
             <T size={20} color="#fff" style={{ lineHeight: 22 }}>+</T>
           </Pressable>
         </View>
@@ -103,7 +103,7 @@ export default function Calendar() {
           for (const [i, top] of Object.entries(monthY.current)) if (y >= top) idx = Math.max(idx, Number(i));
           if (idx !== visibleMonth) setVisibleMonth(idx);
         }}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}>
+        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 120 }}>
         {months.map((month, mi) => {
           const startingDay = month.getDay();
           const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
@@ -188,45 +188,121 @@ export default function Calendar() {
         </Pressable>
       </Modal>
 
-      <CreateTaskModal visible={creating} initialDate={selected ?? todayYmd} onClose={() => setCreating(false)} onCreated={reload} />
+      <AddItemModal visible={creating} initialDate={selected ?? todayYmd} onClose={() => setCreating(false)} onCreated={reload} />
     </View>
   );
 }
 
-function CreateTaskModal({ visible, initialDate, onClose, onCreated }: { visible: boolean; initialDate: string; onClose: () => void; onCreated: () => void }) {
-  const [title, setTitle] = useState('');
-  const [date, setDate] = useState(new Date(initialDate + 'T12:00:00'));
-  const [busy, setBusy] = useState(false);
+
+const ITEM_TYPES = ['Assignment', 'Quiz', 'Exam', 'Project', 'Reading', 'Other'] as const;
+
+function Chip({ label, on, onPress, dot }: { label: string; on: boolean; onPress: () => void; dot?: string }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose} onShow={() => { setTitle(''); setDate(new Date(initialDate + 'T12:00:00')); }}>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: C.white, padding: 20, gap: 16 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <T size={20} weight="semibold" color={C.slate900}>Add a task</T>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: on }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, borderWidth: 1, borderColor: on ? C.brandSolid : C.slate200, backgroundColor: on ? '#EAF1FF' : C.white, paddingHorizontal: 12, paddingVertical: 7 }}>
+      {dot ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dot }} /> : null}
+      <T size={14} weight={on ? 'semibold' : 'medium'} color={on ? C.brandSolid : C.slate700}>{label}</T>
+    </Pressable>
+  );
+}
+
+/** Add an assignment/quiz/exam to a course, or a personal to-do (no course). */
+function AddItemModal({ visible, initialDate, onClose, onCreated }: { visible: boolean; initialDate: string; onClose: () => void; onCreated: () => void }) {
+  const courses = useApi<Course[]>('/courses');
+  const [title, setTitle] = useState('');
+  const [courseId, setCourseId] = useState<string | null>(null);
+  const [type, setType] = useState<(typeof ITEM_TYPES)[number]>('Assignment');
+  const [date, setDate] = useState(new Date(initialDate + 'T12:00:00'));
+  const [time, setTime] = useState<Date | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isTodo = courseId === null;
+
+  const reset = () => {
+    setTitle('');
+    setDate(new Date(initialDate + 'T12:00:00'));
+    setTime(null);
+    setType('Assignment');
+    // Default to the first course: most things added here are coursework.
+    setCourseId(courses.data?.[0]?.id ?? null);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const hhmm = time ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}` : null;
+      await api('/deadlines', {
+        method: 'POST',
+        body: JSON.stringify({ title: title.trim(), date: toYmd(date), time: hhmm, type: isTodo ? 'Deadline' : type === 'Other' ? 'Deadline' : type, course_id: courseId }),
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onCreated();
+      onClose();
+    } catch (e) {
+      Alert.alert('Couldn’t add it', e instanceof Error ? e.message : '');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose} onShow={reset}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: C.white }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 8 }}>
+          <T size={20} weight="semibold" color={C.slate900}>{isTodo ? 'Add a to-do' : `Add ${type === 'Other' ? 'a deadline' : type === 'Assignment' || type === 'Exam' ? `an ${type.toLowerCase()}` : `a ${type.toLowerCase()}`}`}</T>
           <OutlineButton title="Cancel" size="sm" onPress={onClose} />
         </View>
-        <WebInput label="What do you need to do?" placeholder="e.g. Buy blue books" value={title} onChangeText={setTitle} autoFocus />
-        <View style={{ gap: 6 }}>
-          <T size={14} weight="medium" color={C.slate700}>Due</T>
-          <DateTimePicker value={date} mode="date" display="inline" accentColor={C.brand} onChange={(_, d) => d && setDate(d)} />
-        </View>
-        <GradientButton
-          title="Add to To Do list"
-          size="lg"
-          loading={busy}
-          disabled={!title.trim()}
-          onPress={async () => {
-            setBusy(true);
-            try {
-              await api('/deadlines', { method: 'POST', body: JSON.stringify({ title: title.trim(), date: toYmd(date), type: 'Deadline' }) });
-              onCreated();
-              onClose();
-            } catch (e) {
-              Alert.alert('Couldn’t add task', e instanceof Error ? e.message : '');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
+        <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, gap: 18 }} keyboardShouldPersistTaps="handled">
+          <WebInput label="Name" placeholder={isTodo ? 'e.g. Buy blue books' : 'e.g. Problem Set 5'} value={title} onChangeText={setTitle} autoFocus />
+
+          <View style={{ gap: 8 }}>
+            <T size={14} weight="medium" color={C.slate700}>Course</T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {(courses.data ?? []).map((c) => (
+                <Chip key={c.id} label={c.code || c.name} dot={getCourseColor(c.id, c.color).accent} on={courseId === c.id} onPress={() => setCourseId(c.id)} />
+              ))}
+              <Chip label="To-do (no course)" on={isTodo} onPress={() => setCourseId(null)} />
+            </View>
+          </View>
+
+          {!isTodo ? (
+            <View style={{ gap: 8 }}>
+              <T size={14} weight="medium" color={C.slate700}>Type</T>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {ITEM_TYPES.map((t) => <Chip key={t} label={t} on={type === t} onPress={() => setType(t)} />)}
+              </View>
+            </View>
+          ) : null}
+
+          <View style={{ gap: 6 }}>
+            <T size={14} weight="medium" color={C.slate700}>Due</T>
+            <DateTimePicker value={date} mode="date" display="inline" accentColor={C.brandSolid} onChange={(_, d) => d && setDate(d)} />
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <T size={14} weight="medium" color={C.slate700}>Time</T>
+            {time ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <DateTimePicker value={time} mode="time" display="compact" accentColor={C.brandSolid} onChange={(_, d) => d && setTime(d)} />
+                <Pressable onPress={() => setTime(null)} hitSlop={8}><T size={14} color={C.slate500}>Remove</T></Pressable>
+              </View>
+            ) : (
+              <Pressable onPress={() => { const t = new Date(date); t.setHours(23, 59, 0, 0); setTime(t); }} hitSlop={8}>
+                <T size={15} weight="medium" color={C.brandSolid}>Add a time</T>
+              </Pressable>
+            )}
+          </View>
+
+          <GradientButton
+            title={isTodo ? 'Add to-do' : `Add ${type === 'Other' ? 'deadline' : type.toLowerCase()}`}
+            size="lg"
+            loading={busy}
+            disabled={!title.trim()}
+            onPress={save}
+          />
+        </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
   );

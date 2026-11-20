@@ -7,6 +7,8 @@ export const C = {
   brand: '#5B8DEF',
   brandEnd: '#7C9BF6', // gradient end for primary pills (from-[#5B8DEF] to-[#7C9BF6])
   brandDark: '#3b6ed6',
+  brandSolid: '#3F74E0', // solid buttons/links: brand blue dark enough for white text (4.5:1)
+  groupedBg: '#F2F4F8', // iOS grouped-list background behind white cards
   brandText: '#7BB7FF', // "ClassMate" wordmark in the header
   lavender: '#A78BFA',
   indigo: '#5B4EE8', // logo + chat "New Chat" button

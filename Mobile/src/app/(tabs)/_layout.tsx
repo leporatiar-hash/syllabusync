@@ -1,10 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
-import Tabs from 'expo-router/js-tabs';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import * as SecureStore from 'expo-secure-store';
 import { useEffect, useRef } from 'react';
 
-import { AppHeader, WebTabBar } from '@/components/app-chrome';
 import { C } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
 import { useLmsForegroundSync } from '@/lib/lms-sync';
@@ -42,19 +41,30 @@ function useNotificationTaps() {
   }, [response]);
 }
 
+/** The system iOS tab bar (floating glass on iOS 26). Re-tapping a tab pops it to its root natively. */
 export default function TabsLayout() {
   const { me } = useAuth();
   useFirstRunPrompts();
   useNotificationTaps();
   useLmsForegroundSync(!!me);
   return (
-    <Tabs
-      tabBar={(props) => <WebTabBar {...props} />}
-      screenOptions={{ header: () => <AppHeader />, sceneStyle: { backgroundColor: C.pageBg } }}>
-      <Tabs.Screen name="(home)" />
-      <Tabs.Screen name="courses" />
-      <Tabs.Screen name="calendar" />
-      <Tabs.Screen name="chat" />
-    </Tabs>
+    <NativeTabs tintColor={C.brandSolid} minimizeBehavior="automatic">
+      <NativeTabs.Trigger name="(home)">
+        <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'checklist', selected: 'checklist' }} md="today" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="calendar">
+        <NativeTabs.Trigger.Label>Calendar</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="calendar" md="calendar_month" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="courses">
+        <NativeTabs.Trigger.Label>Courses</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'books.vertical', selected: 'books.vertical.fill' }} md="school" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="chat">
+        <NativeTabs.Trigger.Label>Chat</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'bubble.left.and.bubble.right', selected: 'bubble.left.and.bubble.right.fill' }} md="chat" />
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }

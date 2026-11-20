@@ -4,8 +4,9 @@ import { CalendarDays, Pencil, Plus, Trash2, Upload } from 'lucide-react-native'
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
+import { ScreenTitle, TitleAction } from '@/components/app-chrome';
 import { CourseFormModal } from '@/components/course-form';
-import { DashedBox, Eyebrow, GradientButton, IconSquare, PageBackground, Spinner, T } from '@/components/web';
+import { DashedBox, Eyebrow, IconSquare, PageBackground, Spinner, T } from '@/components/web';
 import { C, getCourseColor, shadowSm } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { api } from '@/lib/api';
@@ -63,15 +64,13 @@ export default function Courses() {
 
   return (
     <PageBackground>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 28, paddingBottom: 40 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}>
-        <T size={30} weight="semibold" color={C.slate900} style={{ lineHeight: 36, letterSpacing: -0.5 }}>Courses</T>
-        <T size={16} color={C.slate600} style={{ marginTop: 6 }}>Your syllabi, deadlines, and study materials in one place.</T>
-        <GradientButton title="+ Add Course" style={{ alignSelf: 'flex-start', marginTop: 16 }} onPress={() => setAdding(true)} />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}>
+        <ScreenTitle title="Courses" right={<TitleAction icon={Plus} label="Add course" onPress={() => setAdding(true)} />} />
 
         {error ? <T color={C.red} style={{ marginTop: 16 }}>{error}</T> : null}
         {loading && !data ? <Spinner /> : null}
 
-        <View style={{ gap: 24, marginTop: 32 }}>
+        <View style={{ gap: 16, marginTop: 12 }}>
           {(data ?? []).map((c) => {
             const color = getCourseColor(c.id, c.color);
             return (

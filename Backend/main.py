@@ -7362,7 +7362,7 @@ def survey_results(survey_key: str = CURRENT_SURVEY, current_user: User = Depend
 # ── Schools ("Where do you go?") ───────────────────────────────────────────
 
 SCHOOL_LMS_FOUND_TTL = timedelta(days=30)
-SCHOOL_LMS_NONE_TTL = timedelta(days=7)
+SCHOOL_LMS_NONE_TTL = timedelta(days=1)  # "none" may just mean a probe timed out; retry soon
 
 
 class LmsIdentifyRequest(BaseModel):
