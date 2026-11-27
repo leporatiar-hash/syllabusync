@@ -415,6 +415,43 @@ def test_urgent_change_goes_out_in_the_daytime():
     client.put("/me/notification-settings", json={"deadlines": False, "exams": False, "weekly": False}, headers=h)
 
 
+def test_moved_deadline_gets_a_new_reminder():
+    """Reminded Sunday for Monday; the professor extends it to Wednesday; Tuesday night the student
+    must be reminded again (the old ledger was keyed by deadline only, so they never were)."""
+    uid, h, token = _user()
+    c = _course(h)
+    did = _deadline(h, 1, "Problem Set 6", course_id=c)
+    _run()
+    assert "Due tomorrow: Problem Set 6" in [m["title"] for m in _mine(token)], [m["title"] for m in _mine(token)]
+    db = main.SessionLocal()
+    try:
+        db.query(main.Deadline).filter_by(id=did).one().date = (TODAY + timedelta(days=3)).isoformat()
+        db.commit()
+    finally:
+        db.close()
+    _run(SUNDAY_7PM_NY + timedelta(days=1))  # Monday evening: due in 2 days, nothing
+    _run(SUNDAY_7PM_NY + timedelta(days=2))  # Tuesday evening: due tomorrow again
+    titles = [m["title"] for m in _mine(token) if "Problem Set 6" in m["title"]]
+    assert titles.count("Due tomorrow: Problem Set 6") == 2, titles
+
+
+def test_campus_calendar_events_not_reminded():
+    uid, h, token = _user()
+    db = main.SessionLocal()
+    try:
+        day = (TODAY + timedelta(days=1)).isoformat()
+        for title in ("Daily Mass", "Sacrament of Reconciliation", "Assignment 12 [620285-B-6]"):
+            db.add(main.Deadline(user_id=uid, title=title, date=day, time="7:15 AM", type="assignment", source="ical"))
+        db.add(main.Deadline(user_id=uid, title="Buy blue books", date=day, type="Deadline", source="manual"))
+        db.commit()
+    finally:
+        db.close()
+    _run()
+    bodies = " ".join(m["title"] + " " + m["body"] for m in _mine(token))
+    assert "Assignment 12" in bodies and "Buy blue books" in bodies, bodies
+    assert "Mass" not in bodies and "Reconciliation" not in bodies, bodies
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

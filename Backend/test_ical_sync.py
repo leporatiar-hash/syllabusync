@@ -558,6 +558,101 @@ def test_change_alerts_recorded():
         _set_feed(FIXTURE_EVENTS)
 
 
+def test_feed_timezone_used_when_device_unknown():
+    """A Central-time school's 11:59 PM deadline must land on the right day even before the
+    student's phone has reported a timezone: the feed's X-WR-TIMEZONE is used."""
+    user_id, _ = make_user("tz-feed")
+    db = main.SessionLocal()
+    try:
+        db.add(main.UserProfile(user_id=user_id, email=f"{user_id}@example.com"))
+        db.commit()
+    finally:
+        db.close()
+    # 2026-10-08 04:59 UTC == Wed 10/07 11:59 PM in Chicago (CDT); in New York it would be 12:59 AM Thu.
+    _FakeClient.feed = build_feed([_event("8001", "Lab 4 - Due", "LOCATION:2026 Fall Chemistry (CHEM-111-01)",
+                                          dtstart="20261008T045900Z")]).replace(
+        "X-WR-CALNAME", "X-WR-TIMEZONE:America/Chicago\r\nX-WR-CALNAME")
+    try:
+        run_sync(user_id)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+    d = _deadline(user_id, "8001")
+    check("feed timezone: due Wed 10/07 at 11:59 PM", (d.date, d.time) == ("2026-10-07", "11:59 PM"), f"{d.date} {d.time}")
+    db = main.SessionLocal()
+    try:
+        tz = db.query(main.UserProfile).filter_by(user_id=user_id).first().timezone
+    finally:
+        db.close()
+    check("feed timezone saved on the profile", tz == "America/Chicago", str(tz))
+
+
+def test_device_timezone_beats_feed_timezone():
+    user_id, _ = make_user("tz-device")
+    db = main.SessionLocal()
+    try:
+        db.add(main.UserProfile(user_id=user_id, email=f"{user_id}@example.com", timezone="America/Los_Angeles"))
+        db.commit()
+    finally:
+        db.close()
+    _FakeClient.feed = build_feed([_event("8002", "Lab 5 - Due", "LOCATION:2026 Fall Chemistry (CHEM-111-01)",
+                                          dtstart="20261008T045900Z")]).replace(
+        "X-WR-CALNAME", "X-WR-TIMEZONE:America/Chicago\r\nX-WR-CALNAME")
+    try:
+        run_sync(user_id)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+    d = _deadline(user_id, "8002")
+    check("device timezone wins over the feed's", (d.date, d.time) == ("2026-10-07", "9:59 PM"), f"{d.date} {d.time}")
+
+
+def test_syllabus_items_the_lms_lacks_are_kept():
+    """A professor who posts one quiz to the LMS but keeps papers in the syllabus: the papers must
+    survive (they used to be deleted as soon as the LMS covered the course)."""
+    user_id, _ = make_user("syl-keep", course_codes=["ENGL 110"])
+    db = main.SessionLocal()
+    try:
+        course = db.query(main.Course).filter_by(user_id=user_id).first()
+        for title, day in (("Research Paper", "2026-11-20"), ("Homework 4", "2026-11-13"), ("Quiz 1", "2026-11-05")):
+            db.add(main.Deadline(user_id=user_id, course_id=course.id, title=title, date=day, type="assignment", source="syllabus"))
+        db.commit()
+    finally:
+        db.close()
+    _set_feed([
+        _event("8101", "Quiz 1 - Due", "LOCATION:2026 Fall Composition (ENGL-110-01)", dtstart="20261106T045900Z"),
+        _event("8102", "Homework 3 - Due", "LOCATION:2026 Fall Composition (ENGL-110-01)", dtstart="20261107T045900Z"),
+    ])
+    try:
+        run_sync(user_id)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+    db = main.SessionLocal()
+    try:
+        left = sorted((d.source, d.title) for d in db.query(main.Deadline).filter_by(user_id=user_id).all())
+    finally:
+        db.close()
+    check("only the syllabus copy of Quiz 1 is replaced",
+          left == sorted([("ical", "Quiz 1"), ("ical", "Homework 3"), ("syllabus", "Research Paper"), ("syllabus", "Homework 4")]), str(left))
+
+
+def test_timezone_inferred_from_due_times():
+    """No timezone in the feed (Canvas-style): five assignments due at 06:59 UTC = 11:59 PM Pacific."""
+    user_id, _ = make_user("tz-infer")
+    db = main.SessionLocal()
+    try:
+        db.add(main.UserProfile(user_id=user_id, email=f"{user_id}@example.com"))
+        db.commit()
+    finally:
+        db.close()
+    _set_feed([_event(f"83{i}", f"Essay {i} - Due", "LOCATION:2026 Fall Communication (COMM-100-01)",
+                      dtstart=f"202611{10 + i}T075900Z") for i in range(5)])
+    try:
+        run_sync(user_id)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+    d = _deadline(user_id, "830")
+    check("inferred Pacific: Essay 0 due Mon 11/9 at 11:59 PM", (d.date, d.time) == ("2026-11-09", "11:59 PM"), f"{d.date} {d.time}")
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
@@ -574,6 +669,10 @@ if __name__ == "__main__":
         test_change_alerts_recorded()
         test_lms_titles_and_opens()
         test_old_opens_rows_removed()
+        test_feed_timezone_used_when_device_unknown()
+        test_device_timezone_beats_feed_timezone()
+        test_syllabus_items_the_lms_lacks_are_kept()
+        test_timezone_inferred_from_due_times()
         print("\nAll iCal sync tests passed.")
     finally:
         try:

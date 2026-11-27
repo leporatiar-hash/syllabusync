@@ -2530,6 +2530,16 @@ def _is_exam(d) -> bool:
     return any(re.search(rf"\b{k}\b", title) for k in EXAM_KEYWORDS)
 
 
+_COURSEWORK = re.compile(
+    r"\b(assignments?|homework|hw|quiz(zes)?|exams?|midterm|final|tests?|essays?|papers?|projects?|labs?|"
+    r"submissions?|submit|discussions?|readings?|reports?|presentations?|problem sets?|worksheets?|chapters?|ch)\b"
+    r"|\[\d{4,}", re.I)
+
+
+def _looks_like_coursework(title: str | None) -> bool:
+    return bool(_COURSEWORK.search(title or ""))
+
+
 def _deadline_label(d) -> str:
     course = d.course.code or d.course.name if d.course else None
     return f"{d.title or 'Untitled'}" + (f" ({course})" if course else "")
@@ -2581,13 +2591,20 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
         )
         .all()
     )
+    # School-wide calendar events ride along in some LMS feeds (Daily Mass, holidays, sports). With no
+    # class attached they're only reminded when they look like coursework; manual to-dos always are.
+    deadlines = [d for d in deadlines if d.course_id or d.source not in LMS_SOURCES or _looks_like_coursework(d.title)]
     already = {
         r[0] for r in db.query(PushNotificationSent.id).filter(PushNotificationSent.user_id == profile.user_id).all()
     }
     out = []
 
+    def key(d, kind):
+        # Keyed by due date: if the date moves after a reminder went out, the new date gets its own.
+        return f"{profile.user_id}:{d.id}:{kind}:{d.date}"
+
     def pending(kind, items):
-        return [d for d in items if f"{profile.user_id}:{d.id}:{kind}" not in already]
+        return [d for d in items if key(d, kind) not in already]
 
     def by_offset(n):
         target = (today + timedelta(days=n)).isoformat()
@@ -2618,7 +2635,7 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             msg = {"title": title, "body": body, "data": {"screen": "home", "date": items[0].date}}
             if kind == "day_before":
                 msg["interruptionLevel"] = "time-sensitive"
-            out.append((kind, msg, [f"{profile.user_id}:{d.id}:{kind}" for d in items]))
+            out.append((kind, msg, [key(d, kind) for d in items]))
 
     if pro and profile.notify_exams is not False:
         items = pending("exam_week", [d for d in by_offset(7) if _is_exam(d)])
@@ -2630,7 +2647,7 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
                 if len(items) == 1 else ", ".join(_deadline_label(x) for x in items[:3])
             ).lstrip(" ·")
             out.append(("exam_week", {"title": title, "body": body, "data": {"screen": "chat"}},
-                        [f"{profile.user_id}:{x.id}:exam_week" for x in items]))
+                        [key(x, "exam_week") for x in items]))
 
     out += _setup_nudges(db, profile, local_now, already)
 
@@ -6113,20 +6130,18 @@ def _course_is_lms_backed(db, course_id: str) -> bool:
 
 
 def _syllabus_deadlines_to_keep(db, course_id: str, deadlines_data: list[dict]) -> list[dict]:
-    """The LMS is the source of truth for due dates. For a course it already feeds, a syllabus only
-    contributes exams the LMS doesn't have (nothing from the LMS on that date for this course);
-    everything else in the syllabus is course info (policies, office hours, professor contact)."""
+    """The LMS is the source of truth for the items it lists. For a course it already feeds, a
+    syllabus adds the deadlines the LMS doesn't have (papers, readings, exams never posted there);
+    its copies of LMS items are skipped, as are weekly class meetings."""
     if not _course_is_lms_backed(db, course_id):
         return deadlines_data
-    lms_dates = {
-        r[0] for r in db.query(Deadline.date).filter(Deadline.course_id == course_id, Deadline.source.in_(LMS_SOURCES)).all()
-    }
-    keep = []
-    for d in deadlines_data:
-        probe = Deadline(type=d.get("type"), title=d.get("title"))
-        if _is_exam(probe) and (d.get("date") or "").strip() not in lms_dates and not d.get("recurring"):
-            keep.append(d)
-    return keep
+    lms_rows = db.query(Deadline.title, Deadline.date, Deadline.type).filter(
+        Deadline.course_id == course_id, Deadline.source.in_(LMS_SOURCES)
+    ).all()
+    return [
+        d for d in deadlines_data
+        if not d.get("recurring") and not _lms_has_item(d.get("title"), (d.get("date") or "").strip(), d.get("type"), lms_rows)
+    ]
 
 
 def _find_course_for_syllabus(db, user_id: str, course_code: str | None, course_name: str, semester: str | None):
@@ -6813,6 +6828,15 @@ def sync_canvas(connection, user_id: str, db):
                 return synced, errors
 
             canvas_courses = courses_resp.json()
+            tz_corrected = False
+            try:
+                prof_resp = client.get(f"{base}/api/v1/users/self/profile", headers=headers)
+                if prof_resp.status_code == 200:
+                    tz_corrected = _adopt_lms_timezone(db, user_id, prof_resp.json().get("time_zone"))
+                    if tz_corrected:
+                        user_tz = _user_timezone(db, user_id)
+            except Exception as e:
+                logger.info(f"[LMS] Canvas profile timezone unavailable: {e}")
             seen_ext_ids: set[str] = set()
             lms_course_ids: set[str] = set()
             complete = True  # every course's assignments fetched: safe to mirror removals
@@ -6916,7 +6940,8 @@ def sync_canvas(connection, user_id: str, db):
                     errors.append(f"Error syncing course {course_name}: {str(e)}")
 
             db.flush()
-            _record_lms_changes(db, user_id, changes, datetime.now(user_tz).date().isoformat())
+            if not tz_corrected:
+                _record_lms_changes(db, user_id, changes, datetime.now(user_tz).date().isoformat())
             canvas_accounts = db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "canvas").count()
             if complete and seen_ext_ids and canvas_accounts <= 1:
                 _apply_lms_source_of_truth(db, user_id, "canvas", seen_ext_ids, lms_course_ids,
@@ -7129,20 +7154,22 @@ def _apply_lms_source_of_truth(db, user_id: str, source: str, seen_ext_ids: set[
 
     replaced = 0
     if lms_course_ids:
-        lms_days = {
-            (cid, day) for cid, day in db.query(Deadline.course_id, Deadline.date).filter(
-                Deadline.user_id == user_id,
-                Deadline.course_id.in_(lms_course_ids),
-                Deadline.source.in_(LMS_SOURCES),
-            ).all()
-        }
+        lms_by_course: dict[str, list] = {}
+        for cid, title, day, typ in db.query(Deadline.course_id, Deadline.title, Deadline.date, Deadline.type).filter(
+            Deadline.user_id == user_id,
+            Deadline.course_id.in_(lms_course_ids),
+            Deadline.source.in_(LMS_SOURCES),
+        ).all():
+            lms_by_course.setdefault(cid, []).append((title, day, typ))
         for d in db.query(Deadline).filter(
             Deadline.user_id == user_id,
             Deadline.course_id.in_(lms_course_ids),
             Deadline.source == "syllabus",
             not_done,
         ).all():
-            if _is_exam(d) and (d.course_id, d.date) not in lms_days:
+            # Only the syllabus copy of something the LMS also lists gives way. Papers, readings and
+            # exams the professor never posted to the LMS stay, so they still get reminders.
+            if not _lms_has_item(d.title, d.date, d.type, lms_by_course.get(d.course_id, [])):
                 continue
             doomed.append(d)
             replaced += 1
@@ -7157,6 +7184,41 @@ def _apply_lms_source_of_truth(db, user_id: str, source: str, seen_ext_ids: set[
 
 
 LMS_SOURCES = ("ical", "canvas")
+
+_TITLE_STOP = {"the", "a", "an", "of", "and", "for", "to", "in", "on", "due", "opens", "assignment", "submission", "dropbox"}
+_SAME_ITEM_DAYS = 14  # an LMS copy can sit up to two weeks from the syllabus date (moved, rescheduled)
+
+
+def _title_words(title: str) -> tuple[set[str], set[str]]:
+    words = re.findall(r"[a-z]+|\d+", (title or "").lower())
+    return {w for w in words if not w.isdigit() and w not in _TITLE_STOP}, {w.lstrip("0") or "0" for w in words if w.isdigit()}
+
+
+def _same_item(syl_title, syl_date, syl_is_exam, lms_title, lms_date, lms_is_exam) -> bool:
+    """Is this LMS deadline the same piece of work as this syllabus deadline? Conservative: when in
+    doubt it's a different item, because dropping a real deadline means a missed reminder."""
+    try:
+        gap = abs((date.fromisoformat(lms_date) - date.fromisoformat(syl_date)).days)
+    except (TypeError, ValueError):
+        return False
+    if gap > _SAME_ITEM_DAYS:
+        return False
+    if gap == 0 and syl_is_exam and lms_is_exam:
+        return True  # "Midterm" in the syllabus, "Exam 1" in the LMS, same day
+    sw, sn = _title_words(syl_title)
+    lw, ln = _title_words(lms_title)
+    if sn and ln and sn != ln:
+        return False  # Homework 3 is not Homework 4
+    if not sw or not lw:
+        return bool(sn and sn == ln and gap <= 3)
+    if len(sw & lw) / len(sw | lw) >= 0.5:
+        return True
+    return (sw <= lw or lw <= sw) and gap <= 7  # "Paper" vs "Final Paper" within a week
+
+
+def _lms_has_item(syl_title, syl_date, syl_type, lms_rows) -> bool:
+    syl_exam = _is_exam(Deadline(type=syl_type, title=syl_title))
+    return any(_same_item(syl_title, syl_date, syl_exam, t, d, _is_exam(Deadline(type=ty, title=t))) for t, d, ty in lms_rows)
 
 
 DEFAULT_USER_TZ = "America/New_York"  # nearly all users are at CofC
@@ -7178,6 +7240,66 @@ def _user_timezone(db, user_id: str) -> ZoneInfo:
     except Exception:
         pass
     return ZoneInfo(DEFAULT_USER_TZ)
+
+
+def _valid_tz(name) -> str | None:
+    try:
+        name = str(name or "").strip()
+        if name:
+            ZoneInfo(name)
+            return name
+    except Exception:
+        pass
+    return None
+
+
+def _adopt_lms_timezone(db, user_id: str, tz_name: str | None) -> bool:
+    """The LMS knows the school's timezone (Canvas profile setting, an iCal feed's X-WR-TIMEZONE).
+    Use it when we have nothing better: a timezone the student's own device reported wins.
+    Returns True if the student's timezone was just set, i.e. stored times are being corrected."""
+    tz_name = _valid_tz(tz_name)
+    if not tz_name:
+        return False
+    prof = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if not prof or prof.timezone:
+        return False
+    prof.timezone = tz_name
+    db.flush()
+    logger.info(f"[LMS] Timezone for user {user_id} set from LMS: {tz_name}")
+    return True
+
+
+_US_ZONES = ("America/New_York", "America/Chicago", "America/Denver", "America/Phoenix",
+             "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu")
+
+
+def _infer_timezone_from_due_times(instants: list[datetime]) -> str | None:
+    """Most LMS feeds give due times in UTC without saying where the school is. Professors almost
+    always set due times like 11:59 PM, 11:00 PM or 5:00 PM, so the US timezone in which the most
+    due times land on :59/:00 near midnight is the school's. Needs a clear signal (5+ items)."""
+    aware = [i for i in instants if i.tzinfo is not None]
+    if len(aware) < 5:
+        return None
+    def score(tz):
+        z = ZoneInfo(tz)
+        return sum(1 for i in aware if (lambda l: (l.hour == 23 and l.minute in (59, 55, 0, 30)) or (l.hour == 0 and l.minute == 0))(i.astimezone(z)))
+    scores = {tz: score(tz) for tz in _US_ZONES}
+    best = max(scores, key=scores.get)
+    if scores[best] >= 5 and scores[best] >= 2 * max(1, scores["America/New_York"]) and best != "America/New_York":
+        return best
+    return "America/New_York" if scores["America/New_York"] >= 5 else None
+
+
+def _ical_timezone(cal) -> str | None:
+    """The calendar's own timezone: X-WR-TIMEZONE, else the first VTIMEZONE's TZID."""
+    tz = _valid_tz(cal.get("X-WR-TIMEZONE"))
+    if tz:
+        return tz
+    for comp in cal.walk("VTIMEZONE"):
+        tz = _valid_tz(comp.get("TZID"))
+        if tz:
+            return tz
+    return None
 
 
 def _to_user_local(dt: datetime, tz: ZoneInfo) -> datetime:
@@ -7289,6 +7411,11 @@ def sync_ical(connection, user_id: str, db):
                 _record_lms_health(db, connection, False, "not a calendar", dead=True)
                 return synced, errors
             events = [c for c in cal.walk() if c.name == "VEVENT"]
+            feed_tz = _ical_timezone(cal) or _infer_timezone_from_due_times(
+                [c.get("DTSTART").dt for c in events if c.get("DTSTART") is not None and isinstance(c.get("DTSTART").dt, datetime)])
+            tz_corrected = _adopt_lms_timezone(db, user_id, feed_tz)
+            if tz_corrected:
+                user_tz = _user_timezone(db, user_id)
 
             course_by_uid, user_courses = _ensure_ical_courses(events, user_id, db)
             seen_ext_ids: set[str] = set()
@@ -7381,7 +7508,8 @@ def sync_ical(connection, user_id: str, db):
                 synced += 1
 
             db.flush()
-            _record_lms_changes(db, user_id, changes, datetime.now(user_tz).date().isoformat())
+            if not tz_corrected:  # a timezone correction "moves" many items; that isn't news
+                _record_lms_changes(db, user_id, changes, datetime.now(user_tz).date().isoformat())
             # Removal is only safe when this feed is the student's only iCal feed (external ids
             # don't record which feed they came from) and it actually returned events.
             ical_feeds = db.query(LMSConnection).filter(LMSConnection.user_id == user_id, LMSConnection.provider == "ical").count()
