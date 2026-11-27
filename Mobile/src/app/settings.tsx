@@ -1,13 +1,13 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { BellOff, ChevronDown, ChevronRight, Star } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
-import { ActionSheetIOS, Alert, KeyboardAvoidingView, Linking, Pressable, ScrollView, Switch, View } from 'react-native';
+import { BellOff, ChevronRight, Star } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ActionSheetIOS, ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Pressable, ScrollView, Switch, TextInput, View } from 'react-native';
 
+import { SectionHeader } from '@/components/app-chrome';
 import { BackBar } from '@/components/back-bar';
-import { WebInput } from '@/components/course-form';
-import { Avatar, Card, GradientButton, OutlineButton, PageBackground, T } from '@/components/web';
-import { C } from '@/constants/theme';
+import { Avatar, T } from '@/components/web';
+import { C, F } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -25,18 +25,68 @@ const NAMING = [
   { value: 'descriptive', label: 'Descriptive', hint: 'Full topic/reading/page detail from the syllabus' },
 ];
 
-function Select({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
+const SUPPORT_EMAIL = 'hello@tryclassmate.com';
+
+function Group({ children, footer }: { children: ReactNode; footer?: string }) {
   return (
-    <View style={{ flex: 1, gap: 6 }}>
-      <T size={14} weight="medium" color={C.slate700}>{label}</T>
-      <Pressable
-        onPress={() => ActionSheetIOS.showActionSheetWithOptions({ options: [...options, 'Cancel'], cancelButtonIndex: options.length, title: label }, (i) => i < options.length && onChange(options[i]))}
-        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: C.slate200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: C.white }}>
-        <T size={15} color={value ? C.slate900 : C.slate400}>{value || 'Select...'}</T>
-        <ChevronDown size={16} color={C.slate500} />
-      </Pressable>
+    <View>
+      <View style={{ backgroundColor: C.white, borderRadius: 14, borderCurve: 'continuous', overflow: 'hidden' }}>{children}</View>
+      {footer ? <T size={12} color={C.slate500} style={{ marginTop: 6, paddingHorizontal: 16, lineHeight: 17 }}>{footer}</T> : null}
     </View>
   );
+}
+
+/** One settings row: label on the left, value / control on the right, hairline above all but the first. */
+function Row({ label, detail, value, right, onPress, first, danger, center }: {
+  label: string; detail?: string; value?: string; right?: ReactNode; onPress?: () => void; first?: boolean; danger?: boolean; center?: boolean;
+}) {
+  return (
+    <Pressable
+      disabled={!onPress}
+      onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: pressed && onPress ? C.slate50 : C.white })}>
+      {!first ? <View style={{ position: 'absolute', top: 0, left: 16, right: 0, height: 1, backgroundColor: C.slate100 }} /> : null}
+      <View style={{ flex: 1, alignItems: center ? 'center' : 'flex-start' }}>
+        <T size={16} color={danger ? '#DC2626' : C.slate900}>{label}</T>
+        {detail ? <T size={13} color={C.slate500} style={{ marginTop: 1, lineHeight: 17 }}>{detail}</T> : null}
+      </View>
+      {value !== undefined ? <T size={16} color={C.slate400} numberOfLines={1} style={{ maxWidth: '55%' }}>{value || 'Not set'}</T> : null}
+      {right}
+      {onPress && !right && !center ? <ChevronRight size={17} color={C.slate300} /> : null}
+    </Pressable>
+  );
+}
+
+/** A row whose value is edited in place; saves when editing ends. */
+function TextRow({ label, value, placeholder, onSave, first }: { label: string; value: string; placeholder: string; onSave: (v: string) => void; first?: boolean }) {
+  const [text, setText] = useState(value);
+  // Save an unfinished edit if the user leaves the screen without pressing Done.
+  const latest = useRef({ text, value, onSave });
+  useEffect(() => { latest.current = { text, value, onSave }; });
+  useEffect(() => () => {
+    const { text: t, value: v, onSave: save } = latest.current;
+    if (t.trim() !== v) save(t.trim());
+  }, []);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingHorizontal: 16 }}>
+      {!first ? <View style={{ position: 'absolute', top: 0, left: 16, right: 0, height: 1, backgroundColor: C.slate100 }} /> : null}
+      <T size={16} color={C.slate900} style={{ width: 92 }}>{label}</T>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        onEndEditing={() => { if (text.trim() !== value) onSave(text.trim()); }}
+        maxLength={80}
+        placeholder={placeholder}
+        placeholderTextColor={C.slate300}
+        returnKeyType="done"
+        style={{ flex: 1, textAlign: 'right', fontFamily: F.regular, fontSize: 16, color: C.slate600, paddingVertical: 12 }}
+      />
+    </View>
+  );
+}
+
+function pick(title: string, options: string[], onChange: (v: string) => void) {
+  ActionSheetIOS.showActionSheetWithOptions({ options: [...options, 'Cancel'], cancelButtonIndex: options.length, title }, (i) => i < options.length && onChange(options[i]));
 }
 
 /** The web's "Profile & Settings" page, plus the phone-only pieces: App Store plan, reminders, legal. */
@@ -51,18 +101,18 @@ export default function Settings() {
     return { full_name: p?.full_name ?? '', school_name: p?.school_name ?? '', school_type: p?.school_type ?? '', academic_year: p?.academic_year ?? '', major: p?.major ?? '', naming_style: p?.naming_style || 'simple' };
   });
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState<'upgrade' | 'restore' | 'delete' | null>(null);
 
   useFocusEffect(useCallback(() => { notificationPermission().then(setPermission); }, []));
 
-  const saveProfile = async () => {
+  const lms = useApi<{ id: string; provider: string; status?: 'ok' | 'broken' }[]>('/lms/connections');
+  const saveField = async (change: Partial<typeof form>) => {
+    const next = { ...form, ...change };
+    setForm(next);
     setSaving(true);
     try {
-      await api('/me/profile', { method: 'POST', body: JSON.stringify({ ...form, email: me?.profile?.email }) });
+      await api('/me/profile', { method: 'POST', body: JSON.stringify({ ...next, email: me?.profile?.email }) });
       await refreshMe();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
     } catch (e) {
       Alert.alert('Couldn’t save', e instanceof Error ? e.message : '');
     } finally {
@@ -147,111 +197,112 @@ export default function Settings() {
     : s.billing_source === 'founding' ? 'Founding member'
     : `${s.chat_messages_used}/${s.chat_messages_max ?? '∞'} chat messages this week · ${s.ai_generations_used}/${s.ai_generations_max ?? '∞'} AI generations this month`;
 
+  const hasLms = (lms.data?.length ?? 0) > 0;
+  const lmsBroken = (lms.data ?? []).some((c) => c.status === 'broken');
+  const namingHint = NAMING.find((n) => n.value === form.naming_style)?.hint;
+
   return (
-    <PageBackground>
-      <BackBar label="Back" />
+    <View style={{ flex: 1, backgroundColor: C.groupedBg }}>
+      <BackBar label="Back" right={saving ? <ActivityIndicator color={C.slate400} style={{ marginRight: 8 }} /> : undefined} />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 64, gap: 24 }} keyboardShouldPersistTaps="handled">
-          <T size={30} weight="semibold" color={C.slate900} style={{ letterSpacing: -0.5, lineHeight: 36 }}>Profile & Settings</T>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 64, gap: 26 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          <T size={34} weight="bold" color={C.slate900} style={{ letterSpacing: -0.8, lineHeight: 41, paddingHorizontal: 4 }}>Settings</T>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
-            <Avatar name={form.full_name || me?.profile?.email} size={96} />
-            <View style={{ flex: 1 }}>
-              <T size={18} weight="medium" color={C.slate900}>{form.full_name || 'ClassMate student'}</T>
-              <T size={14} color={C.slate500} numberOfLines={1}>{me?.profile?.email}</T>
-            </View>
-          </View>
-
-          <Card radius={24} padding={20} style={{ gap: 16 }}>
-            <WebInput label="Full Name" value={form.full_name} onChangeText={(v) => setForm({ ...form, full_name: v })} />
-            <View style={{ gap: 6 }}>
-              <WebInput label="Email" value={me?.profile?.email ?? ''} editable={false} style={{ backgroundColor: C.slate50, color: C.slate500 }} />
-              <T size={12} color={C.slate400}>Email cannot be changed</T>
-            </View>
-            <WebInput label="School / University" value={form.school_name} onChangeText={(v) => setForm({ ...form, school_name: v })} />
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <Select label="School Type" value={form.school_type} options={SCHOOL_TYPES} onChange={(v) => setForm({ ...form, school_type: v })} />
-              <Select label="Academic Year" value={form.academic_year} options={ACADEMIC_YEARS} onChange={(v) => setForm({ ...form, academic_year: v })} />
-            </View>
-            <WebInput label="Major / Field of Study" placeholder="e.g. Computer Science" value={form.major} onChangeText={(v) => setForm({ ...form, major: v })} />
-            <View style={{ gap: 8 }}>
-              <T size={14} weight="medium" color={C.slate700}>Assignment Naming</T>
-              {NAMING.map((n) => {
-                const on = form.naming_style === n.value;
-                return (
-                  <Pressable key={n.value} onPress={() => setForm({ ...form, naming_style: n.value })} style={{ borderWidth: on ? 2 : 1, borderColor: on ? C.brand : C.slate200, backgroundColor: on ? 'rgba(91,141,239,0.05)' : C.white, borderRadius: 12, padding: 12 }}>
-                    <T size={14} weight="medium" color={C.slate800}>{n.label}</T>
-                    <T size={12} color={C.slate500} style={{ marginTop: 2 }}>{n.hint}</T>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <GradientButton title={saved ? 'Saved ✓' : 'Save Changes'} size="lg" loading={saving} onPress={saveProfile} />
-          </Card>
-
-          <Card radius={24} padding={20} style={{ gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Star size={20} color={isPro ? '#F59E0B' : C.slate400} fill={isPro ? '#F59E0B' : 'transparent'} />
-              <T size={16} weight="semibold" color={C.slate900}>{isPro ? (s?.is_trial ? 'ClassMate Pro (trial)' : 'ClassMate Pro') : 'Free plan'}</T>
-            </View>
-            {planDetail ? <T size={13} color={C.slate500}>{planDetail}</T> : null}
-            {!isPro && (purchasesEnabled || __DEV__) ? <GradientButton title="Upgrade to Pro" loading={busy === 'upgrade'} onPress={upgrade} /> : null}
-            {isPro && s?.billing_source === 'app_store' ? <OutlineButton title="Manage subscription" onPress={openManageSubscriptions} /> : null}
-            {purchasesEnabled && s?.billing_source !== 'stripe' ? (
-              <Pressable onPress={busy ? undefined : restore}><T size={14} weight="medium" color={C.brand}>{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</T></Pressable>
-            ) : null}
-          </Card>
-
-          <Card radius={24} padding={20}>
-            <T size={16} weight="semibold" color={C.slate900} style={{ marginBottom: 4 }}>Reminders</T>
-            {permission !== 'granted' ? (
-              <Pressable onPress={async () => { if (permission === 'denied') return Linking.openSettings(); await registerForPush(true); setPermission(await notificationPermission()); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 }}>
-                <BellOff size={18} color={C.red} />
-                <View style={{ flex: 1 }}>
-                  <T size={14} weight="medium" color={C.slate800}>Notifications are off</T>
-                  <T size={12} color={C.slate500}>{permission === 'denied' ? 'Tap to turn them on in iOS Settings' : 'Tap to turn them on'}</T>
-                </View>
-              </Pressable>
-            ) : null}
-            {([['deadlines', 'Deadlines', '3 days and 1 day before each one'], ['exams', 'Exams', 'A week before every exam'], ['weekly', 'Weekly brief', 'Sunday evening']] as const).map(([key, label, detail]) => (
-              <View key={key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.slate100 }}>
-                <View style={{ flex: 1 }}>
-                  <T size={14} weight="medium" color={C.slate800}>{label}</T>
-                  <T size={12} color={C.slate500}>{detail}</T>
-                </View>
-                <Switch value={prefs.data?.[key] ?? true} disabled={!prefs.data} onValueChange={(v) => togglePref(key, v)} trackColor={{ true: C.brand }} />
+          <Group>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 }}>
+              <Avatar name={form.full_name || me?.profile?.email} size={56} />
+              <View style={{ flex: 1 }}>
+                <T size={19} weight="semibold" color={C.slate900}>{form.full_name || 'Add your name'}</T>
+                <T size={14} color={C.slate500} numberOfLines={1}>{me?.profile?.email}</T>
               </View>
-            ))}
-          </Card>
-
-          <Card radius={24} padding={8}>
-            {[
-              ['Connect Canvas or iCal', '/settings'],
-              ['Privacy Policy', '/privacy'],
-              ['Terms of Service', '/terms'],
-            ].map(([label, path], i) => (
-              <Pressable key={path + label} onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}${path}`)} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 14, borderTopWidth: i ? 1 : 0, borderTopColor: C.slate100 }}>
-                <T size={14} color={C.slate700} style={{ flex: 1 }}>{label}</T>
-                <ChevronRight size={16} color={C.slate300} />
-              </Pressable>
-            ))}
-            <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 14, borderTopWidth: 1, borderTopColor: C.slate100 }}>
-              <T size={14} color={C.slate700} style={{ flex: 1 }}>Version</T>
-              <T size={14} color={C.slate400}>{APP_VERSION}</T>
             </View>
-          </Card>
+          </Group>
 
-          <OutlineButton title="Log out" onPress={signOut} />
-
-          <View style={{ borderRadius: 16, borderWidth: 1, borderColor: '#FECACA', backgroundColor: C.white, padding: 20 }}>
-            <T size={14} weight="semibold" color="#B91C1C">Delete Account</T>
-            <T size={14} color={C.slate500} style={{ marginTop: 4, marginBottom: 16 }}>Permanently delete your account and all of your data. This cannot be undone.</T>
-            <Pressable onPress={confirmDelete} disabled={busy === 'delete'} style={({ pressed }) => ({ alignSelf: 'flex-start', borderRadius: 8, backgroundColor: pressed ? '#B91C1C' : '#DC2626', paddingHorizontal: 16, paddingVertical: 10, opacity: busy === 'delete' ? 0.5 : 1 })}>
-              <T size={14} weight="semibold" color="#fff">{busy === 'delete' ? 'Deleting…' : 'Delete my account'}</T>
-            </Pressable>
+          <View>
+            <SectionHeader>Profile</SectionHeader>
+            <Group>
+              <TextRow first label="Name" value={form.full_name} placeholder="Your name" onSave={(v) => saveField({ full_name: v })} />
+              <TextRow label="School" value={form.school_name} placeholder="Your school" onSave={(v) => saveField({ school_name: v })} />
+              <Row label="Year" value={form.academic_year} onPress={() => pick('Academic year', ACADEMIC_YEARS, (v) => saveField({ academic_year: v }))} />
+              <Row label="School type" value={form.school_type} onPress={() => pick('School type', SCHOOL_TYPES, (v) => saveField({ school_type: v }))} />
+              <TextRow label="Major" value={form.major} placeholder="e.g. Finance" onSave={(v) => saveField({ major: v })} />
+            </Group>
           </View>
+
+          <View>
+            <SectionHeader>Your LMS</SectionHeader>
+            <Group footer={hasLms ? 'Due dates sync from your LMS every few hours.' : 'Connect once and every due date shows up here, kept up to date.'}>
+              <Row
+                first
+                label={!hasLms ? 'Not connected' : lmsBroken ? 'Stopped syncing' : 'Connected'}
+                detail={lmsBroken ? 'New and changed due dates aren’t coming through' : undefined}
+                right={<T size={16} weight="medium" color={C.brandSolid}>{!hasLms ? 'Connect' : lmsBroken ? 'Reconnect' : 'Change'}</T>}
+                onPress={() => router.push('/onboarding/lms?from=app')}
+              />
+            </Group>
+          </View>
+
+          <View>
+            <SectionHeader>Reminders</SectionHeader>
+            <Group>
+              {permission !== 'granted' ? (
+                <Pressable onPress={async () => { if (permission === 'denied') return Linking.openSettings(); await registerForPush(true); setPermission(await notificationPermission()); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 }}>
+                  <BellOff size={18} color={C.red} />
+                  <View style={{ flex: 1 }}>
+                    <T size={16} color={C.slate900}>Notifications are off</T>
+                    <T size={13} color={C.slate500}>{permission === 'denied' ? 'Tap to turn them on in iOS Settings' : 'Tap to turn them on'}</T>
+                  </View>
+                  <ChevronRight size={17} color={C.slate300} />
+                </Pressable>
+              ) : null}
+              {([['deadlines', 'Deadlines', '3 days and 1 day before each one'], ['exams', 'Exams', 'A week before every exam'], ['weekly', 'Weekly brief', 'Sunday evening']] as const).map(([key, label, detail], i) => (
+                <Row key={key} first={i === 0 && permission === 'granted'} label={label} detail={detail}
+                  right={<Switch value={prefs.data?.[key] ?? true} disabled={!prefs.data} onValueChange={(v) => togglePref(key, v)} trackColor={{ true: C.brandSolid }} />} />
+              ))}
+            </Group>
+          </View>
+
+          <View>
+            <SectionHeader>Plan</SectionHeader>
+            <Group footer={planDetail || undefined}>
+              <Row first label={isPro ? (s?.is_trial ? 'ClassMate Pro (trial)' : 'ClassMate Pro') : 'Free plan'} right={<Star size={18} color={isPro ? '#F59E0B' : C.slate300} fill={isPro ? '#F59E0B' : 'transparent'} />} />
+              {!isPro && (purchasesEnabled || __DEV__) ? (
+                <Row label={busy === 'upgrade' ? 'Opening…' : 'Upgrade to Pro'} detail="Alerts when a date moves, earlier exam reminders" onPress={upgrade} />
+              ) : null}
+              {isPro && s?.billing_source === 'app_store' ? <Row label="Manage subscription" onPress={openManageSubscriptions} /> : null}
+              {purchasesEnabled && s?.billing_source !== 'stripe' ? <Row label={busy === 'restore' ? 'Restoring…' : 'Restore purchases'} onPress={busy ? undefined : restore} /> : null}
+            </Group>
+          </View>
+
+          <View>
+            <SectionHeader>Deadline names from syllabi</SectionHeader>
+            <Group footer={namingHint}>
+              {NAMING.map((n, i) => (
+                <Row key={n.value} first={i === 0} label={n.label} onPress={() => saveField({ naming_style: n.value })}
+                  right={form.naming_style === n.value ? <T size={17} weight="semibold" color={C.brandSolid}>✓</T> : <View style={{ width: 12 }} />} />
+              ))}
+            </Group>
+          </View>
+
+          <View>
+            <SectionHeader>About</SectionHeader>
+            <Group>
+              <Row first label="Contact support" detail={SUPPORT_EMAIL} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)} />
+              <Row label="Privacy Policy" onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/privacy`)} />
+              <Row label="Terms of Service" onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/terms`)} />
+              <Row label="Version" value={APP_VERSION} />
+            </Group>
+          </View>
+
+          <Group>
+            <Row first center label="Log out" onPress={signOut} />
+          </Group>
+
+          <Group footer="Permanently deletes your account, courses, deadlines, notes and study sets. This can’t be undone.">
+            <Row first center danger label={busy === 'delete' ? 'Deleting…' : 'Delete account'} onPress={busy === 'delete' ? undefined : confirmDelete} />
+          </Group>
         </ScrollView>
       </KeyboardAvoidingView>
-    </PageBackground>
+    </View>
   );
 }

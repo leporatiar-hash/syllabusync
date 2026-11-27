@@ -9,6 +9,7 @@ Tests for what the chat AI sees and the daily briefing:
 No pytest in this project -- run directly: `python3 test_chat_context.py`. Throwaway SQLite DB;
 OpenAI is stubbed.
 """
+import re
 import os
 import tempfile
 import uuid
@@ -68,7 +69,7 @@ def test_upcoming_deadlines_survive_a_long_past():
     finally:
         db.close()
     ctx = _context(uid)
-    assert "Essay 2" in ctx and "[upcoming]" in ctx, "this week's work must be in context"
+    assert "Essay 2" in ctx and re.search(r"\[\w+day, (TODAY|TOMORROW|in \d+ days)\]", ctx), "this week's work must be in context, labelled with how far away it is"
     assert "Last week quiz" in ctx, "recent past stays visible"
     assert "Old item 250" not in ctx, "months-old items are left out"
     assert f"today: {today.strftime('%A')}, {today.isoformat()}" in ctx

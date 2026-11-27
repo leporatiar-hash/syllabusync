@@ -12,13 +12,16 @@ const SWATCHES = ['#5B8DEF', '#F87171', '#4ADE80', '#A78BFA', '#FBBF24', '#2DD4B
 export type CourseFormValues = { name: string; code: string; semester: string; color: string | null };
 
 export function WebInput(props: React.ComponentProps<typeof TextInput> & { label: string }) {
-  const { label, style, ...rest } = props;
+  const { label, style, onFocus, onBlur, ...rest } = props;
+  const [focused, setFocused] = useState(false);
   return (
     <View style={{ gap: 6 }}>
       <T size={14} weight="medium" color={C.slate700}>{label}</T>
       <TextInput
         placeholderTextColor={C.slate400}
-        style={[{ borderWidth: 1, borderColor: C.slate200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontFamily: F.regular, color: C.slate900, backgroundColor: C.white }, style]}
+        onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+        onBlur={(e) => { setFocused(false); onBlur?.(e); }}
+        style={[{ borderWidth: focused ? 2 : 1, borderColor: focused ? C.brandSolid : C.slate200, borderRadius: 12, paddingHorizontal: focused ? 13 : 14, paddingVertical: focused ? 13 : 14, fontSize: 16, fontFamily: F.regular, color: C.slate900, backgroundColor: focused ? C.white : C.slate50 }, style]}
         {...rest}
       />
     </View>

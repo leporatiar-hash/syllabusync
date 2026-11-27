@@ -249,6 +249,15 @@ def test_profile_saves_blackboard():
     assert p["lms_provider"] == "blackboard" and p["lms_host"] == "blackboard.sc.edu", p
 
 
+def test_device_timezone_saved():
+    h = _user()
+    client.post("/me/profile", json={"full_name": "TZ Tester"}, headers=h)
+    r = client.post("/me/timezone", json={"timezone": "America/Chicago"}, headers=h)
+    assert r.status_code == 200 and r.json()["saved"], r.text
+    assert client.post("/me/timezone", json={"timezone": "America/Chicago"}, headers=h).json()["changed"] is False
+    assert client.post("/me/timezone", json={"timezone": "Mars/Olympus"}, headers=h).status_code == 400
+
+
 if __name__ == "__main__":
     main.Base.metadata.create_all(bind=main.engine)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

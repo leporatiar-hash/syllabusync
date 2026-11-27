@@ -889,6 +889,9 @@ class UserProfile(Base):
     # or "descriptive" (full topic/reading/page-range text from the syllabus). Can be
     # overridden per-upload; this is just the pre-selected default.
     naming_style = Column(String, nullable=False, default="simple")
+    # IANA timezone the student's own device reports (app or website), e.g. "America/Chicago".
+    # LMS due dates are stored as local date + time, so this decides which day an 11:59 PM lands on.
+    timezone = Column(String, nullable=True)
 
 
 class CalendarEntry(Base):
@@ -1284,6 +1287,7 @@ class DeadlineOut(BaseModel):
     course_id: str | None = Field(None, description="ID of the parent course")
     course_name: str | None = Field(None, description="Name of the parent course")
     course_code: str | None = Field(None, description="Code of the parent course")
+    course_color: str | None = Field(None, description="Accent color of the parent course (hex). Unique among the student's courses.")
     date: str | None = Field(None, description="Due date in YYYY-MM-DD format")
     time: str | None = Field(None, description="Due time in HH:MM format (24-hour)")
     type: str | None = Field(None, description="Type: 'Assignment', 'Exam', 'Quiz', 'Project', 'Deadline', etc.")
@@ -2186,6 +2190,16 @@ def ensure_school_columns():
             pass  # Column already exists
 
 
+def ensure_timezone_column():
+    """user_profiles.timezone (nullable): the timezone the student's device reports."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user_profiles ADD COLUMN timezone VARCHAR"))
+        logger.info("[Migration] Added 'timezone' column to user_profiles")
+    except Exception:
+        pass  # Column already exists
+
+
 def ensure_lms_health_columns():
     """Sync-health columns on lms_connections (nullable; NULL = healthy)."""
     for col_name, col_def in [("failure_count", "INTEGER"), ("failing_since", "TIMESTAMP"), ("last_error", "VARCHAR")]:
@@ -2379,6 +2393,7 @@ def encrypt_existing_feed_urls():
 
 encrypt_existing_feed_urls()
 ensure_naming_style_column()
+ensure_timezone_column()
 ensure_note_columns()
 Base.metadata.create_all(bind=engine)
 
@@ -3923,6 +3938,7 @@ def create_course(payload: CreateCourseRequest, current_user: User = Depends(get
         )
         db.add(course)
         db.commit()
+        _ensure_unique_course_colors(db, user_id)
         db.refresh(course)
 
         return {
@@ -4011,6 +4027,34 @@ def get_me(current_user: User = Depends(get_current_user)):
             },
             "has_completed_onboarding": bool(profile.has_completed_onboarding),
         }
+    finally:
+        db.close()
+
+
+class TimezoneRequest(BaseModel):
+    timezone: str = Field(description="IANA timezone the device reports, e.g. 'America/Chicago'")
+
+
+@app.post("/me/timezone", tags=["user"], summary="Save the timezone the student's device reports")
+@limiter.limit("30/minute")
+def save_timezone(request: Request, payload: TimezoneRequest, current_user: User = Depends(get_current_user)):
+    """Called by the app and website on load. LMS feeds give due dates as instants; this is the
+    timezone they're shown in, so a Central-time 11:59 PM stays on the right day."""
+    tz = (payload.timezone or "").strip()
+    try:
+        ZoneInfo(tz)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Unknown timezone")
+    db = SessionLocal()
+    try:
+        profile = _resolve_profile(db, current_user.id, current_user.email)
+        if not profile:
+            return {"saved": False}
+        changed = profile.timezone != tz
+        if changed:
+            profile.timezone = tz
+            db.commit()
+        return {"saved": True, "changed": changed}
     finally:
         db.close()
 
@@ -4900,6 +4944,7 @@ def list_courses(current_user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
         user_id = current_user.id
+        _ensure_unique_course_colors(db, user_id)
         courses = db.query(Course).filter(Course.user_id == user_id).order_by(Course.created_at.desc()).all()
         return [
             {
@@ -4940,6 +4985,7 @@ def get_course(course_id: str, current_user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
         user_id = current_user.id
+        _ensure_unique_course_colors(db, user_id)
         course = db.query(Course).filter(Course.id == course_id, Course.user_id == user_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -5064,6 +5110,7 @@ def list_all_deadlines(
     db = SessionLocal()
     try:
         user_id = current_user.id
+        _ensure_unique_course_colors(db, user_id)
         print(f"[DEBUG] /deadlines request from={from_date} to={to_date} course_id={course_id}")
         query = db.query(Deadline).outerjoin(Course).filter(Deadline.user_id == user_id)
         if course_id:
@@ -5091,6 +5138,7 @@ def list_all_deadlines(
                 "course_id": d.course_id,
                 "course_name": d.course.name if d.course else None,
                 "course_code": d.course.code if d.course else None,
+                "course_color": d.course.color if d.course else None,
                 "date": d.date,
                 "time": d.time,
                 "type": d.type,
@@ -5146,6 +5194,7 @@ def create_deadline(payload: CreateDeadlineRequest, current_user: User = Depends
             "course_id": deadline.course_id,
             "course_name": course.name if course else None,
             "course_code": course.code if course else None,
+            "course_color": course.color if course else None,
             "date": deadline.date,
             "time": deadline.time,
             "type": deadline.type,
@@ -5374,7 +5423,14 @@ def update_course(course_id: str, payload: UpdateCourseRequest, current_user: Us
         if payload.course_info is not None:
             course.course_info = payload.course_info
         if payload.color is not None:
-            course.color = payload.color
+            new_color = payload.color.upper()
+            clash = db.query(Course).filter(Course.user_id == user_id, Course.id != course.id, func.upper(Course.color) == new_color).first()
+            if clash:
+                # Two courses never share a color: the other course takes this one's old color.
+                _ensure_unique_course_colors(db, user_id)
+                db.refresh(course)
+                clash.color = course.color
+            course.color = new_color
 
         db.commit()
         db.refresh(course)
@@ -6830,6 +6886,8 @@ def sync_canvas(connection, user_id: str, db):
                             if existing.date != deadline_date:
                                 changes.append(("moved", existing, existing.date))
                             existing.title = assignment.get("name", "Untitled")
+                            if (existing.type or "assignment").lower() == "assignment":
+                                existing.type = _infer_lms_type(existing.title)
                             existing.date = deadline_date
                             existing.time = deadline_time
                             existing.description = f"[{course_name}] {assignment.get('description', '') or ''}"[:500]
@@ -6842,7 +6900,7 @@ def sync_canvas(connection, user_id: str, db):
                                 course_id=matched_course_id,
                                 date=deadline_date,
                                 time=deadline_time,
-                                type="assignment",
+                                type=_infer_lms_type(assignment.get("name", "")),
                                 title=assignment.get("name", "Untitled"),
                                 description=f"[{course_name}] {assignment.get('description', '') or ''}"[:500],
                                 source="canvas",
@@ -6892,6 +6950,53 @@ COURSE_COLOR_PALETTE = [
     "#FB923C",  # Tangerine
     "#22D3EE",  # Cyan
 ]
+# Used once a student has more than 10 courses. Still distinct from the first ten.
+COURSE_COLOR_EXTRA = ["#84CC16", "#D946EF", "#B45309", "#0F766E", "#BE123C", "#4338CA", "#64748B", "#CA8A04"]
+
+
+def _palette_index_for(course_id: str) -> int:
+    """Same hash the apps use for a course with no stored color (courseColors.ts / theme.ts)."""
+    h = 0
+    for ch in course_id:
+        h = ((h << 5) - h + ord(ch)) & 0xFFFFFFFF
+    if h >= 0x80000000:
+        h -= 0x100000000
+    return abs(h) % len(COURSE_COLOR_PALETTE)
+
+
+def _ensure_unique_course_colors(db, user_id: str) -> None:
+    """Give every course of this student a stored color, no two the same.
+
+    Colors that are already stored are kept (oldest course wins a tie). A course with no stored
+    color keeps the color the apps were already showing for it when that one is free, so nothing
+    visibly changes for students without clashes.
+    """
+    courses = db.query(Course).filter(Course.user_id == user_id).order_by(Course.created_at.asc(), Course.id.asc()).all()
+    taken: set[str] = set()
+    pending = []
+    changed = False
+    for c in courses:
+        col = (c.color or "").upper()
+        if col and col not in taken:
+            taken.add(col)
+            if c.color != col:
+                c.color = col
+                changed = True
+        else:
+            pending.append(c)
+    pool = COURSE_COLOR_PALETTE + COURSE_COLOR_EXTRA
+    for c in pending:
+        preferred = COURSE_COLOR_PALETTE[_palette_index_for(c.id)]
+        col = preferred if preferred not in taken else next((x for x in pool if x not in taken), None)
+        if col is None:  # 18+ courses: spread extra hues around the wheel
+            import colorsys
+            r, g, b = colorsys.hls_to_rgb((len(taken) * 0.618033988749895) % 1, 0.55, 0.65)
+            col = "#%02X%02X%02X" % (int(r * 255), int(g * 255), int(b * 255))
+        c.color = col
+        taken.add(col)
+        changed = True
+    if changed:
+        db.commit()
 
 # D2L/OAKS puts the class in LOCATION as "2026 Fall Investment Analysis (FINC-400-02)", or wrapped
 # for Zoom meetings: "Zoom Online Meeting (2026 Fall Adv Valuation & Corp Finc Anal (FINC-418-01))".
@@ -7058,7 +7163,14 @@ DEFAULT_USER_TZ = "America/New_York"  # nearly all users are at CofC
 
 
 def _user_timezone(db, user_id: str) -> ZoneInfo:
-    """Best-known timezone for a user: their phone's (registered with a push token), else Eastern."""
+    """Best-known timezone for a user: what their device last reported (app or website), then their
+    phone's push-token timezone, else Eastern."""
+    try:
+        prof = db.query(UserProfile.timezone).filter(UserProfile.user_id == user_id).first()
+        if prof and prof[0]:
+            return ZoneInfo(prof[0])
+    except Exception:
+        pass
     try:
         tok = db.query(PushToken).filter(PushToken.user_id == user_id, PushToken.timezone.isnot(None)).first()
         if tok:
@@ -7106,6 +7218,38 @@ def _lms_status(connection) -> str:
     return "broken" if (connection.failure_count or 0) >= LMS_BROKEN_AFTER else "ok"
 
 
+# ── LMS titles ────────────────────────────────────────────────────────────
+# D2L/OAKS iCal feeds name each calendar event "<item> - Due", "<item> - Available" (when a quiz or
+# exam opens) or "<item> - Availability Ends" (when it closes). Students should see "<item>", and an
+# "opens" event is not a deadline unless it's an exam's start time.
+_LMS_END_SUFFIX = re.compile(r"\s*[-–]\s*(due|due date|availability ends|end date|closes)\s*$", re.I)
+_LMS_OPEN_SUFFIX = re.compile(r"\s*[-–]\s*(available|availability starts|start date|opens)\s*$", re.I)
+
+
+def _lms_title_kind(summary: str) -> tuple[str, str]:
+    """(clean title, kind) where kind is "end" (due / closes), "open" (opens) or "plain"."""
+    s = (summary or "").strip()
+    if _LMS_END_SUFFIX.search(s):
+        return _LMS_END_SUFFIX.sub("", s).strip() or s, "end"
+    if _LMS_OPEN_SUFFIX.search(s):
+        return _LMS_OPEN_SUFFIX.sub("", s).strip() or s, "open"
+    return s, "plain"
+
+
+def _infer_lms_type(title: str) -> str:
+    """Deadline type from an LMS item's name, so exam reminders (a week ahead) fire for LMS exams."""
+    t = (title or "").lower()
+    if re.search(r"\b(final exam|midterm|mid-term|exam|test)\b", t) and not re.search(r"\b(pre-?test|practice|review)\b", t):
+        return "Exam"
+    if re.search(r"\bquiz(zes)?\b", t):
+        return "Quiz"
+    if re.search(r"\bproject\b", t):
+        return "Project"
+    if re.search(r"\breading\b", t):
+        return "Reading"
+    return "assignment"
+
+
 def sync_ical(connection, user_id: str, db):
     """Sync events from an iCal feed into deadlines. The LMS is the source of truth: every class in
     the feed gets a course (matched to the student's existing one or created), changed due dates
@@ -7149,6 +7293,9 @@ def sync_ical(connection, user_id: str, db):
             course_by_uid, user_courses = _ensure_ical_courses(events, user_id, db)
             seen_ext_ids: set[str] = set()
             lms_course_ids: set[str] = set()
+            # Items that also have a "due"/"closes" event: their "opens" event isn't a deadline.
+            has_end = {_lms_title_kind(str(c.get("SUMMARY", "")))[0].lower()
+                       for c in events if _lms_title_kind(str(c.get("SUMMARY", "")))[1] == "end"}
 
             for component in events:
                 uid = str(component.get("UID", ""))
@@ -7156,7 +7303,19 @@ def sync_ical(connection, user_id: str, db):
                     continue
 
                 ext_id = f"ical_{uid}"
-                summary = str(component.get("SUMMARY", "Untitled"))
+                raw_summary = str(component.get("SUMMARY", "Untitled"))
+                summary, kind = _lms_title_kind(raw_summary)
+                lms_type = _infer_lms_type(summary)
+                if kind == "open" and summary.lower() in has_end:
+                    if lms_type != "Exam":
+                        # Quiz/assignment window opening: not a deadline. Remove one saved by an older sync.
+                        db.query(Deadline).filter(
+                            Deadline.user_id == user_id,
+                            Deadline.external_id == ext_id,
+                            or_(Deadline.completed == False, Deadline.completed.is_(None)),  # noqa: E712
+                        ).delete(synchronize_session=False)
+                        continue
+                    summary = f"{summary} (opens)"  # exam start time: worth seeing next to its close
                 description = str(component.get("DESCRIPTION", ""))[:500]
                 location = str(component.get("LOCATION", ""))
                 categories = str(component.get("CATEGORIES", ""))
@@ -7199,6 +7358,8 @@ def sync_ical(connection, user_id: str, db):
                     existing.date = deadline_date
                     existing.time = deadline_time
                     existing.description = description
+                    if (existing.type or "assignment").lower() == "assignment":
+                        existing.type = lms_type
                     # Auto-match course if not already assigned
                     if not existing.course_id and matched_course_id:
                         existing.course_id = matched_course_id
@@ -7208,7 +7369,7 @@ def sync_ical(connection, user_id: str, db):
                         course_id=matched_course_id,
                         date=deadline_date,
                         time=deadline_time,
-                        type="assignment",
+                        type=lms_type,
                         title=summary,
                         description=description,
                         source="ical",
@@ -7828,6 +7989,33 @@ Return ONLY a valid JSON object:
 Each question has 4 options (A, B, C, D). Test understanding, not memorization."""
 
 
+def _clock_12h(t: str) -> str:
+    """'14:00' -> '2:00 PM'; leaves '11:59 PM' and anything unparseable alone."""
+    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", t or "")
+    if not m:
+        return t
+    h = int(m.group(1))
+    return f"{h % 12 or 12}:{m.group(2)} {'PM' if h >= 12 else 'AM'}"
+
+
+def _relative_day_label(ymd: str, today) -> str:
+    """"Saturday, TOMORROW" / "Monday, in 3 days" / "past, 2 days ago": the model miscounts days
+    from bare ISO dates, so spell out how far each deadline is from the student's today."""
+    try:
+        d = date.fromisoformat(ymd)
+    except (TypeError, ValueError):
+        return "date unknown"
+    n = (d - today).days
+    day = d.strftime("%A")
+    if n == 0:
+        return f"{day}, TODAY"
+    if n == 1:
+        return f"{day}, TOMORROW"
+    if n > 1:
+        return f"{day}, in {n} days"
+    return f"past, {-n} day{'s' if n != -1 else ''} ago"
+
+
 def _build_chat_context(db, user_id: str, message: str | None = None) -> str:
     """Build system context from user's courses, deadlines, course materials, notes, and study library.
 
@@ -7883,9 +8071,9 @@ def _build_chat_context(db, user_id: str, message: str | None = None) -> str:
         for label, items in by_course.items():
             parts.append(f"\n### {label}")
             for d in items:
-                time_str = f" at {d.time}" if d.time else ""
-                status = "[past]" if d.date < today.isoformat() else "[upcoming]"
-                parts.append(f"- {d.date}{time_str} {status} — {d.title} ({d.type or 'deadline'}) [id:{d.id}]")
+                time_str = f" at {_clock_12h(d.time)}" if d.time else ""
+                status = _relative_day_label(d.date, today)
+                parts.append(f"- {d.date}{time_str} [{status}] — {d.title} ({d.type or 'deadline'}) [id:{d.id}]")
     else:
         parts.append("(no deadlines recorded — student has not connected their LMS, uploaded a syllabus, or added any deadlines)")
 

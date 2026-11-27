@@ -12,6 +12,8 @@ export type AnalyticsEvent =
   | 'signup'
   | 'onboarding_school_saved'
   | 'onboarding_goals'
+  | 'alerts_plan_chosen'
+  | 'alerts_plan_skipped'
   | 'lms_connected'
   | 'onboarding_lms_opened'
   | 'onboarding_lms_skipped'

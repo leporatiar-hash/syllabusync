@@ -10,7 +10,8 @@ import { GradientButton, OutlineButton, T } from '@/components/web';
 import { C, getCourseColor, normalizeType, typeStyle } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { api } from '@/lib/api';
-import { toYmd } from '@/lib/dates';
+import { formatTime, toYmd } from '@/lib/dates';
+import { cleanTitle } from '@/lib/format';
 import type { Course, Deadline } from '@/lib/types';
 
 type CalDeadline = Deadline & { saved_to_calendar?: boolean };
@@ -135,7 +136,7 @@ export default function Calendar() {
                       </View>
                       <View style={{ flexDirection: 'row', gap: 3, height: 6, marginTop: 2 }}>
                         {items.slice(0, 3).map((d) => (
-                          <View key={d.id} style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: d.completed ? C.slate300 : getCourseColor(d.course_id).accent }} />
+                          <View key={d.id} style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: d.completed ? C.slate300 : getCourseColor(d.course_id, d.course_color).accent }} />
                         ))}
                       </View>
                     </Pressable>
@@ -159,20 +160,20 @@ export default function Calendar() {
               {dayItems.length === 0 ? <T size={14} color={C.slate400} style={{ paddingVertical: 24, textAlign: 'center' }}>No events this day</T> : (
                 <View style={{ gap: 8 }}>
                   {dayItems.map((d) => {
-                    const accent = getCourseColor(d.course_id).accent;
+                    const accent = getCourseColor(d.course_id, d.course_color).accent;
                     const ts = typeStyle(d.type);
                     return (
                       <Pressable key={d.id} onPress={() => toggle(d)} style={({ pressed }) => ({ flexDirection: 'row', borderRadius: 12, backgroundColor: '#F8F7FF', overflow: 'hidden', transform: [{ scale: pressed ? 0.98 : 1 }] })}>
                         <View style={{ width: 4, backgroundColor: accent }} />
                         <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 10 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                            <T size={13} weight="semibold" color={C.slate900} style={[{ flex: 1 }, d.completed ? { textDecorationLine: 'line-through', color: C.slate400 } : null]}>{d.title}</T>
+                            <T size={13} weight="semibold" color={C.slate900} style={[{ flex: 1 }, d.completed ? { textDecorationLine: 'line-through', color: C.slate400 } : null]}>{cleanTitle(d.title)}</T>
                             <View style={{ backgroundColor: ts.chipFg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 }}>
                               <T size={10} weight="semibold" color="#fff">{normalizeType(d.type)}</T>
                             </View>
                           </View>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                            <T size={11} color={C.slate400}>{d.course_code || d.course_name || 'To do'}{d.time ? ` · ${d.time}` : ''}</T>
+                            <T size={11} color={C.slate400}>{d.course_code || d.course_name || 'To do'}{d.time ? ` · ${formatTime(d.time)}` : ''}</T>
                             {d.completed ? <Check size={12} color={C.green} /> : null}
                             {d.saved_to_calendar ? <T size={11} color={C.green}>On calendar</T> : null}
                           </View>

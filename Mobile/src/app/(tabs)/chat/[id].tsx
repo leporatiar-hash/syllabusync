@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Pressable, View } from 'react-native';
+import { FlatList, Keyboard, KeyboardAvoidingView, Pressable, View } from 'react-native';
 
 import { BackBar } from '@/components/back-bar';
 import { CHAT_SOFT_BG, CHAT_SOFT_TEXT, ChatComposer } from '@/components/chat-composer';
@@ -13,11 +13,13 @@ import { track } from '@/lib/analytics';
 import { usePaywall } from '@/components/paywall';
 import type { ChatMessage, Conversation } from '@/lib/types';
 
+const TAB_BAR_SPACE = 86; // height of iOS 26's floating tab bar plus its margin
+
 const PROMPTS = ['What’s due this week?', 'Make me a study plan for my next exam', 'Which class should I focus on today?', 'Quiz me on my notes'];
 
 /** One conversation; id "new" shows the web's empty state and creates the conversation on first send. */
 export default function ChatThread() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, prompt, focus } = useLocalSearchParams<{ id: string; prompt?: string; focus?: string }>();
   const [conversationId, setConversationId] = useState<string | null>(id === 'new' ? null : id);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -26,8 +28,11 @@ export default function ChatThread() {
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const { openPaywall } = usePaywall();
 
+  // Load history only for a chat that already existed when the screen opened. A chat created here
+  // changes the route param too, and refetching then would wipe the reply that's streaming in.
+  const createdHere = useRef<string | null>(null);
   useEffect(() => {
-    if (id !== 'new') api<ChatMessage[]>(`/chat/conversations/${id}/messages`).then(setMessages).catch(() => {});
+    if (id !== 'new' && id !== createdHere.current) api<ChatMessage[]>(`/chat/conversations/${id}/messages`).then(setMessages).catch(() => {});
   }, [id]);
 
   const send = async (text: string) => {
@@ -44,6 +49,7 @@ export default function ChatThread() {
       let convId = conversationId;
       if (!convId) {
         convId = (await api<Conversation>('/chat/conversations', { method: 'POST' })).id;
+        createdHere.current = convId;
         setConversationId(convId);
         router.setParams({ id: convId });
       }
@@ -63,10 +69,30 @@ export default function ChatThread() {
     }
   };
 
+  // Opened from a starter on the Chat tab: ask it straight away (once).
+  const asked = useRef(false);
+  useEffect(() => {
+    if (id === 'new' && prompt && !asked.current) {
+      asked.current = true;
+      send(prompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, prompt]);
+
+  // The floating tab bar sits over the bottom of the screen; keep the composer above it, and drop
+  // that space while the keyboard (which covers the tab bar) is up.
+  const [keyboardUp, setKeyboardUp] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', () => setKeyboardUp(true));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardUp(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  const tabBarSpace = keyboardUp ? 0 : TAB_BAR_SPACE;
+
   const empty = messages.length === 0;
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: C.white }} keyboardVerticalOffset={120}>
+    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: C.white }}>
       <BackBar label="Chats" />
       {empty ? (
         <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 20 }}>
@@ -76,7 +102,7 @@ export default function ChatThread() {
             <T size={14} color={C.slate500} style={{ marginTop: 6, textAlign: 'center' }}>Ask anything about your courses, or tap a prompt below to get started.</T>
           </View>
           <View style={{ marginTop: 24 }}>
-            <ChatComposer value={input} onChange={setInput} onSubmit={() => send(input)} sending={sending} />
+            <ChatComposer value={input} onChange={setInput} onSubmit={() => send(input)} sending={sending} autoFocus={focus === '1'} />
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 16 }}>
             {PROMPTS.map((p) => (
@@ -114,7 +140,7 @@ export default function ChatThread() {
             }
           />
           {error ? <T color={C.red} style={{ paddingHorizontal: 16, paddingBottom: 6 }}>{error}</T> : null}
-          <View style={{ borderTopWidth: 1, borderTopColor: C.slate200, paddingHorizontal: 16, paddingVertical: 12 }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: C.slate100, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 + tabBarSpace }}>
             <ChatComposer value={input} onChange={setInput} onSubmit={() => send(input)} sending={sending} />
             <T size={11} color={C.slate400} style={{ textAlign: 'center', marginTop: 8 }}>ClassMate can make mistakes. Check important dates with your syllabus.</T>
           </View>

@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,37 +5,64 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LogoMark, T } from '@/components/web';
 import { C } from '@/constants/theme';
 
-/** Web auth layout: logo header, then a centered rounded-3xl white card. */
-export function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+/** Sign-in / sign-up layout: brand mark and promise up top, then a big title and the form on the page. */
+export function AuthShell({ title, subtitle, children, footer }: { title: string; subtitle: string; children: ReactNode; footer?: ReactNode }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={{ flex: 1, backgroundColor: C.pageBg }}>
-      <View style={{ paddingTop: insets.top, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: 'rgba(226,232,240,0.7)' }}>
-        <View style={{ height: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16 }}>
-          <LogoMark size={32} />
-          <T size={17} weight="bold" color={C.slate900} style={{ letterSpacing: -0.3 }}>ClassMate</T>
-        </View>
-      </View>
+    <View style={{ flex: 1, backgroundColor: C.white }}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 16, paddingBottom: insets.bottom + 24 }}>
-          <View style={{ backgroundColor: C.white, borderRadius: 24, borderWidth: 1, borderColor: C.slate200, padding: 28, shadowColor: '#0F172A', shadowOpacity: 0.05, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } }}>
-            <T size={24} weight="semibold" color={C.slate900} style={{ lineHeight: 30 }}>{title}</T>
-            <T size={14} color={C.slate500} style={{ marginTop: 4 }}>{subtitle}</T>
-            <View style={{ marginTop: 24, gap: 16 }}>{children}</View>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <LogoMark size={40} />
+            <View>
+              <T size={19} weight="bold" color={C.slate900} style={{ letterSpacing: -0.4, lineHeight: 22 }}>ClassMate</T>
+              <T size={13} color={C.slate500} style={{ lineHeight: 17 }}>Every deadline, before it sneaks up on you</T>
+            </View>
           </View>
+
+          <T size={32} weight="bold" color={C.slate900} style={{ marginTop: 44, lineHeight: 38, letterSpacing: -0.8 }}>{title}</T>
+          <T size={16} color={C.slate500} style={{ marginTop: 6, lineHeight: 22 }}>{subtitle}</T>
+
+          <View style={{ marginTop: 28, gap: 16 }}>{children}</View>
+
+          {footer ? <View style={{ flex: 1, justifyContent: 'flex-end', alignItems: 'center', paddingTop: 32 }}>{footer}</View> : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
 
-/** rounded-lg bg-gradient-to-r from-[#5B8DEF] to-[#A78BFA] (web auth submit button). */
+/** Full-width solid primary button for auth forms. */
 export function AuthButton({ title, onPress, loading, disabled }: { title: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled || loading} style={({ pressed }) => ({ opacity: disabled ? 0.5 : pressed ? 0.9 : 1 })}>
-      <LinearGradient colors={[C.brand, C.lavender]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ borderRadius: 10, paddingVertical: 13, alignItems: 'center' }}>
-        {loading ? <ActivityIndicator color="#fff" /> : <T size={15} weight="semibold" color="#fff">{title}</T>}
-      </LinearGradient>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      disabled={disabled || loading}
+      style={({ pressed }) => ({
+        height: 52,
+        borderRadius: 14,
+        borderCurve: 'continuous',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: disabled ? C.slate200 : C.brandSolid,
+        opacity: pressed ? 0.88 : 1,
+        marginTop: 4,
+      })}>
+      {loading ? <ActivityIndicator color="#fff" /> : <T size={17} weight="semibold" color={disabled ? C.slate400 : '#fff'}>{title}</T>}
+    </Pressable>
+  );
+}
+
+/** "New to ClassMate? Create an account"-style line for the bottom of auth screens. */
+export function AuthSwitch({ prompt, action, onPress }: { prompt: string; action: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={10} style={{ paddingVertical: 8 }}>
+      <T size={15} color={C.slate500}>
+        {prompt} <T size={15} weight="semibold" color={C.brandSolid}>{action}</T>
+      </T>
     </Pressable>
   );
 }
@@ -44,7 +70,7 @@ export function AuthButton({ title, onPress, loading, disabled }: { title: strin
 export function Banner({ tone, children }: { tone: 'error' | 'warn' | 'ok'; children: ReactNode }) {
   const s = tone === 'error' ? { bg: '#FEF2F2', fg: '#B91C1C' } : tone === 'warn' ? { bg: '#FFFBEB', fg: '#92400E' } : { bg: '#ECFDF5', fg: '#047857' };
   return (
-    <View style={{ backgroundColor: s.bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 }}>
+    <View style={{ backgroundColor: s.bg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 }}>
       <T size={14} color={s.fg}>{children}</T>
     </View>
   );

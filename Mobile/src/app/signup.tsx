@@ -1,9 +1,9 @@
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { ChevronDown } from 'lucide-react-native';
 import { useState } from 'react';
 import { ActionSheetIOS, Pressable, View } from 'react-native';
 
-import { AuthButton, AuthShell, Banner } from '@/components/auth-shell';
+import { AuthButton, AuthShell, AuthSwitch, Banner } from '@/components/auth-shell';
 import { WebInput } from '@/components/course-form';
 import { T } from '@/components/web';
 import { C } from '@/constants/theme';
@@ -33,27 +33,26 @@ export default function Signup() {
     }
   };
 
-  const linkStyle = { color: C.brand, fontFamily: 'Inter_400Regular', fontSize: 12 } as const;
+  const linkStyle = { color: C.brandSolid, fontFamily: 'Inter_400Regular', fontSize: 12 } as const;
 
   return (
-    <AuthShell title="Create account" subtitle="Join thousands of students organizing their studies">
+    <AuthShell
+      title="Create your account"
+      subtitle="Connect your school’s LMS and get reminded before things are due."
+      footer={<AuthSwitch prompt="Already have an account?" action="Log in" onPress={() => router.replace('/login')} />}>
       <WebInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="email" keyboardType="email-address" textContentType="emailAddress" placeholder="you@school.edu" />
       <WebInput label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" textContentType="newPassword" placeholder="At least 6 characters" />
       <View style={{ gap: 6 }}>
         <T size={14} weight="medium" color={C.slate700}>How did you hear about ClassMate? <T size={14} color={C.slate400}>(optional)</T></T>
         <Pressable
           onPress={() => ActionSheetIOS.showActionSheetWithOptions({ options: [...SOURCES, 'Cancel'], cancelButtonIndex: SOURCES.length }, (i) => i < SOURCES.length && setSource(SOURCES[i]))}
-          style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: C.slate200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 }}>
+          style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: C.slate200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: C.slate50 }}>
           <T size={15} color={source ? C.slate900 : C.slate400}>{source || 'Select...'}</T>
           <ChevronDown size={16} color={C.slate500} />
         </Pressable>
       </View>
-      <AuthButton title={busy ? 'Creating account...' : 'Create account'} onPress={submit} loading={busy} disabled={!email || !password} />
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 4 }}>
-        <T size={14} color={C.slate500}>Already have an account?</T>
-        <Link href="/login" style={{ color: C.brand, fontFamily: 'Inter_400Regular', fontSize: 14 }}>Log in</Link>
-      </View>
+      <AuthButton title={busy ? 'Creating account…' : 'Create account'} onPress={submit} loading={busy} disabled={!email || !password} />
       <T size={12} color={C.slate400} style={{ textAlign: 'center' }}>
         By continuing you agree to the <Link href="https://www.tryclassmate.com/terms" style={linkStyle}>Terms</Link> and <Link href="https://www.tryclassmate.com/privacy" style={linkStyle}>Privacy Policy</Link>.
       </T>

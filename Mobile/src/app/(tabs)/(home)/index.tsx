@@ -9,12 +9,13 @@ import { Pressable, RefreshControl, ScrollView, Share, View } from 'react-native
 import { ScreenTitle, SectionHeader } from '@/components/app-chrome';
 import { usePaywall } from '@/components/paywall';
 import { GradientButton, IconSquare, Spinner, T } from '@/components/web';
-import { C, getCourseColor, normalizeType } from '@/constants/theme';
+import { C, getCourseColor } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { track } from '@/lib/analytics';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { addDaysYmd, formatDeadlineDate, formatTime, localToday } from '@/lib/dates';
+import { addDaysYmd, daysUntil, formatTime, localToday, parseYmd } from '@/lib/dates';
+import { cleanTitle, notableType, relativeDays, TYPE_TAG } from '@/lib/format';
 import { onLmsSynced } from '@/lib/lms-sync';
 import { purchasesEnabled } from '@/lib/purchases';
 import type { Course, Deadline, Subscription } from '@/lib/types';
@@ -23,7 +24,22 @@ type LmsConnection = { id: string; provider: string; status?: 'ok' | 'broken' };
 type Dated = Deadline & { date: string };
 
 const SETUP_DISMISSED_KEY = 'cm-setup-dismissed';
-const MAX_LATER = 6;
+const DAYS_SHOWN = 14;
+
+/** Minutes after midnight for "11:59 PM"-style times (untimed items sort first). */
+function timeKey(t: string | null | undefined): number {
+  const m = (t ?? '').match(/^(\d{1,2}):(\d{2})\s*([AP]M)?$/i);
+  if (!m) return -1;
+  let h = Number(m[1]) % 12;
+  if ((m[3] ?? '').toUpperCase() === 'PM' || (!m[3] && Number(m[1]) >= 12)) h += 12;
+  return h * 60 + Number(m[2]);
+}
+
+function dayLabel(ymd: string, today: string): string {
+  if (ymd === today) return 'Today';
+  if (ymd === addDaysYmd(today, 1)) return 'Tomorrow';
+  return parseYmd(ymd).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+}
 
 /** White rounded card used for grouped lists. */
 function Group({ children }: { children: React.ReactNode }) {
@@ -49,21 +65,24 @@ export default function Home() {
 
   const tomorrow = addDaysYmd(today, 1);
   const weekEnd = addDaysYmd(today, 6);
+  const horizon = addDaysYmd(today, DAYS_SHOWN - 1);
   const sections = useMemo(() => {
     const list = (entries.data ?? [])
       .filter((d): d is Dated => !!d.date && d.date >= today && !d.recurring)
-      .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''));
+      .sort((a, b) => a.date.localeCompare(b.date) || timeKey(a.time) - timeKey(b.time));
     const open = list.filter((d) => !d.completed);
+    // One section per day for the next two weeks; everything after that is a count + link.
+    const byDay = new Map<string, Dated[]>();
+    for (const d of list) if (d.date <= horizon) byDay.set(d.date, [...(byDay.get(d.date) ?? []), d]);
     return {
-      today: list.filter((d) => d.date === today),
-      tomorrow: list.filter((d) => d.date === tomorrow),
-      week: list.filter((d) => d.date > tomorrow && d.date <= weekEnd),
-      later: open.filter((d) => d.date > weekEnd).slice(0, MAX_LATER),
+      days: [...byDay.entries()],
+      laterCount: open.filter((d) => d.date > horizon).length,
       soon: open.filter((d) => d.date <= tomorrow).length,
       thisWeek: open.filter((d) => d.date <= weekEnd).length,
+      next: open[0] ?? null,
       any: open.length > 0,
     };
-  }, [entries.data, today, tomorrow, weekEnd]);
+  }, [entries.data, today, tomorrow, weekEnd, horizon]);
 
   const hasLms = (lms.data?.length ?? 0) > 0;
   const lmsBroken = (lms.data ?? []).some((c) => c.status === 'broken');
@@ -101,19 +120,15 @@ export default function Home() {
 
   const firstName = (me?.profile?.full_name ?? '').trim().split(/\s+/)[0];
   const dateLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const nextIn = sections.next ? daysUntil(sections.next.date) : 0;
   const summary =
     sections.soon > 0
-      ? `${sections.soon} due in the next 48 hours${sections.thisWeek > sections.soon ? `, ${sections.thisWeek} this week` : ''}.`
+      ? `${sections.soon} due in the next 48 hours.${sections.thisWeek > sections.soon ? ` ${sections.thisWeek} this week.` : ''}`
       : sections.thisWeek > 0
-        ? `Nothing due until later this week. ${sections.thisWeek} coming up.`
-        : 'Nothing due this week.';
-
-  const groups: { title: string; items: Dated[]; showDate: boolean }[] = [
-    { title: 'Today', items: sections.today, showDate: false },
-    { title: 'Tomorrow', items: sections.tomorrow, showDate: false },
-    { title: 'This week', items: sections.week, showDate: true },
-    { title: 'Later', items: sections.later, showDate: true },
-  ].filter((g) => g.items.length > 0);
+        ? `${sections.thisWeek} due this week. The next one is ${relativeDays(nextIn)}.`
+        : sections.any
+          ? `Nothing due this week. Next up ${relativeDays(nextIn)}.`
+          : 'Nothing coming up.';
 
   return (
     <View style={{ flex: 1, backgroundColor: C.groupedBg }}>
@@ -162,7 +177,7 @@ export default function Home() {
 
         {loading ? (
           <Spinner />
-        ) : groups.length === 0 ? (
+        ) : sections.days.length === 0 ? (
           <Group>
             <View style={{ alignItems: 'center', padding: 28, gap: 6 }}>
               <IconSquare icon={CalendarDays} bg={C.slate100} fg={C.slate400} size={48} radius={24} />
@@ -173,18 +188,24 @@ export default function Home() {
             </View>
           </Group>
         ) : (
-          groups.map((g) => (
-            <View key={g.title}>
-              <SectionHeader right={g.title === 'Later' ? (
-                <Pressable onPress={() => router.navigate('/calendar')} hitSlop={8}><T size={14} color={C.brandSolid}>Calendar</T></Pressable>
-              ) : undefined}>{g.title}</SectionHeader>
-              <Group>
-                {g.items.map((d, i) => (
-                  <DeadlineRow key={d.id} d={d} first={i === 0} showDate={g.showDate} today={today} onToggle={() => toggle(d)} />
-                ))}
-              </Group>
-            </View>
-          ))
+          <View style={{ gap: 22 }}>
+            {sections.days.map(([day, items]) => (
+              <View key={day}>
+                <SectionHeader>{dayLabel(day, today)}</SectionHeader>
+                <Group>
+                  {items.map((d, i) => (
+                    <DeadlineRow key={d.id} d={d} first={i === 0} onToggle={() => toggle(d)} />
+                  ))}
+                </Group>
+              </View>
+            ))}
+            {sections.laterCount > 0 ? (
+              <Pressable onPress={() => router.navigate('/calendar')} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10, opacity: pressed ? 0.6 : 1 })}>
+                <T size={15} weight="medium" color={C.brandSolid}>{sections.laterCount} more after that in Calendar</T>
+                <ChevronRight size={16} color={C.brandSolid} />
+              </Pressable>
+            ) : null}
+          </View>
         )}
 
         {hasLms && courses.data && missingSyllabus.length > 0 ? (
@@ -278,29 +299,38 @@ export default function Home() {
   );
 }
 
-/** One deadline: course-colour bar, title, course · type, and a time (or date) on the right. Tap the circle to check it off. */
-function DeadlineRow({ d, first, showDate, today, onToggle }: { d: Dated; first: boolean; showDate: boolean; today: string; onToggle: () => void }) {
-  const accent = getCourseColor(d.course_id).accent;
+/** One deadline: course-colour check circle, full-width title, then course and time. Tap the row
+ *  to open its course; tap the circle to check it off. */
+function DeadlineRow({ d, first, onToggle }: { d: Dated; first: boolean; onToggle: () => void }) {
+  const accent = getCourseColor(d.course_id, d.course_color).accent;
   const time = formatTime(d.time);
-  const right = showDate ? formatDeadlineDate(d.date, today) : time;
-  const isExam = normalizeType(d.type) === 'Exam';
+  const tag = notableType(d.type, d.title);
+  const course = d.course_code || d.course_name || 'To-do';
   return (
     <Pressable
       onPress={() => (d.course_id ? router.navigate(`/courses/${d.course_id}`) : onToggle())}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, backgroundColor: pressed ? C.slate50 : C.white })}>
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, backgroundColor: pressed ? C.slate50 : C.white })}>
       {!first ? <View style={{ position: 'absolute', top: 0, left: 50, right: 0, height: 1, backgroundColor: C.slate100 }} /> : null}
-      <Pressable onPress={onToggle} hitSlop={10} accessibilityRole="checkbox" accessibilityState={{ checked: d.completed }} accessibilityLabel={`Mark ${d.title ?? 'deadline'} done`}>
-        <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: d.completed ? 0 : 2, borderColor: accent, backgroundColor: d.completed ? accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-          {d.completed ? <Check size={14} color="#fff" strokeWidth={3} /> : null}
+      <Pressable onPress={onToggle} hitSlop={12} style={{ paddingTop: 1 }} accessibilityRole="checkbox" accessibilityState={{ checked: d.completed }} accessibilityLabel={`Mark ${cleanTitle(d.title)} done`}>
+        <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: d.completed ? 0 : 2, borderColor: accent, backgroundColor: d.completed ? accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+          {d.completed ? <Check size={13} color="#fff" strokeWidth={3} /> : null}
         </View>
       </Pressable>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <T size={16} weight="medium" color={d.completed ? C.slate400 : C.slate900} numberOfLines={2} style={d.completed ? { textDecorationLine: 'line-through' } : undefined}>
-          {d.title || 'Untitled'}
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <T size={16} weight="medium" color={d.completed ? C.slate400 : C.slate900} numberOfLines={2} style={[{ lineHeight: 21 }, d.completed ? { textDecorationLine: 'line-through' } : null]}>
+          {cleanTitle(d.title)}
         </T>
-        <T size={13} color={isExam && !d.completed ? '#DC2626' : C.slate500} numberOfLines={1}>{d.course_code || d.course_name || 'To do'} · {normalizeType(d.type)}</T>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {tag && !d.completed ? (
+            <View style={{ backgroundColor: TYPE_TAG[tag].bg, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 }}>
+              <T size={11} weight="semibold" color={TYPE_TAG[tag].fg}>{tag.toUpperCase()}</T>
+            </View>
+          ) : null}
+          <T size={13} color={C.slate500} numberOfLines={1} style={{ flexShrink: 1 }}>
+            {course}{time ? ` · ${time}` : ''}
+          </T>
+        </View>
       </View>
-      {right ? <T size={14} weight="medium" color={C.slate500}>{right}</T> : null}
     </Pressable>
   );
 }

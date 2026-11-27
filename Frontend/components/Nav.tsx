@@ -65,6 +65,21 @@ export default function Nav() {
       }
     }
     loadAvatar()
+    // LMS due dates are stored in the student's timezone; report the browser's once per session.
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      if (tz && sessionStorage.getItem('cm-tz-sent') !== tz) {
+        fetchWithAuth(`${API_URL}/me/timezone`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ timezone: tz }),
+        })
+          .then((r) => { if (r.ok) sessionStorage.setItem('cm-tz-sent', tz) })
+          .catch(() => {})
+      }
+    } catch {
+      // non-fatal
+    }
   }, [user])
 
   useEffect(() => {

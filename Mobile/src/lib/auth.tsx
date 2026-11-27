@@ -39,6 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     identify(data.user_id, data.profile?.email);
     identifyPurchaser(data.user_id);
     registerForPush(false); // refresh token/timezone if already allowed; never prompts here
+    // LMS due dates are shown in this timezone, so a Central/Pacific student's 11:59 PM stays on the right day.
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) api('/me/timezone', { method: 'POST', body: JSON.stringify({ timezone: tz }) }).catch(() => {});
   }, []);
 
   const signOut = useCallback(async () => {

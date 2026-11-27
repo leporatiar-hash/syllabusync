@@ -327,6 +327,13 @@ export default function CoursesClient() {
       }
       const updated = await res.json()
       setCourses((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)))
+      // Picking another course's color swaps the two on the server; refetch so both cards update.
+      if (updated.color !== courseToEdit.color) {
+        fetchWithAuth(`${API_URL}/courses`, { cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => { if (data) setCourses(data) })
+          .catch(() => {})
+      }
       setCourseToEdit(null)
       setToastMessage('Course updated successfully.')
       setToastType('success')

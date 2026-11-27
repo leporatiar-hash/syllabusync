@@ -301,6 +301,36 @@ def test_utc_times_stored_local():
     run_sync(user2)
     check("phone timezone used when known", _stored(user2, "2002") == ("2026-10-07", "8:59 PM"), str(_stored(user2, "2002")))
 
+    # The timezone the student's device reports (app or website) wins over everything else:
+    # a Central-time student's 11:59 PM CDT (04:59Z next day) must stay on the same day.
+    user3, _ = make_user("tz-device")
+    db = main.SessionLocal()
+    try:
+        db.add(main.PushToken(token=f"ExponentPushToken[{user3[:12]}]", user_id=user3, timezone="America/Los_Angeles"))
+        prof = db.query(main.UserProfile).filter(main.UserProfile.user_id == user3).first()
+        if prof is None:
+            prof = main.UserProfile(user_id=user3, email=f"{user3}@example.edu")
+            db.add(prof)
+        prof.timezone = "America/Chicago"
+        db.commit()
+    finally:
+        db.close()
+    run_sync(user3)
+    check("device timezone beats push-token timezone", _stored(user3, "2002") == ("2026-10-07", "10:59 PM"), str(_stored(user3, "2002")))
+
+
+def _utc_stamp(days_from_now: int) -> str:
+    """An iCal UTC timestamp N days out at 03:59Z (11:59 PM Eastern the night before)."""
+    return (datetime.utcnow() + timedelta(days=days_from_now)).strftime("%Y%m%dT035900Z")
+
+
+def _local_date(days_from_now: int) -> str:
+    """The Eastern calendar date of _utc_stamp(days_from_now) (the suite's default timezone)."""
+    from datetime import datetime as _dt
+    stamp = _utc_stamp(days_from_now)
+    utc = _dt.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=main.ZoneInfo("UTC"))
+    return utc.astimezone(main.ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
 
 def _set_feed(events):
     _FakeClient.feed = build_feed(events)
@@ -316,7 +346,7 @@ def _deadline(user_id, uid):
 
 def test_lms_changes_flow_through():
     user_id, _ = make_user("truth")
-    future = "20261120T045900Z"  # 11/19 11:59 PM Eastern
+    future = _utc_stamp(10)  # always in the future, whatever day the suite runs
     events = [
         _event("3001", "Problem Set 5 - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=future),
         _event("3002", "Old Quiz - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20260901T035900Z"),
@@ -334,7 +364,7 @@ def test_lms_changes_flow_through():
             db.close()
 
         # Professor moves Problem Set 5, deletes Draft and Done already, and the past quiz ages out
-        moved = _event("3001", "Problem Set 5 (extended) - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart="20261124T045900Z")
+        moved = _event("3001", "Problem Set 5 (extended) - Due", "LOCATION:2026 Fall Investment Analysis (FINC-400-02)", dtstart=_utc_stamp(14))
         _set_feed([moved])
         # Default: an item missing from the feed is NOT deleted (feeds can omit real items)
         run_sync(user_id)
@@ -343,7 +373,7 @@ def test_lms_changes_flow_through():
         run_sync(user_id)
         os.environ.pop("LMS_MIRROR_DELETIONS", None)
         ps5 = _deadline(user_id, "3001")
-        check("moved due date updates", ps5 and (ps5.date, ps5.title) == ("2026-11-23", "Problem Set 5 (extended) - Due"),
+        check("moved due date updates", ps5 and ps5.title == "Problem Set 5 (extended)" and ps5.date == _local_date(14),
               str(ps5 and (ps5.date, ps5.title)))
         check("upcoming item removed from the LMS is removed", _deadline(user_id, "3003") is None)
         check("past item is kept as history", _deadline(user_id, "3002") is not None)
@@ -404,8 +434,56 @@ def test_syllabus_deadlines_give_way_to_lms():
     finally:
         db.close()
     check("syllabus copies replaced, LMS-free exam + completed + manual kept",
-          left == sorted([("ical", "Homework 3 - Due"), ("ical", "Final Exam - Available"), ("syllabus", "Midterm Exam"),
+          left == sorted([("ical", "Homework 3"), ("ical", "Final Exam"), ("syllabus", "Midterm Exam"),
                           ("syllabus", "Reading 1"), ("manual", "My study group")]), str(left))
+
+
+def test_lms_titles_and_opens():
+    """D2L suffixes are stripped; a quiz's "Available" (opens) event isn't a deadline when the
+    quiz also has a close/due event; an exam keeps its start as "(opens)"; types are inferred."""
+    user_id, _ = make_user("titles")
+    loc = "LOCATION:2026 Fall Investment Analysis (FINC-400-02)"
+    _set_feed([
+        _event("6001", "Quiz 3 - Available", loc, dtstart=_utc_stamp(2)),
+        _event("6002", "Quiz 3 - Availability Ends", loc, dtstart=_utc_stamp(5)),
+        _event("6003", "Midterm Exam - Available", loc, dtstart=_utc_stamp(8)),
+        _event("6004", "Midterm Exam - Availability Ends", loc, dtstart=_utc_stamp(8)),
+        _event("6005", "Final Exam - Available", loc, dtstart=_utc_stamp(20)),
+        _event("6006", "Group Project - Due", loc, dtstart=_utc_stamp(10)),
+    ])
+    try:
+        run_sync(user_id)
+        q_open, q_end = _deadline(user_id, "6001"), _deadline(user_id, "6002")
+        check("quiz 'opens' event not saved", q_open is None, str(q_open and q_open.title))
+        check("quiz close saved as plain title, type Quiz", q_end and (q_end.title, q_end.type) == ("Quiz 3", "Quiz"), str(q_end and (q_end.title, q_end.type)))
+        m_open = _deadline(user_id, "6003")
+        check("exam start kept as '(opens)'", m_open and (m_open.title, m_open.type) == ("Midterm Exam (opens)", "Exam"), str(m_open and (m_open.title, m_open.type)))
+        f = _deadline(user_id, "6005")
+        check("exam with only a start kept by name", f and f.title == "Final Exam", str(f and f.title))
+        p = _deadline(user_id, "6006")
+        check("project typed", p and (p.title, p.type) == ("Group Project", "Project"), str(p and (p.title, p.type)))
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+
+
+def test_old_opens_rows_removed():
+    """A quiz 'Available' row saved by an older sync is removed once the quiz also has a close event."""
+    user_id, _ = make_user("old-opens")
+    loc = "LOCATION:2026 Fall Investment Analysis (FINC-400-02)"
+    db = main.SessionLocal()
+    try:
+        db.add(main.Deadline(user_id=user_id, date="2026-12-01", time="9:00 AM", type="assignment",
+                             title="Quiz 4 - Available", source="ical", external_id="ical_1000-7001@lms.example.edu"))
+        db.commit()
+    finally:
+        db.close()
+    _set_feed([_event("7001", "Quiz 4 - Available", loc, dtstart=_utc_stamp(3)),
+               _event("7002", "Quiz 4 - Availability Ends", loc, dtstart=_utc_stamp(4))])
+    try:
+        run_sync(user_id)
+        check("stale quiz 'opens' row removed", _deadline(user_id, "7001") is None)
+    finally:
+        _set_feed(FIXTURE_EVENTS)
 
 
 def _status(headers):
@@ -451,11 +529,6 @@ def test_dead_link_detected_and_replaced():
     check("deadlines carry over, no duplicates", before == after == 8, f"{before} -> {after}")
 
 
-def _utc_stamp(days_from_now: int) -> str:
-    """An iCal UTC timestamp N days out at 03:59Z (11:59 PM Eastern the night before)."""
-    return (datetime.utcnow() + timedelta(days=days_from_now)).strftime("%Y%m%dT035900Z")
-
-
 def test_change_alerts_recorded():
     user_id, _ = make_user("changes")
     loc = "LOCATION:2026 Fall Investment Analysis (FINC-400-02)"
@@ -499,6 +572,8 @@ if __name__ == "__main__":
         test_syllabus_deadlines_give_way_to_lms()
         test_dead_link_detected_and_replaced()
         test_change_alerts_recorded()
+        test_lms_titles_and_opens()
+        test_old_opens_rows_removed()
         print("\nAll iCal sync tests passed.")
     finally:
         try:

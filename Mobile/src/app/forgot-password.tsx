@@ -26,7 +26,7 @@ export default function ForgotPassword() {
     }
   };
 
-  const back = <Link href="/login" style={{ color: C.brand, fontFamily: 'Inter_400Regular', fontSize: 14, textAlign: 'center' }}>Back to log in</Link>;
+  const back = <Link href="/login" style={{ color: C.brandSolid, fontFamily: 'Inter_600SemiBold', fontSize: 15, textAlign: 'center', paddingVertical: 8 }}>Back to log in</Link>;
 
   if (sent) {
     return (
@@ -39,7 +39,7 @@ export default function ForgotPassword() {
   return (
     <AuthShell title="Reset password" subtitle="Enter your email and we’ll send you a reset link.">
       <WebInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} spellCheck={false} keyboardType="email-address" autoComplete="email" placeholder="you@school.edu" />
-      <AuthButton title={busy ? 'Sending...' : 'Send reset link'} onPress={submit} loading={busy} disabled={!email} />
+      <AuthButton title={busy ? 'Sending…' : 'Send reset link'} onPress={submit} loading={busy} disabled={!email} />
       {error ? <Banner tone="error">{error}</Banner> : null}
       {back}
     </AuthShell>

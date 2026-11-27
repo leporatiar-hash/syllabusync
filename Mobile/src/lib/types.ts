@@ -50,6 +50,7 @@ export type Deadline = {
   course_id: string | null;
   course_name: string | null;
   course_code: string | null;
+  course_color?: string | null;
   date: string | null; // YYYY-MM-DD
   time: string | null;
   type: string | null;
