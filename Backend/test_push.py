@@ -452,6 +452,22 @@ def test_campus_calendar_events_not_reminded():
     assert "Mass" not in bodies and "Reconciliation" not in bodies, bodies
 
 
+def test_impossible_dates_rejected_and_nudges_survive():
+    uid, h, token = _user()
+    r = client.post("/deadlines", json={"title": "Quiz 10", "date": "2026-11-31", "type": "Quiz"}, headers=h)
+    assert r.status_code == 422, r.text
+    r = client.post("/deadlines", json={"title": "Quiz 11", "date": "2026-12-3", "type": "Quiz"}, headers=h)
+    assert r.status_code == 200 and r.json()["date"] == "2026-12-03", r.text
+    db = main.SessionLocal()
+    try:  # a bad row already in the database must not crash the nudge job
+        db.add(main.Deadline(user_id=uid, title="old junk", date="2026-11-31", type="assignment", source="syllabus"))
+        db.commit()
+    finally:
+        db.close()
+    import asyncio
+    asyncio.run(main._run_nudge_check())
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

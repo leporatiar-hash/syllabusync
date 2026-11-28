@@ -245,7 +245,9 @@ AI_LIMITS = {  # USD per user
     "pro": {"day": _usd_env("AI_PRO_DAILY_USD", 0.50), "month": _usd_env("AI_PRO_MONTHLY_USD", 3.00)},
     "free": {"day": _usd_env("AI_FREE_DAILY_USD", 0.20), "month": _usd_env("AI_FREE_MONTHLY_USD", 1.00)},
 }
-AI_GLOBAL_DAILY_USD = _usd_env("AI_GLOBAL_DAILY_USD", 20.0)
+# Whole site, per UTC day. Real spend is cents a day (Nov 2026: $0.09 for the month); $5 leaves 100x
+# headroom for a launch spike while capping the worst case near $150/month.
+AI_GLOBAL_DAILY_USD = _usd_env("AI_GLOBAL_DAILY_USD", 5.0)
 
 
 def _ai_cost_microusd(model: str | None, usage) -> tuple[int, int, int]:
@@ -1171,10 +1173,26 @@ class UpdateCourseRequest(BaseModel):
         return v.upper()
 
 
+def _clean_ymd(v):
+    """A real calendar date as YYYY-MM-DD (zero-padded). '2026-11-31' and '2025-11-8' style values
+    used to be stored as-is, never got reminders and crashed the nudge job."""
+    if v is None:
+        return v
+    m = re.fullmatch(r"\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*", str(v))
+    if not m:
+        raise ValueError("date must be YYYY-MM-DD")
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+    except ValueError:
+        raise ValueError("that date doesn't exist")
+
+
 class UpdateDeadlineRequest(BaseModel):
     title: str | None = Field(None, description="New deadline title")
     date: str | None = Field(None, description="New due date in YYYY-MM-DD format")
     course_id: str | None = Field(None, description="Move deadline to a different course ID")
+
+    _date_ok = validator("date", allow_reuse=True)(_clean_ymd)
 
 
 class UserProfileRequest(BaseModel):
@@ -1201,6 +1219,8 @@ class CreateDeadlineRequest(BaseModel):
     type: str = Field(default="Deadline", description="Type: 'Assignment', 'Exam', 'Quiz', 'Project', 'Deadline', etc.")
     description: str | None = Field(None, description="Additional details about the assignment")
     course_id: str | None = Field(None, description="ID of the course this deadline belongs to (required)")
+
+    _date_ok = validator("date", allow_reuse=True)(_clean_ymd)
 
 
 NOTE_TITLE_MAX_CHARS = 200
@@ -2466,7 +2486,10 @@ async def _run_nudge_check():
             )
 
             for deadline in deadlines:
-                dl_date = date.fromisoformat(deadline.date)
+                try:
+                    dl_date = date.fromisoformat(deadline.date)
+                except (TypeError, ValueError):
+                    continue
 
                 if dl_date == tomorrow:
                     exists = db.query(NudgeFlag).filter(
@@ -5525,7 +5548,10 @@ async def upload_course_syllabus(
         saved_count = 0
         for d in to_save:
             d_title = (d.get("title") or "").strip()
-            d_date = (d.get("date") or "").strip()
+            try:
+                d_date = _clean_ymd((d.get("date") or "").strip()) if (d.get("date") or "").strip() else ""
+            except ValueError:
+                continue  # an impossible date from the syllabus reader: skip rather than store junk
             db_key = f"{d_title.lower()[:40]}_{d_date}"
             if db_key in seen_db or db_key in existing_keys:
                 continue
@@ -6265,7 +6291,10 @@ async def upload_syllabus(
             seen_db: set[str] = set()
             for d in to_save:
                 d_title = (d.get("title") or "").strip()
-                d_date = (d.get("date") or "").strip()
+                try:
+                    d_date = _clean_ymd((d.get("date") or "").strip()) if (d.get("date") or "").strip() else ""
+                except ValueError:
+                    continue  # an impossible date from the syllabus reader: skip rather than store junk
                 db_key = f"{d_title.lower()[:40]}_{d_date}"
                 if db_key in seen_db or db_key in existing_keys:
                     continue
@@ -6957,6 +6986,8 @@ def sync_canvas(connection, user_id: str, db):
     except Exception as e:
         db.rollback()
         errors.append(f"Canvas sync error: {str(e)}")
+        logger.exception(f"[LMS] Canvas sync crashed for connection {connection.id} (user {user_id})")
+        _record_lms_health(db, connection, False, f"internal: {type(e).__name__}: {str(e)[:150]}", network=True)
 
     return synced, errors
 
@@ -7523,6 +7554,10 @@ def sync_ical(connection, user_id: str, db):
     except Exception as e:
         db.rollback()
         errors.append(f"iCal sync error: {str(e)}")
+        # Our bug, not the student's link: logged with a traceback (no feed URL) and recorded as
+        # last_error so the weekly report shows it, without counting toward "stopped syncing".
+        logger.exception(f"[LMS] iCal sync crashed for connection {connection.id} (user {user_id})")
+        _record_lms_health(db, connection, False, f"internal: {type(e).__name__}: {str(e)[:150]}", network=True)
 
     return synced, errors
 
