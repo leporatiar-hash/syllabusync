@@ -5,7 +5,7 @@ export default function Footer() {
         <div className="flex items-center gap-2.5">
           <img src="/brand/logo-inverted.svg" alt="" className="h-7 w-7 shrink-0" />
           <div>
-            <span className="font-bold block">ClassMate</span>
+            <span className="font-bold block">classmate</span>
             <span className="text-xs text-slate-400">Never get caught off guard by a due date.</span>
           </div>
         </div>
@@ -20,7 +20,7 @@ export default function Footer() {
             Contact
           </a>
         </div>
-        <div className="text-sm text-slate-400">© {new Date().getFullYear()} ClassMate. All rights reserved.</div>
+        <div className="text-sm text-slate-400">© {new Date().getFullYear()} classmate. All rights reserved.</div>
       </div>
     </footer>
   )

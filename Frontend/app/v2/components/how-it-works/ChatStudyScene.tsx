@@ -36,7 +36,7 @@ export default function ChatStudyScene({ reducedMotion }: SceneProps) {
           CM
         </div>
         <div>
-          <p className="text-sm font-semibold text-slate-900">ClassMate AI</p>
+          <p className="text-sm font-semibold text-slate-900">classmate AI</p>
           <p className="text-[11px] text-slate-400 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
             Online

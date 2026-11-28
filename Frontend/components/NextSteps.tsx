@@ -33,7 +33,7 @@ export default function NextSteps({
           <h2 className="text-lg font-semibold text-slate-900">
             {deadlineCount === 1 ? 'Your deadline is' : `All ${deadlineCount} deadlines are`} on your calendar
           </h2>
-          <p className="mt-0.5 text-sm text-slate-600">Now let ClassMate help you get ready for them:</p>
+          <p className="mt-0.5 text-sm text-slate-600">Now let classmate help you get ready for them:</p>
         </div>
       </div>
 
@@ -65,7 +65,7 @@ export default function NextSteps({
             <MessageCircle size={18} />
           </span>
           <span>
-            <span className="block text-sm font-semibold text-slate-900">Ask ClassMate</span>
+            <span className="block text-sm font-semibold text-slate-900">Ask classmate</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">Grading, due dates, or a study plan. Just ask.</span>
           </span>
         </Link>

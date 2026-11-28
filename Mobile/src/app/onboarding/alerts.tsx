@@ -14,7 +14,7 @@ import { purchasesEnabled } from '@/lib/purchases';
 import type { Subscription } from '@/lib/types';
 
 /**
- * Right after the LMS connects: how closely should ClassMate watch it? Framed as a preference, not
+ * Right after the LMS connects: how closely should classmate watch it? Framed as a preference, not
  * a sales screen. "The basics" (free) and "Keep me in the loop" (Pro) are equal choices; the price
  * is a quiet line on the Pro card. Mirrors the tiers in Backend/main.py _build_user_reminders.
  */
@@ -89,7 +89,7 @@ export default function AlertsStep() {
 
   return (
     <QuizScreen
-      title="How closely should ClassMate watch your classes?"
+      title="How closely should classmate watch your classes?"
       subtitle={`${lms} is connected. You can change this anytime in Settings.`}
       onSkip={() => { track('alerts_plan_skipped'); set({ alertPlan: null }); advance('syllabus', 0); }}
       skipLabel="Not now"

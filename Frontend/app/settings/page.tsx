@@ -484,7 +484,7 @@ function SettingsPageContent() {
               <span className="text-sm text-slate-500">Unlimited AI generations</span>
             </div>
             <p className="text-sm text-slate-500">
-              Thanks for backing ClassMate early — your $15 one-time purchase covers a full year
+              Thanks for backing classmate early — your $15 one-time purchase covers a full year
               {sub.foundingMemberExpiresAt && (
                 <>, through {new Date(sub.foundingMemberExpiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</>
               )}.
@@ -667,7 +667,7 @@ function SettingsPageContent() {
       {/* Logout */}
       <div className="mt-8 rounded-2xl border border-red-100 bg-white p-6">
         <h2 className="mb-2 text-sm font-semibold text-slate-900">Sign Out</h2>
-        <p className="mb-4 text-sm text-slate-500">Sign out of your ClassMate account on this device.</p>
+        <p className="mb-4 text-sm text-slate-500">Sign out of your classmate account on this device.</p>
         <button
           type="button"
           onClick={handleLogout}

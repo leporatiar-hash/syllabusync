@@ -7,7 +7,7 @@ export default function Loading() {
       </div>
 
       {/* Loading text */}
-      <h2 className="mb-2 text-xl font-semibold text-slate-900">ClassMate is loading…</h2>
+      <h2 className="mb-2 text-xl font-semibold text-slate-900">classmate is loading…</h2>
       <p className="text-sm text-slate-500">Organizing your academic life</p>
 
       {/* Animated progress bar */}

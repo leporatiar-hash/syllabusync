@@ -22,7 +22,7 @@ function useFirstRunPrompts() {
     (async () => {
       clearJustSignedUp();
       if (!me.has_completed_onboarding) {
-        router.replace('/onboarding/name');
+        router.replace({ pathname: '/how-it-works', params: { next: 'onboarding' } });
         return;
       }
       const asked = await SecureStore.getItemAsync(REMINDERS_ASKED_KEY);

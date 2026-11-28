@@ -3,11 +3,11 @@ import { PRICING } from '../../../lib/pricing'
 const faqs = [
   {
     q: 'Does it work with my school?',
-    a: "Most likely. ClassMate works with any school on Canvas or Brightspace (D2L), including OAKS at the College of Charleston. Pick your school and we'll find your LMS. You can also add syllabi as PDF or Word files.",
+    a: "Most likely. classmate works with any school on Canvas or Brightspace (D2L), including OAKS at the College of Charleston. Pick your school and we'll find your LMS. You can also add syllabi as PDF or Word files.",
   },
   {
     q: 'What happens when a professor changes a due date?',
-    a: "Your LMS is the source of truth, so ClassMate checks it every few hours and updates your calendar on its own. With Pro, you also get a notification that night saying what moved and when it's due now.",
+    a: "Your LMS is the source of truth, so classmate checks it every few hours and updates your calendar on its own. With Pro, you also get a notification that night saying what moved and when it's due now.",
   },
   {
     q: "What's free and what's Pro?",
@@ -19,7 +19,7 @@ const faqs = [
   },
   {
     q: 'Can my parents pay for it, or use a 529 plan?',
-    a: "Yes. Receipts list ClassMate as educational software used by the student, which many 529 plans accept. Check with your plan or a tax professional; this isn't tax advice.",
+    a: "Yes. Receipts list classmate as educational software used by the student, which many 529 plans accept. Check with your plan or a tax professional; this isn't tax advice.",
   },
   {
     q: 'Is my data private?',
@@ -27,7 +27,7 @@ const faqs = [
   },
   {
     q: 'Is there an app?',
-    a: 'ClassMate works in any browser today. The iPhone app, with one-tap LMS sign-in and push reminders, is coming soon.',
+    a: 'classmate works in any browser today. The iPhone app, with one-tap LMS sign-in and push reminders, is coming soon.',
   },
 ]
 

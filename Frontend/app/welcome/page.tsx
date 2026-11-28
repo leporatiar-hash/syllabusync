@@ -497,7 +497,7 @@ export default function WelcomePage() {
                 <span className="mb-2 flex h-20 w-20 items-center justify-center rounded-full bg-green-100"><Check size={40} className="text-green-600" strokeWidth={3} /></span>
                 <span className="text-3xl font-bold text-slate-900">{lmsName} is connected</span>
                 <span className="text-slate-500">{synced ? `${synced} due dates pulled in. ` : ''}New ones show up on their own.</span>
-                <span className="mt-2 flex items-center gap-1.5 text-sm text-slate-400"><Lock size={12} />Read-only. ClassMate never changes anything in {lmsName}.</span>
+                <span className="mt-2 flex items-center gap-1.5 text-sm text-slate-400"><Lock size={12} />Read-only. classmate never changes anything in {lmsName}.</span>
               </div>
               <div className="pt-4"><Primary onClick={() => go('syllabus')}>Continue</Primary></div>
             </>
@@ -564,7 +564,7 @@ export default function WelcomePage() {
                   <div><div className="text-5xl font-bold">{summary ? summary.courses : '…'}</div><div className="mt-1 text-white/85">courses</div></div>
                   <div><div className="text-5xl font-bold">{summary ? summary.upcoming : '…'}</div><div className="mt-1 text-white/85">due in the next 30 days</div></div>
                 </div>
-                {promoUntil && <p className="mt-6 text-sm text-white/90">ClassMate Pro is free for everyone through {promoEndLabel(promoUntil)}. No card needed.</p>}
+                {promoUntil && <p className="mt-6 text-sm text-white/90">classmate Pro is free for everyone through {promoEndLabel(promoUntil)}. No card needed.</p>}
               </div>
               <div className="pt-4"><Primary onClick={finish}>Go to my dashboard</Primary></div>
             </>

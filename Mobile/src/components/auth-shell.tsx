@@ -17,7 +17,7 @@ export function AuthShell({ title, subtitle, children, footer }: { title: string
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <LogoMark size={40} />
             <View>
-              <T size={19} weight="bold" color={C.slate900} style={{ letterSpacing: -0.4, lineHeight: 22 }}>ClassMate</T>
+              <T size={19} weight="bold" color={C.slate900} style={{ letterSpacing: -0.4, lineHeight: 22 }}>classmate</T>
               <T size={13} color={C.slate500} style={{ lineHeight: 17 }}>Every deadline, before it sneaks up on you</T>
             </View>
           </View>
@@ -56,7 +56,7 @@ export function AuthButton({ title, onPress, loading, disabled }: { title: strin
   );
 }
 
-/** "New to ClassMate? Create an account"-style line for the bottom of auth screens. */
+/** "New to classmate? Create an account"-style line for the bottom of auth screens. */
 export function AuthSwitch({ prompt, action, onPress }: { prompt: string; action: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} hitSlop={10} style={{ paddingVertical: 8 }}>

@@ -118,7 +118,7 @@ print(f"[Auth] SUPABASE_ISSUER={'SET' if SUPABASE_ISSUER else 'NOT SET'}")
 bearer_scheme = HTTPBearer(auto_error=True)
 
 app = FastAPI(
-    title="ClassMate API",
+    title="classmate API",
     description=(
         "AI-powered study platform. Parses syllabi, tracks deadlines, and generates "
         "flashcards, summaries, and quizzes from uploaded course materials. "
@@ -291,7 +291,7 @@ def _check_ai_budget(user_id: str | None):
             logger.error(f"[AI budget] Site-wide daily AI budget reached (${site_today / 1e6:.2f}); AI paused until midnight UTC")
             raise HTTPException(status_code=429, detail={
                 "error": "limit_reached", "limit_type": "ai_budget",
-                "message": "ClassMate's AI is taking a short break. Try again tomorrow; your calendar and reminders still work.",
+                "message": "classmate's AI is taking a short break. Try again tomorrow; your calendar and reminders still work.",
             })
         if not user_id:
             return
@@ -380,7 +380,7 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", "")
 # Who our emails come from. Must be on a domain verified in Resend (tryclassmate.com is); the old
 # onboarding@resend.dev test sender only delivers to the Resend account owner, so student emails bounced.
-EMAIL_FROM = os.getenv("EMAIL_FROM", "ClassMate <noreply@tryclassmate.com>")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "classmate <noreply@tryclassmate.com>")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
 
@@ -847,7 +847,7 @@ class UserProfile(Base):
     profile_picture = Column(Text, nullable=True)
     referral_code = Column(String, unique=True, nullable=True, default=generate_referral_code)
     referred_by = Column(String, nullable=True)  # referral_code of the user who referred them
-    referral_source = Column(String, nullable=True)  # how they heard about ClassMate, set at signup
+    referral_source = Column(String, nullable=True)  # how they heard about classmate, set at signup
     referral_source_other = Column(String, nullable=True)  # free text when referral_source == "other"
     created_at = Column(DateTime, default=datetime.utcnow)
     # Subscription / billing
@@ -993,7 +993,7 @@ class SurveyResponse(Base):
 
 class ValuePromptResponse(Base):
     """Answer to the one-question 'what's the one thing you'd hate to lose about
-    ClassMate?' ask, shown once ever after 3+ sessions or 7 days of account age."""
+    classmate?' ask, shown once ever after 3+ sessions or 7 days of account age."""
     __tablename__ = "value_prompt_responses"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -1115,7 +1115,7 @@ class AuthRegisterRequest(BaseModel):
     email: str = Field(description="User email address")
     password: str = Field(description="Password (min 6 characters)")
     referral_code: str | None = Field(None, description="Optional referral code")
-    referral_source: str | None = Field(None, description="How the user heard about ClassMate, e.g. 'ChatGPT', 'Google', 'Other'")
+    referral_source: str | None = Field(None, description="How the user heard about classmate, e.g. 'ChatGPT', 'Google', 'Other'")
     referral_source_other: str | None = Field(None, description="Free-text detail when referral_source is 'Other'")
 
 
@@ -1855,24 +1855,24 @@ PLAN_CONFIG = {
     "semester": {"env_var": "STRIPE_PRICE_SEMESTER", "mode": "subscription"},
 }
 PLAN_TERMS = {
-    "monthly": "Renews automatically every month until you cancel. Cancel anytime in ClassMate Settings. Full refund within 14 days, no questions asked.",
-    "semester": "Renews automatically every 6 months until you cancel. Cancel anytime in ClassMate Settings. Full refund within 14 days, no questions asked.",
+    "monthly": "Renews automatically every month until you cancel. Cancel anytime in classmate Settings. Full refund within 14 days, no questions asked.",
+    "semester": "Renews automatically every 6 months until you cancel. Cancel anytime in classmate Settings. Full refund within 14 days, no questions asked.",
 }
-PLAN_LABELS = {"monthly": ("ClassMate Pro, monthly", "every month"), "semester": ("ClassMate Pro Semester Pass", "every 6 months")}
+PLAN_LABELS = {"monthly": ("classmate Pro, monthly", "every month"), "semester": ("classmate Pro Semester Pass", "every 6 months")}
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "hello@tryclassmate.com")
 
 
 def _subscription_description(profile) -> str:
-    """'Educational software subscription: ClassMate Pro, used by <name>, <school>' (for 529 records)."""
+    """'Educational software subscription: classmate Pro, used by <name>, <school>' (for 529 records)."""
     who = ", ".join(x for x in [(profile.full_name or "").strip() if profile else "", (profile.school_name or "").strip() if profile else ""] if x)
-    return "Educational software subscription: ClassMate Pro" + (f", used by {who}" if who else "")
+    return "Educational software subscription: classmate Pro" + (f", used by {who}" if who else "")
 
 
 def _send_subscription_confirmation(profile, plan: str, amount_cents: int | None):
     """Receipt-style confirmation: what they bought, when it renews, how to cancel, refunds, 529."""
     if not RESEND_API_KEY or not profile or not profile.email:
         return
-    name, cadence = PLAN_LABELS.get(plan, ("ClassMate Pro", "each billing period"))
+    name, cadence = PLAN_LABELS.get(plan, ("classmate Pro", "each billing period"))
     price = f"${amount_cents / 100:.2f}" if amount_cents else "your plan price"
     frontend_url = os.getenv("FRONTEND_URL", "https://www.tryclassmate.com")
     try:
@@ -1883,14 +1883,14 @@ def _send_subscription_confirmation(profile, plan: str, amount_cents: int | None
             "reply_to": SUPPORT_EMAIL,
             "subject": f"You're on {name}",
             "html": f"""
-            <p>Thanks for supporting ClassMate. Here are the details, in plain English:</p>
+            <p>Thanks for supporting classmate. Here are the details, in plain English:</p>
             <ul>
               <li><b>Plan:</b> {name}, {price} {cadence}</li>
               <li><b>Renews:</b> automatically {cadence} until you cancel</li>
-              <li><b>Cancel anytime:</b> <a href="{frontend_url}/settings">ClassMate Settings</a> &rarr; Manage Subscription</li>
+              <li><b>Cancel anytime:</b> <a href="{frontend_url}/settings">classmate Settings</a> &rarr; Manage Subscription</li>
               <li><b>Refunds:</b> not happy? Email <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a> within 14 days for a full refund, no questions asked</li>
             </ul>
-            <p><b>Paying with a 529 plan?</b> ClassMate is educational software used by the student, which may be a qualified
+            <p><b>Paying with a 529 plan?</b> classmate is educational software used by the student, which may be a qualified
             529 expense. Your Stripe receipt lists it as "{_subscription_description(profile)}". Check with your plan or a
             tax professional; this isn't tax advice.</p>
             <p>Can't afford it right now? Reply to this email. We'd rather you have it.</p>
@@ -2643,7 +2643,7 @@ def _build_user_reminders(db, profile, local_now: datetime) -> list[tuple[str, d
             d = items[0]
             title = f"{d.title or 'Exam'} is a week away" if len(items) == 1 else f"{_plural(len(items), 'exam')} next week"
             body = (
-                f"{(d.course.code or d.course.name) if d.course else ''} · {parse_ymd_label(d.date)}. Want a study plan? Ask ClassMate."
+                f"{(d.course.code or d.course.name) if d.course else ''} · {parse_ymd_label(d.date)}. Want a study plan? Ask classmate."
                 if len(items) == 1 else ", ".join(_deadline_label(x) for x in items[:3])
             ).lstrip(" ·")
             out.append(("exam_week", {"title": title, "body": body, "data": {"screen": "chat"}},
@@ -2795,7 +2795,7 @@ def _setup_nudges(db, profile, local_now: datetime, already: set[str]) -> list:
             ledger_id = f"{uid}:setup:connect_lms:{n}"
             if age >= min_age and ledger_id not in already:
                 return [("setup", {
-                    "title": "Let ClassMate watch your due dates",
+                    "title": "Let classmate watch your due dates",
                     "body": "Connect your school's LMS once. When a professor moves a deadline, your calendar updates on its own.",
                     "data": {"screen": "connect"},
                 }, [f"{uid}:setup:connect_lms:{k}" for k in range(1, n + 1)])]
@@ -3580,7 +3580,7 @@ def validate_deadlines(deadlines: list) -> list:
 async def startup_event():
     """Initialize app: validate env vars, test DB, pre-fetch JWKS, log configuration."""
     logger.info("=" * 50)
-    logger.info("[Startup] ClassMate Backend API starting...")
+    logger.info("[Startup] classmate Backend API starting...")
     logger.info("=" * 50)
 
     # Validate required environment variables
@@ -3632,7 +3632,7 @@ async def startup_event():
     logger.info("[Startup] Push reminder loop started")
 
     logger.info("=" * 50)
-    logger.info("[Startup] ClassMate Backend API ready!")
+    logger.info("[Startup] classmate Backend API ready!")
     logger.info("=" * 50)
 
 
@@ -3747,7 +3747,7 @@ def auth_forgot_password(request: Request, payload: AuthForgotPasswordRequest, d
             resend.Emails.send({
                 "from": EMAIL_FROM,
                 "to": [user.email],
-                "subject": "Reset your ClassMate password",
+                "subject": "Reset your classmate password",
                 "html": f"""
                 <p>Hi there,</p>
                 <p>Click the link below to reset your password. This link expires in 1 hour.</p>
@@ -3844,7 +3844,7 @@ def auth_delete_account(
 def root():
     """Root endpoint - service status."""
     return {
-        "service": "ClassMate Backend API",
+        "service": "classmate Backend API",
         "status": "running",
         "version": "1.0.0"
     }
@@ -4698,7 +4698,7 @@ def create_checkout_session(
                         "metadata": {"user_id": current_user.id, "plan": payload.plan},
                     },
                     # Plain-language renewal terms right above the Pay button (auto-renewal laws)
-                    custom_text={"submit": {"message": PLAN_TERMS.get(payload.plan, "Renews automatically. Cancel anytime in ClassMate Settings.")}},
+                    custom_text={"submit": {"message": PLAN_TERMS.get(payload.plan, "Renews automatically. Cancel anytime in classmate Settings.")}},
                     success_url=f"{frontend_url}/settings?checkout=success",
                     cancel_url=f"{frontend_url}/settings?checkout=canceled",
                 )
@@ -6694,7 +6694,7 @@ def submit_feedback(request: Request, payload: FeedbackRequest, current_user: Us
                 resend.Emails.send({
                     "from": EMAIL_FROM,
                     "to": [FEEDBACK_EMAIL],
-                    "subject": f"[ClassMate Feedback] {type_label} from {current_user.email}",
+                    "subject": f"[classmate Feedback] {type_label} from {current_user.email}",
                     "html": (
                         f"<h2>{type_label}</h2>"
                         f"<p><strong>From:</strong> {current_user.email}</p>"
@@ -6753,7 +6753,7 @@ def _extract_course_codes(text: str) -> list[str]:
 
 
 def _match_course(lms_text: str, lms_code: str, user_courses) -> str | None:
-    """Try to match LMS course name/code against the user's ClassMate courses.
+    """Try to match LMS course name/code against the user's classmate courses.
     Uses normalized text comparison and course code extraction for robust matching.
     Returns the matched course_id or None."""
 
@@ -6814,7 +6814,7 @@ def sync_canvas(connection, user_id: str, db):
     first_sync = connection.last_synced is None  # everything is "new" on the first sync: no alerts
     changes: list = []
 
-    # Load user's ClassMate courses for auto-matching
+    # Load user's classmate courses for auto-matching
     user_courses = db.query(Course).filter(Course.user_id == user_id).all()
 
     try:
@@ -7077,7 +7077,7 @@ def _ical_course_identity(location: str) -> tuple[str, str] | None:
 
 
 def _ensure_ical_courses(events, user_id: str, db):
-    """Map every iCal event UID to a ClassMate course, the LMS being the source of truth for which
+    """Map every iCal event UID to a classmate course, the LMS being the source of truth for which
     classes a student takes: each class found in the feed (by LOCATION code) is matched to the
     student's existing course with the same code, or a course is created for it (distinct palette
     color). Events with no recognizable class are left out of the map.
@@ -7130,7 +7130,7 @@ def _ensure_ical_courses(events, user_id: str, db):
 
 
 def _apply_lms_source_of_truth(db, user_id: str, source: str, seen_ext_ids: set[str], lms_course_ids: set[str], today_iso: str):
-    """After an LMS sync, make ClassMate match the LMS:
+    """After an LMS sync, make classmate match the LMS:
     - an upcoming LMS deadline the professor removed is removed here too (past ones are kept as
       history; completed ones are left alone);
     - in courses the LMS covers, syllabus-extracted deadlines give way to the LMS's. Syllabus exams
@@ -7621,7 +7621,7 @@ def _email_survey_response(student_email: str | None, survey_key: str, answers: 
         resend.Emails.send({
             "from": EMAIL_FROM,
             "to": [FEEDBACK_EMAIL],
-            "subject": f"[ClassMate survey] New response from {student_email or 'a student'}",
+            "subject": f"[classmate survey] New response from {student_email or 'a student'}",
             "html": f"<p>A student answered the {html.escape(survey_key)} survey.</p><table>{rows}</table>"
                     f"<p style='color:#999;font-size:12px'>All responses: GET /admin/survey-responses</p>",
             **({"reply_to": student_email} if student_email else {}),
@@ -8510,7 +8510,7 @@ def _execute_chat_tool(tool_name: str, args: dict, user_id: str, db) -> dict:
     return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
 
-CHAT_SYSTEM_PROMPT = """You are ClassMate, a student's personal academic assistant. You can see their courses, deadlines (synced from their school's LMS and their syllabi), syllabi, notes and study materials below.
+CHAT_SYSTEM_PROMPT = """You are classmate, a student's personal academic assistant. You can see their courses, deadlines (synced from their school's LMS and their syllabi), syllabi, notes and study materials below.
 
 How to write:
 - Talk like a sharp, friendly classmate who has their whole semester in front of them. Plain, warm, direct.
@@ -9112,7 +9112,7 @@ Format: 1-2 sentence overview, then 6-10 bullet points covering key concepts, de
             # The base prompt says these requests are always auto-saved, so without this the model claims a set exists
             openai_messages[-1]["content"] += (
                 "\n\n[System note: The student asked for a quiz or flashcards from their notes, but they have no notes "
-                "saved in ClassMate yet, so NOTHING was created. Do not say anything was created, saved, or is in the "
+                "saved in classmate yet, so NOTHING was created. Do not say anything was created, saved, or is in the "
                 "Library. Tell them they can write notes in the Notes tab of any class (or paste the material here), and "
                 "offer to make a quiz or flashcards on a topic instead.]"
             )
@@ -9430,7 +9430,7 @@ async def generate_proactive_message(
         user_name = profile.full_name.strip() if profile and profile.full_name and profile.full_name.strip() else None
         name_line = f"Student's name: {user_name}" if user_name else "Student's name: (not set — do not use 'Your Name' or any placeholder)"
 
-        prompt = f"""You are ClassMate. Write a brief, specific opening message for a student starting their study session.
+        prompt = f"""You are classmate. Write a brief, specific opening message for a student starting their study session.
 
 Student situation:
 {name_line}

@@ -34,7 +34,7 @@ const FREE_LINE = 'Also in Pro: unlimited flashcards, quizzes & summaries. Free 
 // Shown only when the store can't return products (Expo Go / before App Store Connect is set up).
 const FALLBACK = { semester: '$19.99', monthly: '$4.99', trialDays: 14 };
 
-export type PaywallReason = 'onboarding' | 'limit' | 'upgrade' | 'home_banner';
+export type PaywallReason = 'onboarding' | 'limit' | 'upgrade' | 'home_banner' | 'exam_card';
 
 type PaywallCtx = { openPaywall: (reason: PaywallReason, message?: string) => Promise<boolean> };
 const Ctx = createContext<PaywallCtx>({ openPaywall: async () => false });
@@ -43,8 +43,9 @@ export const usePaywall = () => useContext(Ctx);
 const HEADLINES: Record<PaywallReason, string> = {
   onboarding: 'Never get caught off guard',
   limit: 'Keep the momentum going',
-  upgrade: 'ClassMate Pro',
-  home_banner: 'ClassMate Pro',
+  upgrade: 'classmate Pro',
+  home_banner: 'classmate Pro',
+  exam_card: 'Walk into every exam ready',
 };
 
 function trialLabel(pkg: PurchasesPackage | undefined, eligible: boolean) {
@@ -172,7 +173,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
         await waitForPro();
         await refreshMe();
         close(true);
-      } else Alert.alert('Nothing to restore', 'No ClassMate subscription was found for this Apple ID.');
+      } else Alert.alert('Nothing to restore', 'No classmate subscription was found for this Apple ID.');
     } catch (e) {
       Alert.alert('Restore failed', e instanceof Error ? e.message : 'Please try again.');
     } finally {

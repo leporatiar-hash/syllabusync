@@ -158,7 +158,7 @@ export default function Settings() {
     try {
       const found = await restorePurchases();
       if (found) await waitForPro();
-      Alert.alert(found ? 'Purchases restored' : 'Nothing to restore', found ? 'ClassMate Pro is active.' : 'No App Store subscription was found for this Apple ID.');
+      Alert.alert(found ? 'Purchases restored' : 'Nothing to restore', found ? 'classmate Pro is active.' : 'No App Store subscription was found for this Apple ID.');
     } catch (e) {
       Alert.alert('Restore failed', e instanceof Error ? e.message : 'Please try again.');
     } finally {
@@ -265,7 +265,7 @@ export default function Settings() {
           <View>
             <SectionHeader>Plan</SectionHeader>
             <Group footer={planDetail || undefined}>
-              <Row first label={isPro ? (s?.is_trial ? 'ClassMate Pro (trial)' : 'ClassMate Pro') : 'Free plan'} right={<Star size={18} color={isPro ? '#F59E0B' : C.slate300} fill={isPro ? '#F59E0B' : 'transparent'} />} />
+              <Row first label={isPro ? (s?.is_trial ? 'classmate Pro (trial)' : 'classmate Pro') : 'Free plan'} right={<Star size={18} color={isPro ? '#F59E0B' : C.slate300} fill={isPro ? '#F59E0B' : 'transparent'} />} />
               {!isPro && (purchasesEnabled || __DEV__) ? (
                 <Row label={busy === 'upgrade' ? 'Opening…' : 'Upgrade to Pro'} detail="Alerts when a date moves, earlier exam reminders" onPress={upgrade} />
               ) : null}
@@ -287,7 +287,8 @@ export default function Settings() {
           <View>
             <SectionHeader>About</SectionHeader>
             <Group>
-              <Row first label="Contact support" detail={SUPPORT_EMAIL} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)} />
+              <Row first label="How classmate works" onPress={() => router.push('/how-it-works')} />
+              <Row label="Contact support" detail={SUPPORT_EMAIL} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)} />
               <Row label="Privacy Policy" onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/privacy`)} />
               <Row label="Terms of Service" onPress={() => WebBrowser.openBrowserAsync(`${WEB_URL}/terms`)} />
               <Row label="Version" value={APP_VERSION} />

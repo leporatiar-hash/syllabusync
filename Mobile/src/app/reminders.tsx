@@ -33,7 +33,7 @@ export default function Reminders() {
       <View style={{ alignItems: 'center', gap: Spacing.three, marginTop: Spacing.five }}>
         <IconSquare icon={Bell} bg={C.brand} fg="#fff" size={72} radius={20} />
         <T size={26} weight="semibold" color={C.slate900} style={{ textAlign: 'center', lineHeight: 32 }}>Never miss a deadline</T>
-        <T size={15} color={C.slate500} style={{ textAlign: 'center' }}>ClassMate reminds you in the evening, before things are due.</T>
+        <T size={15} color={C.slate500} style={{ textAlign: 'center' }}>classmate reminds you in the evening, before things are due.</T>
       </View>
       <Card radius={24} padding={20} style={{ gap: Spacing.four }}>
         {ITEMS.map((it) => (

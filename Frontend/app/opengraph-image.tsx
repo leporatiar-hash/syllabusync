@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
 
-export const alt = "ClassMate — The AI that knows your entire semester.";
+export const alt = "classmate — The AI that knows your entire semester.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -41,7 +41,7 @@ export default async function Image() {
             marginTop: 28,
           }}
         >
-          ClassMate
+          classmate
         </div>
       </div>
     ),

@@ -596,7 +596,7 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
           </button>
           <div className="flex items-center gap-2">
             <Mark size={22} radius={6} fontSize={12} />
-            <span className="text-sm font-semibold text-slate-900">ClassMate</span>
+            <span className="text-sm font-semibold text-slate-900">classmate</span>
           </div>
           <div className="flex items-center gap-1">
             {onViewLibrary && (
@@ -879,10 +879,10 @@ export default function ChatTab({ onViewLibrary, triggerProactive = false, initi
                   onRemoveAttachment={() => setAttachedFile(null)}
                   onAttachClick={() => fileInputRef.current?.click()}
                   textareaRef={textareaRef}
-                  placeholder="Reply to ClassMate..."
+                  placeholder="Reply to classmate..."
                 />
                 <p className="mt-2 text-center text-[11px] text-slate-400">
-                  ClassMate can make mistakes — check important dates.
+                  classmate can make mistakes — check important dates.
                 </p>
               </div>
             )}

@@ -21,7 +21,7 @@ export default function ValuePropPrompt({ onSubmit, onSkip }: Props) {
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="text-sm font-semibold text-slate-900">Quick question</h3>
       <p className="mt-1 text-sm text-slate-600">
-        What&apos;s the one thing you&apos;d hate to lose about ClassMate?
+        What&apos;s the one thing you&apos;d hate to lose about classmate?
       </p>
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input

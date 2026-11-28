@@ -58,7 +58,7 @@ function ChatHeader() {
         CM
       </div>
       <div>
-        <p className="text-sm font-semibold text-slate-900">ClassMate</p>
+        <p className="text-sm font-semibold text-slate-900">classmate</p>
         <p className="text-[11px] text-slate-400 flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
           Online
@@ -93,7 +93,7 @@ function AiBubble({ answer, animate }: { answer: ScriptedAnswer; animate: boolea
 
 const INTRO_ID = 'intro'
 
-/** iOS-style push banner that opens the demo: the thing ClassMate Pro actually sends. */
+/** iOS-style push banner that opens the demo: the thing classmate Pro actually sends. */
 function AlertBanner({ visible }: { visible: boolean }) {
   return (
     <div
@@ -111,7 +111,7 @@ function AlertBanner({ visible }: { visible: boolean }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">ClassMate</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">classmate</p>
             <p className="text-[11px] text-slate-400">now</p>
           </div>
           <p className="truncate text-xs font-semibold text-slate-900">{heroAlert.title}</p>
@@ -227,7 +227,7 @@ export default function ChatWidget({ variant = 'interactive' }: { variant?: 'int
         ref={scrollRef}
         role="log"
         aria-live="polite"
-        aria-label="ClassMate demo conversation"
+        aria-label="classmate demo conversation"
         className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-smooth bg-[#F9FAFB] p-4"
       >
         {messages.map((m) =>

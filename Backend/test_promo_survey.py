@@ -147,7 +147,7 @@ def test_checkout_terms_529_description_and_confirmation_email():
     try:
         r = client.post("/create-checkout-session", json={"plan": "semester"}, headers=h)
         assert r.status_code == 200, r.text
-        assert captured["subscription_data"]["description"] == "Educational software subscription: ClassMate Pro, used by Alex Smith, College of Charleston", captured
+        assert captured["subscription_data"]["description"] == "Educational software subscription: classmate Pro, used by Alex Smith, College of Charleston", captured
         assert "every 6 months" in captured["custom_text"]["submit"]["message"] and "refund" in captured["custom_text"]["submit"]["message"]
         # Confirmation email
         main.RESEND_API_KEY = "re_test"
@@ -160,7 +160,7 @@ def test_checkout_terms_529_description_and_confirmation_email():
             db.close()
         html = sent[0]["html"]
         # Sent from the verified domain (the resend.dev test sender never reached students) and replies reach support
-        assert sent[0]["from"] == "ClassMate <noreply@tryclassmate.com>" and sent[0]["reply_to"] == main.SUPPORT_EMAIL, sent[0]
+        assert sent[0]["from"] == "classmate <noreply@tryclassmate.com>" and sent[0]["reply_to"] == main.SUPPORT_EMAIL, sent[0]
         assert "$19.99 every 6 months" in html and "Manage Subscription" in html and "14 days" in html and "529" in html, html
     finally:
         main.stripe_lib.checkout.Session.create, main.stripe_lib.Customer.create, main.RESEND_API_KEY, main.resend.Emails.send = orig

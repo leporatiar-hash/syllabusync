@@ -48,7 +48,7 @@ export default function SyllabusStep() {
       title={uploaded.length ? (allLms ? 'Course info saved' : `${total} deadline${total === 1 ? '' : 's'} found`) : synced ? 'Now add a syllabus' : 'Drop in a syllabus'}
       subtitle={
         uploaded.length
-          ? allLms ? `Ask ClassMate about office hours, grading or how to reach your professor. Due dates stay synced from ${lmsName}.` : undefined
+          ? allLms ? `Ask classmate about office hours, grading or how to reach your professor. Due dates stay synced from ${lmsName}.` : undefined
           : synced
             ? `Professor emails, office hours and grading policies. Due dates keep coming from ${lmsName}.`
             : 'We’ll pull out every exam and assignment.'

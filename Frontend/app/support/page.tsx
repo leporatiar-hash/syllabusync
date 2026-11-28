@@ -1,14 +1,14 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Support · ClassMate',
-  description: 'Help with ClassMate: connecting your LMS, reminders, subscriptions and your account.',
+  title: 'Support · classmate',
+  description: 'Help with classmate: connecting your LMS, reminders, subscriptions and your account.',
 }
 
 const FAQ: { q: string; a: React.ReactNode }[] = [
   {
     q: 'How do I connect my school’s LMS?',
-    a: 'In the app, pick your school and sign in to your school’s Canvas, Brightspace (D2L) or Blackboard site. ClassMate saves your read-only calendar link and pulls in your due dates. It never sees or stores your password. Your due dates then refresh on their own every few hours.',
+    a: 'In the app, pick your school and sign in to your school’s Canvas, Brightspace (D2L) or Blackboard site. classmate saves your read-only calendar link and pulls in your due dates. It never sees or stores your password. Your due dates then refresh on their own every few hours.',
   },
   {
     q: 'My due dates stopped updating.',
@@ -20,11 +20,11 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
   },
   {
     q: 'I’m not getting reminders.',
-    a: 'On iPhone, go to Settings › Notifications › ClassMate and turn on Allow Notifications. In the app, check Settings › Reminders.',
+    a: 'On iPhone, go to Settings › Notifications › classmate and turn on Allow Notifications. In the app, check Settings › Reminders.',
   },
   {
     q: 'How do I cancel or manage my subscription?',
-    a: 'If you subscribed in the iPhone app: iPhone Settings › your name › Subscriptions › ClassMate. Apple handles refunds for App Store purchases at reportaproblem.apple.com. If you subscribed on the website, manage it from Settings on tryclassmate.com.',
+    a: 'If you subscribed in the iPhone app: iPhone Settings › your name › Subscriptions › classmate. Apple handles refunds for App Store purchases at reportaproblem.apple.com. If you subscribed on the website, manage it from Settings on tryclassmate.com.',
   },
   {
     q: 'How do I delete my account?',

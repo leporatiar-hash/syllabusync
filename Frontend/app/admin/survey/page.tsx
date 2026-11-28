@@ -82,7 +82,7 @@ export default function SurveyResultsPage() {
     }
     fetchWithAuth(`${API_URL}/admin/survey-responses`)
       .then(async (r) => {
-        if (r.status === 403) throw new Error('This page is only for the ClassMate founder.')
+        if (r.status === 403) throw new Error('This page is only for the classmate founder.')
         if (!r.ok) throw new Error('Couldn’t load responses. Try again in a minute.')
         setData(await r.json())
       })
@@ -145,7 +145,7 @@ export default function SurveyResultsPage() {
         <>
           <div className="mb-6 grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <p className="text-sm text-slate-500">Would be very disappointed without ClassMate</p>
+              <p className="text-sm text-slate-500">Would be very disappointed without classmate</p>
               <p className="mt-1 text-4xl font-bold text-slate-900">{stats.pmf}%</p>
               <p className="mt-1 text-xs text-slate-400">
                 {stats.very} of {data.answered}. 40%+ is the usual sign people truly need it.
@@ -166,7 +166,7 @@ export default function SurveyResultsPage() {
                     <li key={i} className="flex justify-between gap-3">
                       <span className="text-slate-700">{r.answers.contact || r.email}</span>
                       {r.email && (
-                        <a className="text-[#5B4EE8] hover:underline" href={`mailto:${r.email}?subject=Quick%20ClassMate%20call%3F`}>
+                        <a className="text-[#5B4EE8] hover:underline" href={`mailto:${r.email}?subject=Quick%20classmate%20call%3F`}>
                           Email
                         </a>
                       )}

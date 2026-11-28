@@ -24,6 +24,9 @@ type LmsConnection = { id: string; provider: string; status?: 'ok' | 'broken' };
 type Dated = Deadline & { date: string };
 
 const SETUP_DISMISSED_KEY = 'cm-setup-dismissed';
+// After the Pro card is dismissed (or its paywall closed), it stays away for a week.
+const PRO_NUDGE_SNOOZE_KEY = 'cm-pro-nudge-snoozed-until';
+const WEEK_MS = 7 * 86_400_000;
 const DAYS_SHOWN = 14;
 
 /** Minutes after midnight for "11:59 PM"-style times (untimed items sort first). */
@@ -58,9 +61,11 @@ export default function Home() {
   const referral = useApi<{ referral_code: string; referral_count: number }>('/me/referral');
   const [setupDismissed, setSetupDismissed] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [nudgeSnoozed, setNudgeSnoozed] = useState(true);
 
   useEffect(() => {
     SecureStore.getItemAsync(SETUP_DISMISSED_KEY).then((v) => setSetupDismissed(v === '1'));
+    SecureStore.getItemAsync(PRO_NUDGE_SNOOZE_KEY).then((v) => setNudgeSnoozed(!!v && Number(v) > Date.now()));
   }, []);
 
   const tomorrow = addDaysYmd(today, 1);
@@ -100,6 +105,17 @@ export default function Home() {
   ];
   const doneCount = setupItems.filter((i) => i.done).length;
   const isPro = sub.data?.is_pro ?? me?.subscription.is_pro;
+  // The one Pro ask on Today: only when an exam is 2-10 days out, the moment an early heads-up matters.
+  const examSoon = useMemo(() => {
+    const exams = (entries.data ?? []).filter((d): d is Dated => !!d.date && !d.completed && notableType(d.type, d.title) === 'Exam');
+    return exams.map((d) => ({ d, days: daysUntil(d.date) })).filter(({ days }) => days >= 2 && days <= 10).sort((a, b) => a.days - b.days)[0] ?? null;
+  }, [entries.data]);
+  const showNudge = !isPro && purchasesEnabled && !!examSoon && !nudgeSnoozed && !!sub.data;
+  useEffect(() => { if (showNudge) track('pro_nudge_shown', { days: examSoon?.days ?? null }); }, [showNudge, examSoon?.days]);
+  const snoozeNudge = () => {
+    setNudgeSnoozed(true);
+    SecureStore.setItemAsync(PRO_NUDGE_SNOOZE_KEY, String(Date.now() + WEEK_MS)).catch(() => {});
+  };
   const referralLink = referral.data?.referral_code ? `https://tryclassmate.com/signup?ref=${referral.data.referral_code}` : '';
   const loading = entries.loading && !entries.data;
   const refreshAll = () => Promise.all([entries.refresh(), courses.refresh(), lms.refresh(), sub.refresh()]);
@@ -172,6 +188,35 @@ export default function Home() {
               subtitle="Canvas, Blackboard or Brightspace: every due date, kept up to date"
               onPress={() => connectLms('home_card')}
             />
+          </Group>
+        ) : null}
+
+        {showNudge && examSoon ? (
+          <Group>
+            <View style={{ padding: 16, gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+                <IconSquare icon={Sparkles} bg="#EEF2FF" fg={C.indigo} size={40} radius={10} />
+                <View style={{ flex: 1, gap: 3 }}>
+                  <T size={16} weight="semibold" color={C.slate900} style={{ lineHeight: 21 }}>
+                    {`${examSoon.d.course_code ? `${examSoon.d.course_code} ` : ''}${cleanTitle(examSoon.d.title)} is in ${examSoon.days} days`}
+                  </T>
+                  <T size={14} color={C.slate500} style={{ lineHeight: 19 }}>
+                    Pro gives you a heads-up a week before every exam, plus a plan every Sunday. New to Pro? Try it free for 2 weeks.
+                  </T>
+                </View>
+                <Pressable accessibilityLabel="Not now" hitSlop={10} onPress={() => { track('pro_nudge_dismissed'); snoozeNudge(); }}>
+                  <X size={18} color={C.slate400} />
+                </Pressable>
+              </View>
+              <GradientButton
+                title="See Pro"
+                onPress={async () => {
+                  const bought = await openPaywall('exam_card', `Your ${cleanTitle(examSoon.d.title)} is in ${examSoon.days} days. Pro gives you a heads-up a week before every exam.`);
+                  if (bought) sub.reload();
+                  else snoozeNudge();
+                }}
+              />
+            </View>
           </Group>
         ) : null}
 
@@ -261,18 +306,10 @@ export default function Home() {
           </View>
         ) : null}
 
-        {(!isPro && purchasesEnabled) || referralLink ? (
+        {referralLink ? (
           <Group>
-            {!isPro && purchasesEnabled ? (
-              <Row
-                icon={<IconSquare icon={Sparkles} bg="#EEF2FF" fg={C.indigo} size={32} radius={8} />}
-                title="ClassMate Pro"
-                subtitle="Alerts when a date moves, plus earlier exam reminders"
-                onPress={async () => { if (await openPaywall('home_banner')) sub.reload(); }}
-              />
-            ) : null}
             {referralLink ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: !isPro && purchasesEnabled ? 1 : 0, borderTopColor: C.slate100 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 }}>
                 <IconSquare icon={Share2} bg={C.slate100} fg={C.slate500} size={32} radius={8} />
                 <View style={{ flex: 1 }}>
                   <T size={15} weight="medium" color={C.slate900}>Share with friends</T>
@@ -286,7 +323,7 @@ export default function Home() {
                   {copied ? <Check size={15} color={C.green} /> : <Copy size={15} color={C.slate600} />}
                 </Pressable>
                 <Pressable
-                  onPress={() => Share.share({ message: `I use ClassMate to keep track of every deadline. Try it: ${referralLink}` })}
+                  onPress={() => Share.share({ message: `I use classmate to keep track of every deadline. Try it: ${referralLink}` })}
                   style={({ pressed }) => ({ borderRadius: 999, backgroundColor: pressed ? C.slate200 : C.slate100, paddingHorizontal: 14, paddingVertical: 8 })}>
                   <T size={14} weight="semibold" color={C.brandSolid}>Share</T>
                 </Pressable>

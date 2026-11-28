@@ -66,7 +66,7 @@ export default function ConnectStep() {
     if (!quiet) setError('That doesn’t look like a calendar link. It usually ends in .ics.');
   };
 
-  // OAKS/Canvas/Blackboard: sign in inside ClassMate and the feed link is picked up automatically.
+  // OAKS/Canvas/Blackboard: sign in inside classmate and the feed link is picked up automatically.
   // Others: open the LMS; when they close it with the link copied, connect from the clipboard.
   const openLms = async () => {
     if (auto) {
@@ -125,7 +125,7 @@ export default function ConnectStep() {
   return (
     <QuizScreen
       title={`Connect ${guide.name}`}
-      subtitle={auto ? `Sign in and ClassMate pulls in every assignment. Read-only.` : `Copy your calendar link from ${guide.name}, come back, done.`}
+      subtitle={auto ? `Sign in and classmate pulls in every assignment. Read-only.` : `Copy your calendar link from ${guide.name}, come back, done.`}
       onSkip={() => {
         if (inApp) return router.back();
         track('onboarding_lms_skip_tapped', { lms: answers.lms ?? null });

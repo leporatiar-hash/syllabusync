@@ -23,7 +23,7 @@ export default function Hero() {
               Never get caught off guard by a due date.
             </h1>
             <p className="text-lg text-slate-600 mb-8 leading-relaxed max-w-lg">
-              ClassMate pulls every deadline from your LMS and your syllabi into one calendar, reminds you
+              classmate pulls every deadline from your LMS and your syllabi into one calendar, reminds you
               before things are due, and tells you when a professor moves a date.
             </p>
 

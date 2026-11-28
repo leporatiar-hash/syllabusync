@@ -7,18 +7,18 @@ import SiteChrome from "../components/SiteChrome";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ClassMate",
+  title: "classmate",
   description: "Parse syllabi, track deadlines, and study smarter.",
   metadataBase: new URL("https://tryclassmate.com"),
   openGraph: {
-    title: "ClassMate",
+    title: "classmate",
     description: "Parse syllabi, track deadlines, and study smarter.",
-    siteName: "ClassMate",
+    siteName: "classmate",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "ClassMate",
+    title: "classmate",
     description: "Parse syllabi, track deadlines, and study smarter.",
   },
   icons: {

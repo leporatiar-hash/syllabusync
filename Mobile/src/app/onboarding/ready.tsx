@@ -188,7 +188,7 @@ export default function ReadyStep() {
         </View>
       </ScrollView>
       <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: insets.bottom + 12 }}>
-        <QuizButton title={empty ? 'Go to ClassMate' : 'Let’s go'} loading={busy} onPress={finish} />
+        <QuizButton title={empty ? 'Go to classmate' : 'Let’s go'} loading={busy} onPress={finish} />
       </View>
     </View>
   );

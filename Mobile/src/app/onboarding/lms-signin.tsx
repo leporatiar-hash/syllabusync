@@ -36,7 +36,7 @@ type Phase = 'signin' | 'looking' | 'connecting' | 'done' | 'manual' | 'error';
 
 const close = () => (router.canGoBack() ? router.back() : router.replace('/onboarding/connect'));
 
-/** The LMS loads inside ClassMate. Once the student is signed in we read their own calendar feed
+/** The LMS loads inside classmate. Once the student is signed in we read their own calendar feed
  *  link from the page and connect it; they never copy anything. */
 export default function LmsSignIn() {
   const insets = useSafeAreaInsets();
@@ -180,7 +180,7 @@ export default function LmsSignIn() {
   const banner =
     phase === 'signin'
       ? {
-          text: `Sign in to ${lms.name}. ClassMate takes it from there.`,
+          text: `Sign in to ${lms.name}. classmate takes it from there.`,
           busy: false,
         }
       : phase === 'manual'
@@ -357,7 +357,7 @@ export default function LmsSignIn() {
                 >
                   <Lock size={12} color={C.slate400} />
                   <T size={13} color={C.slate400}>
-                    Read-only. ClassMate never changes anything in {lms.name}.
+                    Read-only. classmate never changes anything in {lms.name}.
                   </T>
                 </Animated.View>
                 <View style={{ marginTop: 8 }}>

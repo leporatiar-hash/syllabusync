@@ -36,7 +36,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight shrink-0">
             <img src="/brand/logo.svg" alt="" className="h-8 w-8 shrink-0" />
-            <span className="text-[#7BB7FF]">ClassMate</span>
+            <span className="text-[#7BB7FF]">classmate</span>
           </Link>
           <Nav />
         </div>
@@ -46,7 +46,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       {!isChat && <TalkToClassMateButton />}
       {!isChat && <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>&copy; {new Date().getFullYear()} ClassMate</span>
+          <span>&copy; {new Date().getFullYear()} classmate</span>
           <div className="flex items-center gap-4">
             <Link href="/privacy" className="hover:text-slate-600 transition-colors">
               Privacy Policy

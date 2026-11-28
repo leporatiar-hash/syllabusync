@@ -22,7 +22,7 @@ export default function TermsPage() {
             <section>
               <h2 className="text-lg font-semibold text-slate-900 mb-3">Agreement to Our Legal Terms</h2>
               <p>
-                We are Alexander Leporati, doing business as ClassMate (&quot;Company,&quot; &quot;we,&quot; &quot;us,&quot; &quot;our&quot;).
+                We are Alexander Leporati, doing business as classmate (&quot;Company,&quot; &quot;we,&quot; &quot;us,&quot; &quot;our&quot;).
               </p>
               <p className="mt-3">
                 We operate the website{' '}
@@ -38,7 +38,7 @@ export default function TermsPage() {
                 </a>.
               </p>
               <p className="mt-3">
-                These Legal Terms constitute a legally binding agreement made between you, whether personally or on behalf of an entity (&quot;you&quot;), and Alexander Leporati (DBA ClassMate), concerning your access to and use of the Services. You agree that by accessing the Services, you have read, understood, and agreed to be bound by all of these Legal Terms. IF YOU DO NOT AGREE WITH ALL OF THESE LEGAL TERMS, THEN YOU ARE EXPRESSLY PROHIBITED FROM USING THE SERVICES AND YOU MUST DISCONTINUE USE IMMEDIATELY.
+                These Legal Terms constitute a legally binding agreement made between you, whether personally or on behalf of an entity (&quot;you&quot;), and Alexander Leporati (DBA classmate), concerning your access to and use of the Services. You agree that by accessing the Services, you have read, understood, and agreed to be bound by all of these Legal Terms. IF YOU DO NOT AGREE WITH ALL OF THESE LEGAL TERMS, THEN YOU ARE EXPRESSLY PROHIBITED FROM USING THE SERVICES AND YOU MUST DISCONTINUE USE IMMEDIATELY.
               </p>
               <p className="mt-3">
                 We reserve the right, in our sole discretion, to make changes or modifications to these Legal Terms at any time and for any reason. We will alert you about any changes by updating the &quot;Last updated&quot; date of these Legal Terms. You will be subject to the changes in any revised Legal Terms by your continued use of the Services after the date such revised Legal Terms are posted.
@@ -237,7 +237,7 @@ export default function TermsPage() {
               <h2 className="text-lg font-semibold text-slate-900 mb-3">19. Contact Us</h2>
               <p>To resolve a complaint regarding the Services or to receive further information, please contact us:</p>
               <div className="mt-3 rounded-2xl bg-slate-50 p-4">
-                <p className="font-medium text-slate-800">Alexander Leporati (DBA ClassMate)</p>
+                <p className="font-medium text-slate-800">Alexander Leporati (DBA classmate)</p>
                 <p className="mt-1">
                   Email:{' '}
                   <a href="mailto:leporatialex@gmail.com" className="text-[#5B8DEF] hover:underline">

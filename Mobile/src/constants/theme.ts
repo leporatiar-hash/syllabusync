@@ -9,7 +9,7 @@ export const C = {
   brandDark: '#3b6ed6',
   brandSolid: '#3F74E0', // solid buttons/links: brand blue dark enough for white text (4.5:1)
   groupedBg: '#F2F4F8', // iOS grouped-list background behind white cards
-  brandText: '#7BB7FF', // "ClassMate" wordmark in the header
+  brandText: '#7BB7FF', // "classmate" wordmark in the header
   lavender: '#A78BFA',
   indigo: '#5B4EE8', // logo + chat "New Chat" button
   rose: '#FB7185',

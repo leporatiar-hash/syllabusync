@@ -155,7 +155,7 @@ function SignupContent() {
 
           <div>
             <label htmlFor="referralSource" className="block text-sm font-medium text-slate-700 mb-1">
-              How did you hear about ClassMate? <span className="font-normal text-slate-400">(optional)</span>
+              How did you hear about classmate? <span className="font-normal text-slate-400">(optional)</span>
             </label>
             <select
               id="referralSource"

@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Privacy Policy · ClassMate',
-  description: 'What ClassMate collects, why, who processes it, and how to delete it.',
+  title: 'Privacy Policy · classmate',
+  description: 'What classmate collects, why, who processes it, and how to delete it.',
 }
 
 const CONTACT = 'hello@tryclassmate.com'
@@ -53,10 +53,10 @@ export default function PrivacyPage() {
           <div className="mt-8 space-y-10 text-sm text-slate-600 leading-relaxed">
             <section>
               <p>
-                This policy explains what ClassMate collects, why, who helps us process it, and how you can see or delete it. It
-                covers the ClassMate iPhone app and the website at{' '}
+                This policy explains what classmate collects, why, who helps us process it, and how you can see or delete it. It
+                covers the classmate iPhone app and the website at{' '}
                 <a href="https://www.tryclassmate.com" className="text-[#5B8DEF] hover:underline">tryclassmate.com</a> (together,
-                &quot;ClassMate&quot;). ClassMate is run by Alexander Leporati (&quot;we,&quot; &quot;us&quot;). Questions:{' '}
+                &quot;classmate&quot;). classmate is run by Alexander Leporati (&quot;we,&quot; &quot;us&quot;). Questions:{' '}
                 <Mail />.
               </p>
               <div className="mt-4 rounded-2xl bg-slate-50 p-4">
@@ -77,11 +77,11 @@ export default function PrivacyPage() {
               </p>
               <p>
                 <strong className="text-slate-800">What you add.</strong> Courses, deadlines, to-dos, notes, syllabi and other files
-                you upload, flashcards, quizzes and summaries you create, and your chat messages with ClassMate.
+                you upload, flashcards, quizzes and summaries you create, and your chat messages with classmate.
               </p>
               <p>
                 <strong className="text-slate-800">Your school&apos;s LMS, if you connect it.</strong> When you connect Canvas,
-                Brightspace (D2L) or Blackboard, you sign in on your school&apos;s own page. ClassMate does not see or store your
+                Brightspace (D2L) or Blackboard, you sign in on your school&apos;s own page. classmate does not see or store your
                 password. We save a read-only calendar link from your LMS (encrypted) and the course names and due dates in that
                 calendar. If you connected Canvas with an access token, we store that token encrypted. We don&apos;t receive your
                 grades.
@@ -108,10 +108,10 @@ export default function PrivacyPage() {
 
             <Section n={2} title="How we use it">
               <ul className="list-disc list-inside space-y-1.5">
-                <li>To run ClassMate: show your courses and deadlines, keep them in sync with your LMS, and send the reminders you turn on.</li>
+                <li>To run classmate: show your courses and deadlines, keep them in sync with your LMS, and send the reminders you turn on.</li>
                 <li>To power the AI features you use: reading a syllabus, making study tools, and answering questions about your classes.</li>
                 <li>To manage your subscription and send account emails such as password resets and receipts.</li>
-                <li>To fix bugs, keep ClassMate secure, and understand which features help so we can improve them.</li>
+                <li>To fix bugs, keep classmate secure, and understand which features help so we can improve them.</li>
                 <li>To answer you when you contact us.</li>
               </ul>
               <p>We don&apos;t use your information for advertising, and we don&apos;t sell it or share it for cross-context behavioral advertising.</p>
@@ -119,7 +119,7 @@ export default function PrivacyPage() {
 
             <Section n={3} title="Who processes it for us">
               <p>
-                We use these service providers to run ClassMate. They process information only to provide their service to us.
+                We use these service providers to run classmate. They process information only to provide their service to us.
               </p>
               <div className="overflow-hidden rounded-2xl border border-slate-100">
                 <table className="w-full text-left">
@@ -140,7 +140,7 @@ export default function PrivacyPage() {
               </p>
               <p>
                 We may also disclose information if required by law, to protect someone&apos;s safety, or as part of a sale or
-                merger of ClassMate (in which case this policy would continue to apply).
+                merger of classmate (in which case this policy would continue to apply).
               </p>
             </Section>
 
@@ -148,7 +148,7 @@ export default function PrivacyPage() {
               <p>
                 The website uses cookies and browser storage to keep you signed in and remember your settings, plus privacy-focused
                 product analytics (PostHog and Vercel Analytics). We don&apos;t use advertising cookies, don&apos;t show ads, and
-                don&apos;t allow third parties to track you on ClassMate for advertising. The iPhone app doesn&apos;t track you
+                don&apos;t allow third parties to track you on classmate for advertising. The iPhone app doesn&apos;t track you
                 across other companies&apos; apps or websites.
               </p>
             </Section>
@@ -188,7 +188,7 @@ export default function PrivacyPage() {
 
             <Section n={8} title="Age">
               <p>
-                ClassMate is for college students and other adults; our Terms require you to be an adult where you live. We
+                classmate is for college students and other adults; our Terms require you to be an adult where you live. We
                 don&apos;t knowingly collect information from children under 13. If you believe a child has given us information,
                 email <Mail /> and we&apos;ll delete it.
               </p>
@@ -196,7 +196,7 @@ export default function PrivacyPage() {
 
             <Section n={9} title="Where your data is processed">
               <p>
-                ClassMate is run from the United States, and your information is stored and processed in the United States by us
+                classmate is run from the United States, and your information is stored and processed in the United States by us
                 and our service providers.
               </p>
             </Section>
@@ -213,7 +213,7 @@ export default function PrivacyPage() {
                 Email <Mail />, or write to:
               </p>
               <div className="rounded-2xl bg-slate-50 p-4">
-                <p className="font-medium text-slate-800">Alexander Leporati (ClassMate)</p>
+                <p className="font-medium text-slate-800">Alexander Leporati (classmate)</p>
                 <p className="mt-1">Charleston, SC 29403</p>
                 <p>United States</p>
               </div>

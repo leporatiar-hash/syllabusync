@@ -53,7 +53,7 @@ export async function errorMessage(res: Response) {
   return `Request failed (${res.status})`;
 }
 
-/** Authenticated fetch against the ClassMate API. Retries once after refreshing an expired token. */
+/** Authenticated fetch against the classmate API. Retries once after refreshing an expired token. */
 export async function apiRaw(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
   const headers = new Headers(init.headers);
   const token = getAccessToken();

@@ -137,7 +137,7 @@ export function IconSquare({ icon: Icon, bg, fg, size = 40, radius = 12 }: { ico
   );
 }
 
-/** The ClassMate "C" mark (Frontend/public/brand/logo.svg). */
+/** The classmate "C" mark (Frontend/public/brand/logo.svg). */
 export function LogoMark({ size = 32 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 512 512">
@@ -180,7 +180,7 @@ export function Divider() {
   return <View style={{ height: 1, backgroundColor: C.slate100 }} />;
 }
 
-/** The ClassMate mark breathing in and out: our "working on it" state anywhere the app waits. */
+/** The classmate mark breathing in and out: our "working on it" state anywhere the app waits. */
 export function BrandLoader({ size = 44, label, sublabel }: { size?: number; label?: string; sublabel?: string }) {
   const t = useSharedValue(0);
   useEffect(() => {

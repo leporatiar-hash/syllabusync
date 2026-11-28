@@ -69,13 +69,13 @@ export default function FeedbackSurvey({ email, onSubmit, onDismiss }: Props) {
       <div className="flex items-start gap-3">
         <MessageSquareHeart className="mt-0.5 h-5 w-5 shrink-0 text-[#5B8DEF]" />
         <div>
-          <h3 className="text-base font-semibold text-slate-900">Help shape ClassMate (1 minute)</h3>
+          <h3 className="text-base font-semibold text-slate-900">Help shape classmate (1 minute)</h3>
           <p className="mt-0.5 text-sm text-slate-500">A student is building this. Honest answers help the most.</p>
         </div>
       </div>
 
       <fieldset className="mt-5">
-        <legend className="text-sm font-medium text-slate-800">How would you feel if you could no longer use ClassMate?</legend>
+        <legend className="text-sm font-medium text-slate-800">How would you feel if you could no longer use classmate?</legend>
         <div className="mt-2 flex flex-wrap gap-2">
           {DISAPPOINTED.map((o) => <Chip key={o.value} on={disappointed === o.value} label={o.label} onClick={() => setDisappointed(o.value)} />)}
         </div>
@@ -101,7 +101,7 @@ export default function FeedbackSurvey({ email, onSubmit, onDismiss }: Props) {
       </label>
 
       <fieldset className="mt-4">
-        <legend className="text-sm font-medium text-slate-800">How did you hear about ClassMate?</legend>
+        <legend className="text-sm font-medium text-slate-800">How did you hear about classmate?</legend>
         <div className="mt-2 flex flex-wrap gap-2">
           {HEARD.map((h) => <Chip key={h} on={heard === h} label={h} onClick={() => setHeard(h)} />)}
         </div>
@@ -110,7 +110,7 @@ export default function FeedbackSurvey({ email, onSubmit, onDismiss }: Props) {
       <fieldset className="mt-5 rounded-xl bg-[#F5F7FF] p-4">
         <legend className="sr-only">Quick call</legend>
         <p className="text-sm font-medium text-slate-800">Free Spring Semester Pass for a 15-minute call?</p>
-        <p className="mt-0.5 text-sm text-slate-500">Talk to the founder about how you study and what would make ClassMate worth it.</p>
+        <p className="mt-0.5 text-sm text-slate-500">Talk to the founder about how you study and what would make classmate worth it.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Chip on={call === 'yes'} label="Yes, I’m in" onClick={() => setCall('yes')} />
           <Chip on={call === 'no'} label="No thanks" onClick={() => setCall('no')} />

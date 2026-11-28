@@ -77,7 +77,7 @@ export default function UpgradePage() {
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 rounded-full bg-[#5B8DEF]/10 px-4 py-1.5 text-sm font-semibold text-[#5B8DEF] mb-4">
             <Sparkles size={16} />
-            ClassMate Pro
+            classmate Pro
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
             Never get caught off guard
@@ -203,7 +203,7 @@ export default function UpgradePage() {
               </div>
             ))}
           </div>
-          <p className="mt-4 text-xs text-slate-400">Reminders and alerts are push notifications in the ClassMate iPhone app.</p>
+          <p className="mt-4 text-xs text-slate-400">Reminders and alerts are push notifications in the classmate iPhone app.</p>
         </div>
 
       </div>

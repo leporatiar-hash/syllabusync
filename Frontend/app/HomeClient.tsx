@@ -295,7 +295,7 @@ export default function HomeClient() {
   const shareLink = () => {
     if (!referralLink) return
     if (navigator.share) {
-      navigator.share({ title: 'Join ClassMate', text: 'Check out ClassMate — it helps you stay organized with your courses!', url: referralLink })
+      navigator.share({ title: 'Join classmate', text: 'Check out classmate — it helps you stay organized with your courses!', url: referralLink })
     } else {
       copyLink()
     }
@@ -314,7 +314,7 @@ export default function HomeClient() {
       <main className="min-h-screen bg-gradient-to-br from-[#F5F7FA] to-[#E8EDFB]">
         <section className="mx-auto flex min-h-[70vh] max-w-6xl flex-col items-center justify-center px-4 py-16 text-center">
           <h1 className="text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
-            Welcome to ClassMate
+            Welcome to classmate
           </h1>
           <p className="mt-4 max-w-xl text-lg text-slate-600">
             A calm, organized workspace for students to parse syllabi, track deadlines, and build study momentum.
@@ -350,7 +350,7 @@ export default function HomeClient() {
         {promoUntil ? (
           <div className="mb-8 flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
             <span className="text-sm text-slate-600">
-              <span className="font-medium text-slate-800">ClassMate Pro is free for everyone through {promoEndLabel(promoUntil)}.</span>
+              <span className="font-medium text-slate-800">classmate Pro is free for everyone through {promoEndLabel(promoUntil)}.</span>
               {' '}Due-date change alerts, early reminders and unlimited study tools, no card needed.
             </span>
           </div>

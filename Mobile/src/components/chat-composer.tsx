@@ -15,7 +15,7 @@ export function ChatComposer({ value, onChange, onSubmit, sending, autoFocus }: 
       <TextInput
         value={value}
         onChangeText={onChange}
-        placeholder="Message ClassMate"
+        placeholder="Message classmate"
         placeholderTextColor={C.slate400}
         multiline
         autoFocus={autoFocus}

@@ -142,7 +142,7 @@ export default function ChatThread() {
           {error ? <T color={C.red} style={{ paddingHorizontal: 16, paddingBottom: 6 }}>{error}</T> : null}
           <View style={{ borderTopWidth: 1, borderTopColor: C.slate100, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 + tabBarSpace }}>
             <ChatComposer value={input} onChange={setInput} onSubmit={() => send(input)} sending={sending} />
-            <T size={11} color={C.slate400} style={{ textAlign: 'center', marginTop: 8 }}>ClassMate can make mistakes. Check important dates with your syllabus.</T>
+            <T size={11} color={C.slate400} style={{ textAlign: 'center', marginTop: 8 }}>classmate can make mistakes. Check important dates with your syllabus.</T>
           </View>
         </>
       )}

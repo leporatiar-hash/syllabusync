@@ -34,7 +34,7 @@ export default function Login() {
     <AuthShell
       title="Welcome back"
       subtitle="Log in to see what’s due."
-      footer={<AuthSwitch prompt="New to ClassMate?" action="Create an account" onPress={() => router.replace('/signup')} />}>
+      footer={<AuthSwitch prompt="New to classmate?" action="Create an account" onPress={() => router.replace('/signup')} />}>
       <WebInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="email" keyboardType="email-address" textContentType="emailAddress" placeholder="you@school.edu" returnKeyType="next" />
       <WebInput label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" textContentType="password" placeholder="Your password" onSubmitEditing={submit} returnKeyType="go" />
       <View style={{ alignItems: 'flex-end', marginTop: -6 }}>

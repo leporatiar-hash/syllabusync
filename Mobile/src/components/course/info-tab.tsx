@@ -67,7 +67,7 @@ export function InfoTab({ info, courseName }: { info: CourseInfo | null; courseN
       <Card radius={24} padding={24} style={{ alignItems: 'center' }}>
         <IconSquare icon={BookOpen} bg="#EEF2FF" fg={C.brand} size={48} radius={24} />
         <T size={16} weight="semibold" color={C.slate900} style={{ marginTop: 12 }}>No course info yet</T>
-        <T size={14} color={C.slate500} style={{ textAlign: 'center', marginTop: 4 }}>Upload the syllabus and ClassMate fills in the instructor, schedule, grading, and policies.</T>
+        <T size={14} color={C.slate500} style={{ textAlign: 'center', marginTop: 4 }}>Upload the syllabus and classmate fills in the instructor, schedule, grading, and policies.</T>
       </Card>
     );
   }

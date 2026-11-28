@@ -286,7 +286,7 @@ async def _current_domain(domain: str) -> str | None:
     """The .edu a school's old domain now redirects to (utd.edu -> utdallas.edu), if any. Our school
     list is years old and some schools have moved, so every LMS guess on the old domain misses."""
     try:
-        async with httpx.AsyncClient(follow_redirects=True, max_redirects=5, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
+        async with httpx.AsyncClient(follow_redirects=True, max_redirects=5, headers={"User-Agent": "classmate/1.0 (+https://tryclassmate.com)"}) as client:
             r = await client.get(f"https://{domain}/", timeout=PROBE_TIMEOUT)
         host = (r.url.host or "").lower()
     except Exception:
@@ -316,7 +316,7 @@ async def _detect_on(domain: str, name: str) -> list[dict]:
     # Canvas's directory lists schools under their full name, the part before " - " ("University of
     # Michigan - Ann Arbor"), or the abbreviation students use ("UCLA"), so ask all three.
     terms = list(dict.fromkeys(t for t in (name, name.split(" - ")[0], root) if t.strip()))
-    async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
+    async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "classmate/1.0 (+https://tryclassmate.com)"}) as client:
         bs_hosts = _brightspace_candidates(domain)
         bb_hosts = _blackboard_candidates(domain)
         results = await asyncio.gather(
@@ -382,7 +382,7 @@ async def identify(host: str) -> dict | None:
     """What LMS runs at a host a student typed in (Brightspace, Canvas or Blackboard), or None."""
     if not await asyncio.to_thread(_public_host, host):
         return None
-    async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "ClassMate/1.0 (+https://tryclassmate.com)"}) as client:
+    async with httpx.AsyncClient(follow_redirects=False, headers={"User-Agent": "classmate/1.0 (+https://tryclassmate.com)"}) as client:
         bs, cv, bb = await asyncio.gather(_is_brightspace(client, host), _is_canvas(client, host), _is_blackboard(client, host))
     if bs:
         return lms_option("brightspace", host, "manual")
@@ -450,7 +450,7 @@ def _icon_links(html: str, base: str) -> list[str]:
 # (Clemson's paw, the CofC Cougars). Images are served by Wikimedia Commons, rendered to PNG.
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
 _wikidata_cache: dict[str, dict] = {}
-_UA = {"User-Agent": "ClassMate/1.0 (https://tryclassmate.com; support@tryclassmate.com)"}
+_UA = {"User-Agent": "classmate/1.0 (https://tryclassmate.com; support@tryclassmate.com)"}
 
 
 def _commons_png(file_url: str, width: int) -> str:
@@ -507,7 +507,7 @@ async def site_icon_url(domain: str) -> str | None:
         return _logo_cache[domain]
     best: tuple[int, str | None] = (0, None)
     async with httpx.AsyncClient(follow_redirects=True, timeout=5.0,
-                                 headers={"User-Agent": "Mozilla/5.0 (compatible; ClassMate/1.0; +https://tryclassmate.com)"}) as client:
+                                 headers={"User-Agent": "Mozilla/5.0 (compatible; classmate/1.0; +https://tryclassmate.com)"}) as client:
         candidates: list[str] = []
         for base in (f"https://www.{domain}", f"https://{domain}"):
             try:

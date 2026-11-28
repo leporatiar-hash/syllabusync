@@ -43,7 +43,7 @@ export default function Signup() {
       <WebInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="email" keyboardType="email-address" textContentType="emailAddress" placeholder="you@school.edu" />
       <WebInput label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" textContentType="newPassword" placeholder="At least 6 characters" />
       <View style={{ gap: 6 }}>
-        <T size={14} weight="medium" color={C.slate700}>How did you hear about ClassMate? <T size={14} color={C.slate400}>(optional)</T></T>
+        <T size={14} weight="medium" color={C.slate700}>How did you hear about classmate? <T size={14} color={C.slate400}>(optional)</T></T>
         <Pressable
           onPress={() => ActionSheetIOS.showActionSheetWithOptions({ options: [...SOURCES, 'Cancel'], cancelButtonIndex: SOURCES.length }, (i) => i < SOURCES.length && setSource(SOURCES[i]))}
           style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: C.slate200, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: C.slate50 }}>

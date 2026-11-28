@@ -827,7 +827,7 @@ export default function CourseDetailPage() {
                   <p className="mt-2 text-sm text-slate-600">
                     {hasSyllabus
                       ? 'Upload a corrected file to re-extract deadlines, or remove the syllabus along with the deadlines on this course.'
-                      : 'Add a syllabus PDF or Word doc and ClassMate will pull out every exam, assignment and due date.'}
+                      : 'Add a syllabus PDF or Word doc and classmate will pull out every exam, assignment and due date.'}
                   </p>
                 </div>
                 {hasDeadlines && !syllabusFile && !syllabusLoading && (
