@@ -89,6 +89,9 @@ export default function TermsPage() {
                 We are the owner or licensee of all intellectual property rights in our Services, including all source code, databases, functionality, software, website designs, audio, video, text, photographs, and graphics (collectively, the &quot;Content&quot;), as well as the trademarks, service marks, and logos contained therein (the &quot;Marks&quot;).
               </p>
               <p className="mt-3">Our Content and Marks are protected by copyright and trademark laws and treaties around the world.</p>
+              <p className="mt-3">
+                <strong className="text-slate-800">No affiliation.</strong> classmate is an independent service. It is not affiliated with, endorsed by or sponsored by your school or by any learning management system provider. Canvas is a trademark of Instructure, Inc.; Brightspace and D2L are trademarks of D2L Corporation; Blackboard is a trademark of Anthology Inc.; ChatGPT is a trademark of OpenAI; Claude is a trademark of Anthropic. School names and logos belong to their schools and are shown only so you can find your school. All other trademarks belong to their owners.
+              </p>
               <p className="mt-3">Subject to your compliance with these Legal Terms, we grant you a non-exclusive, non-transferable, revocable license to access the Services solely for your personal, non-commercial use.</p>
               <p className="mt-3">Any breach of these Intellectual Property Rights will constitute a material breach of our Legal Terms and your right to use our Services will terminate immediately.</p>
             </section>

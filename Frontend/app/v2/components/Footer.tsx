@@ -22,6 +22,9 @@ export default function Footer() {
         </div>
         <div className="text-sm text-slate-400">© {new Date().getFullYear()} classmate. All rights reserved.</div>
       </div>
+      <p className="max-w-6xl mx-auto mt-6 text-xs text-slate-500 text-center md:text-left">
+        classmate is independent and not affiliated with your school, Instructure (Canvas), D2L (Brightspace) or Anthology (Blackboard).
+      </p>
     </footer>
   )
 }
