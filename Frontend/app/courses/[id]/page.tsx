@@ -151,6 +151,16 @@ export default function CourseDetailPage() {
   const [mainTab, setMainTab] = useState<'deadlines' | 'study' | 'info' | 'notes'>('deadlines')
   const [syllabusOpen, setSyllabusOpen] = useState(false) // the "replace or remove" panel, once a syllabus is already parsed
   const [liveNoteCount, setLiveNoteCount] = useState<number | null>(null) // kept fresh by the Notes tab
+  // Links from the Notebook page: ?tab=notes, plus &note=<id> to open one or &new=1 to start one.
+  const [notesLink, setNotesLink] = useState<{ noteId?: string; startNew?: boolean }>({})
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('tab') === 'notes') {
+      setMainTab('notes')
+      setNotesLink({ noteId: q.get('note') || undefined, startNew: q.get('new') === '1' })
+      window.history.replaceState(null, '', window.location.pathname) // a refresh shouldn't start another note
+    }
+  }, [])
   const [courseError, setCourseError] = useState(false)
   const [generateFlashcards, setGenerateFlashcards] = useState(true)
   const [generateQuiz, setGenerateQuiz] = useState(true)
@@ -1244,7 +1254,7 @@ export default function CourseDetailPage() {
           </div>
         ) : mainTab === 'notes' ? (
           /* Notes Tab — mounted only while open so leaving the tab flushes any pending autosave */
-          courseId ? <CourseNotes courseId={courseId} courseName={course?.code || course?.name} onStudyToolsCreated={loadCourse} onCountChange={setLiveNoteCount} /> : null
+          courseId ? <CourseNotes courseId={courseId} courseName={course?.code || course?.name} onStudyToolsCreated={loadCourse} onCountChange={setLiveNoteCount} initialNoteId={notesLink.noteId} startNew={notesLink.startNew} /> : null
         ) : (
           /* Course Info Tab */
           <div className="mt-6">

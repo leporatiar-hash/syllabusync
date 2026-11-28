@@ -90,8 +90,14 @@ export default function CourseNotes({
   courseName,
   onStudyToolsCreated,
   onCountChange,
+  initialNoteId,
+  startNew,
 }: {
   courseId: string
+  /** Open this note once the list has loaded (links from the Notebook page). */
+  initialNoteId?: string
+  /** Start a fresh note once the list has loaded ("Take notes for this class"). */
+  startNew?: boolean
   /** Shown under the title, and used to name study sets built from "all notes in this class". */
   courseName?: string
   /** Called after study tools are created from a note, so the page can refresh its Study Tools list. */
@@ -175,6 +181,15 @@ export default function CourseNotes({
   useEffect(() => {
     void loadList()
   }, [loadList])
+
+  // Arriving from the Notebook page: open the linked note, or start a new one, once.
+  const arrivedRef = useRef(false)
+  useEffect(() => {
+    if (listLoading || arrivedRef.current) return
+    arrivedRef.current = true
+    if (initialNoteId) void loadNote(initialNoteId)
+    else if (startNew) void createNote()
+  }, [listLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!listLoading && !listError) onCountChange?.(notes.length)

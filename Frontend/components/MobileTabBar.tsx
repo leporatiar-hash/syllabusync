@@ -2,14 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BookOpen, CalendarDays, Home, MessageCircle, type LucideIcon } from 'lucide-react'
+import { BookOpen, CalendarDays, Home, NotebookPen, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../lib/useAuth'
 
 const tabs: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/home', label: 'Home', icon: Home },
   { href: '/courses', label: 'Courses', icon: BookOpen },
   { href: '/calendar', label: 'Calendar', icon: CalendarDays },
-  { href: '/chat', label: 'Chat', icon: MessageCircle },
+  { href: '/notebook', label: 'Notebook', icon: NotebookPen },
 ]
 
 /**

@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation'
 import Nav from './Nav'
 import MobileTabBar from './MobileTabBar'
 import FeedbackButton from './FeedbackButton'
-import TalkToClassMateButton from './TalkToClassMateButton'
 import AuthDebug from './AuthDebug'
 
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
@@ -43,7 +42,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       </header>
       {children}
       {!isChat && <FeedbackButton />}
-      {!isChat && <TalkToClassMateButton />}
       {!isChat && <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-slate-400">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>&copy; {new Date().getFullYear()} classmate · Not affiliated with your school or LMS provider</span>

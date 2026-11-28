@@ -1,7 +1,6 @@
 'use client'
 
-import Link from 'next/link'
-import { Check, GraduationCap, MessageCircle, NotebookPen } from 'lucide-react'
+import { Check, GraduationCap, NotebookPen } from 'lucide-react'
 
 /**
  * Shown on the Deadlines tab once every deadline is on the student's calendar. Getting the deadlines in is only
@@ -60,15 +59,6 @@ export default function NextSteps({
             </span>
           </button>
         )}
-        <Link href="/chat" className={tile}>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#DCFCE7] text-[#22A55A]">
-            <MessageCircle size={18} />
-          </span>
-          <span>
-            <span className="block text-sm font-semibold text-slate-900">Ask classmate</span>
-            <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">Grading, due dates, or a study plan. Just ask.</span>
-          </span>
-        </Link>
       </div>
     </section>
   )

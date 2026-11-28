@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import posthog from 'posthog-js'
-import { ChevronRight, Layers, MessageCircle, Sparkles } from 'lucide-react'
+import { ChevronRight, Layers, NotebookPen, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 interface Card {
-  key: 'study_guide' | 'flashcards' | 'chat'
+  key: 'study_guide' | 'flashcards' | 'notebook'
   title: string
   description: string
   href: string
@@ -36,11 +36,11 @@ export default function FeatureDiscoveryPanel({ latestCourseId, onHide }: Props)
       icon: <Layers size={16} />,
     },
     {
-      key: 'chat',
-      title: 'Chat',
-      description: 'Ask what’s due and what to start first',
-      href: `/chat?prompt=${encodeURIComponent("What's due this week and what should I start first?")}`,
-      icon: <MessageCircle size={16} />,
+      key: 'notebook',
+      title: 'Notebook',
+      description: 'Keep every class’s notes in one place',
+      href: '/notebook',
+      icon: <NotebookPen size={16} />,
     },
   ]
 

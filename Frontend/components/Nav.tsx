@@ -10,7 +10,7 @@ import { API_URL, useAuthFetch } from '../hooks/useAuthFetch'
 const baseNavItems = [
   { href: '/courses', label: 'Courses' },
   { href: '/calendar', label: 'Calendar' },
-  { href: '/chat', label: 'Chat' },
+  { href: '/notebook', label: 'Notebook' },
 ]
 
 export default function Nav() {
