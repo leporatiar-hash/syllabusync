@@ -33,8 +33,8 @@ export default function TermsPage() {
               </p>
               <p className="mt-3">
                 You can contact us by email at{' '}
-                <a href="mailto:leporatialex@gmail.com" className="text-[#5B8DEF] hover:underline">
-                  leporatialex@gmail.com
+                <a href="mailto:hello@tryclassmate.com" className="text-[#5B8DEF] hover:underline">
+                  hello@tryclassmate.com
                 </a>.
               </p>
               <p className="mt-3">
@@ -246,8 +246,8 @@ export default function TermsPage() {
                 <p className="font-medium text-slate-800">Alexander Leporati (DBA classmate)</p>
                 <p className="mt-1">
                   Email:{' '}
-                  <a href="mailto:leporatialex@gmail.com" className="text-[#5B8DEF] hover:underline">
-                    leporatialex@gmail.com
+                  <a href="mailto:hello@tryclassmate.com" className="text-[#5B8DEF] hover:underline">
+                    hello@tryclassmate.com
                   </a>
                 </p>
                 <p className="mt-1">
