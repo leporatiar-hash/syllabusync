@@ -255,7 +255,7 @@ export default function Settings() {
                   <ChevronRight size={17} color={C.slate300} />
                 </Pressable>
               ) : null}
-              {([['deadlines', 'Deadlines', '3 days and 1 day before each one'], ['exams', 'Exams', 'A week before every exam'], ['weekly', 'Weekly brief', 'Sunday evening']] as const).map(([key, label, detail], i) => (
+              {([['deadlines', 'Deadlines', '3 days and 1 day before each one'], ['exams', 'Exams', 'A week before every exam'], ['weekly', 'Weekly brief', 'Sunday evening'], ['class_notes', 'Class notes', 'A nudge to take notes when class starts']] as const).map(([key, label, detail], i) => (
                 <Row key={key} first={i === 0 && permission === 'granted'} label={label} detail={detail}
                   right={<Switch value={prefs.data?.[key] ?? true} disabled={!prefs.data} onValueChange={(v) => togglePref(key, v)} trackColor={{ true: C.brandSolid }} />} />
               ))}

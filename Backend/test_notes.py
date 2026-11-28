@@ -608,6 +608,17 @@ def test_course_detail_note_count():
     check("note_count follows deletes", client.get(f"/courses/{course_a}", headers=ha).json()["note_count"] == 2)
 
 
+def test_recent_notes_across_classes():
+    h, cid, uid = make_user_and_course("recent")
+    h2, cid2, uid2 = make_user_and_course("recent-other")
+    add_note(uid, cid, title="Older", content="first", updated_at=main.datetime(2026, 11, 1))
+    add_note(uid, cid, title="Newer", content="second", updated_at=main.datetime(2026, 11, 20))
+    add_note(uid2, cid2, title="Someone else's", content="x")
+    r = client.get("/notes", headers=h).json()
+    check("recent notes newest first, only mine", [n["title"] for n in r["recent"]] == ["Newer", "Older"], str(r))
+    check("note count per class", r["counts"] == {cid: 2}, str(r["counts"]))
+
+
 if __name__ == "__main__":
     try:
         test_crud_happy_path()
@@ -623,6 +634,7 @@ if __name__ == "__main__":
         test_note_document_field()
         test_note_migration()
         test_course_detail_note_count()
+        test_recent_notes_across_classes()
         print("\nAll notes tests passed.")
     finally:
         try:

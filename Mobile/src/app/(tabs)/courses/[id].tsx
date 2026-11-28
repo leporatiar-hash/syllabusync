@@ -44,9 +44,9 @@ function Segmented({ value, onChange }: { value: Tab; onChange: (t: Tab) => void
 }
 
 export default function CourseScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab: startTab } = useLocalSearchParams<{ id: string; tab?: Tab }>();
   const { data, setData, refreshing, refresh, reload } = useApi<CourseDetail>(`/courses/${id}`);
-  const [tab, setTab] = useState<Tab>('deadlines');
+  const [tab, setTab] = useState<Tab>(startTab && TABS.some((t) => t.key === startTab) ? startTab : 'deadlines');
 
   const setDeadlines = (fn: (prev: CourseDeadline[]) => CourseDeadline[]) => setData((d) => (d ? { ...d, deadlines: fn(d.deadlines) } : d));
 

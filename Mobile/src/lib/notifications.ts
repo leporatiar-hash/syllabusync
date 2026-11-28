@@ -65,4 +65,4 @@ export async function unregisterPush() {
   registeredToken = null;
 }
 
-export type NotificationSettings = { deadlines: boolean; exams: boolean; weekly: boolean };
+export type NotificationSettings = { deadlines: boolean; exams: boolean; weekly: boolean; class_notes?: boolean };

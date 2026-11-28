@@ -96,9 +96,9 @@ def _run(now=SUNDAY_7PM_NY):
 def test_token_validation_and_settings():
     uid, h, token = _user()
     assert client.post("/me/push-token", json={"token": "garbage"}, headers=h).status_code == 400
-    assert client.get("/me/notification-settings", headers=h).json() == {"deadlines": True, "exams": True, "weekly": True}
+    assert client.get("/me/notification-settings", headers=h).json() == {"deadlines": True, "exams": True, "weekly": True, "class_notes": True}
     r = client.put("/me/notification-settings", json={"deadlines": True, "exams": False, "weekly": False}, headers=h)
-    assert r.json() == {"deadlines": True, "exams": False, "weekly": False}
+    assert r.json() == {"deadlines": True, "exams": False, "weekly": False, "class_notes": True}
     # Same device signs into another account: token moves
     uid2, h2, _ = _user()
     client.post("/me/push-token", json={"token": token, "timezone": "America/New_York"}, headers=h2)
@@ -466,6 +466,65 @@ def test_impossible_dates_rejected_and_nudges_survive():
         db.close()
     import asyncio
     asyncio.run(main._run_nudge_check())
+
+
+def _drop_tokens(*tokens):
+    """Keep later tests' sends to themselves (they share one database and one fake sender)."""
+    db = main.SessionLocal()
+    try:
+        db.query(main.PushToken).filter(main.PushToken.token.in_(tokens)).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _class_course(h, uid, meeting="MWF 9-9:50am", end_date=None):
+    cid = _course(h, name="Intro to Psychology", code="PSYC 103")
+    db = main.SessionLocal()
+    try:
+        c = db.query(main.Course).filter_by(id=cid).one()
+        c.course_info = {"logistics": {"meeting_times": meeting}}
+        c.end_date = end_date
+        db.commit()
+    finally:
+        db.close()
+    return cid
+
+
+def test_class_start_nudge():
+    uid, h, token = _user()
+    cid = _class_course(h, uid)
+    _deadline(h, 3, "Reading response", course_id=cid)  # in session: something due soon
+    monday_901 = datetime(2026, 10, 5, 13, 1)  # 9:01 AM EDT, Monday
+    _run(monday_901)
+    titles = [m["title"] for m in _mine(token)]
+    assert titles.count("PSYC 103 is starting") == 1, titles
+    nudge = next(m for m in _mine(token) if m["title"] == "PSYC 103 is starting")
+    assert nudge["data"] == {"screen": "notebook", "course_id": cid}, nudge
+    _run(monday_901 + timedelta(minutes=8))  # same class, same day: no repeat
+    assert [m["title"] for m in _mine(token)].count("PSYC 103 is starting") == 1
+    _run(datetime(2026, 10, 6, 13, 1))  # Tuesday: no class
+    assert [m["title"] for m in _mine(token)].count("PSYC 103 is starting") == 1
+    client.put("/me/notification-settings", json={"deadlines": True, "exams": True, "weekly": True, "class_notes": False}, headers=h)
+    _run(datetime(2026, 10, 7, 13, 1))  # Wednesday, but switched off
+    assert [m["title"] for m in _mine(token)].count("PSYC 103 is starting") == 1
+    # an older app build that doesn't send class_notes must not switch it back on
+    client.put("/me/notification-settings", json={"deadlines": True, "exams": True, "weekly": True}, headers=h)
+    assert client.get("/me/notification-settings", headers=h).json()["class_notes"] is False
+    _drop_tokens(token)
+
+
+def test_class_nudge_skips_old_and_ambiguous_classes():
+    from datetime import date as _d
+    uid, h, token = _user()
+    _class_course(h, uid, end_date=_d(2026, 5, 1))  # last semester's syllabus
+    uid2, h2, token2 = _user()
+    cid2 = _class_course(h2, uid2, meeting="MWF 9am, 11am, 1pm")  # lists every section: unknown
+    _deadline(h2, 3, "Reading", course_id=cid2)
+    _run(datetime(2026, 10, 5, 13, 1))
+    assert not [m for m in _mine(token) if "is starting" in m["title"]]
+    assert not [m for m in _mine(token2) if "is starting" in m["title"]]
+    _drop_tokens(token, token2)
 
 
 if __name__ == "__main__":

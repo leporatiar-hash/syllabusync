@@ -882,6 +882,7 @@ class UserProfile(Base):
     notify_deadlines = Column(Boolean, nullable=True)      # 3 days before + day before every deadline
     notify_exams = Column(Boolean, nullable=True)          # extra heads-up 7 days before exams
     notify_weekly = Column(Boolean, nullable=True)         # Sunday-evening brief of the week ahead
+    notify_class_notes = Column(Boolean, nullable=True)    # "PSYC 103 is starting: take notes" at class start
     # "Get more out of your courses" feature-discovery panel on /home
     feature_panel_hidden = Column(Boolean, nullable=False, default=False)
     # One-question value-prop feedback ask (shown once, ever)
@@ -2233,7 +2234,7 @@ def ensure_lms_health_columns():
 
 def ensure_notification_pref_columns():
     """Add push-notification preference columns to user_profiles (nullable; NULL = enabled)."""
-    for col_name in ("notify_deadlines", "notify_exams", "notify_weekly"):
+    for col_name in ("notify_deadlines", "notify_exams", "notify_weekly", "notify_class_notes"):
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {col_name} BOOLEAN"))
@@ -2533,6 +2534,81 @@ async def _nudge_background_loop():
     while True:
         await _run_nudge_check()
         await asyncio.sleep(86400)
+
+
+# ============================================================
+# Class times ("you're in class: take notes")
+# ============================================================
+from class_times import parse_meeting_times  # noqa: E402
+
+CLASS_EARLY_MIN = 10  # a class counts as "now" from 10 minutes before it starts
+
+
+def _course_slots(course) -> list[dict]:
+    info = course.course_info if isinstance(course.course_info, dict) else None
+    if info is None and isinstance(course.course_info, str):
+        try:
+            info = json.loads(course.course_info)
+        except Exception:
+            info = None
+    lg = (info or {}).get("logistics") if isinstance(info, dict) else None
+    return parse_meeting_times((lg or {}).get("meeting_times") if isinstance(lg, dict) else None)
+
+
+def _course_in_session(db, course, today: date) -> bool:
+    """Only this semester's classes: by the syllabus's end date, else by having deadlines around now.
+    Keeps last semester's syllabus from announcing classes that no longer meet."""
+    if course.end_date:
+        return course.end_date >= today and (not course.start_date or course.start_date <= today + timedelta(days=7))
+    window = (today - timedelta(days=21)).isoformat(), (today + timedelta(days=30)).isoformat()
+    return db.query(Deadline.id).filter(
+        Deadline.course_id == course.id, Deadline.date >= window[0], Deadline.date <= window[1],
+        or_(Deadline.recurring == False, Deadline.recurring.is_(None)),  # noqa: E712
+    ).first() is not None
+
+
+def _classes_today(db, user_id: str, local_now: datetime) -> list[tuple]:
+    """[(course, start_dt, end_dt)] for today's classes in local time, soonest first."""
+    today = local_now.date()
+    out = []
+    for c in db.query(Course).filter(Course.user_id == user_id).all():
+        slots = [sl for sl in _course_slots(c) if sl["day"] == today.weekday()]
+        if not slots or not _course_in_session(db, c, today):
+            continue
+        for sl in slots:
+            sh, sm = map(int, sl["start"].split(":"))
+            eh, em = map(int, sl["end"].split(":"))
+            out.append((c, local_now.replace(hour=sh, minute=sm, second=0, microsecond=0),
+                        local_now.replace(hour=eh, minute=em, second=0, microsecond=0)))
+    return sorted(out, key=lambda x: x[1])
+
+
+def _class_payload(c, start, end):
+    color = c.color
+    return {"course_id": c.id, "code": c.code, "name": c.name, "color": color,
+            "start": start.strftime("%H:%M"), "end": end.strftime("%H:%M"),
+            "label": f"{format_time_12h(start.strftime('%H:%M'))} - {format_time_12h(end.strftime('%H:%M'))}"}
+
+
+def _class_start_nudges(db, profile, local_now: datetime, already: set[str]) -> list:
+    """At most one "PSYC 103 is starting: take notes" per class per day, sent within 10 minutes of
+    the start. Only for classes with syllabus times that are in session; switchable in Settings."""
+    if profile.notify_class_notes is False:
+        return []
+    out = []
+    for c, start, end in _classes_today(db, profile.user_id, local_now):
+        if not (start - timedelta(minutes=5) <= local_now <= start + timedelta(minutes=10)):
+            continue
+        ledger_id = f"{profile.user_id}:classnotes:{c.id}:{local_now.date().isoformat()}"
+        if ledger_id in already:
+            continue
+        name = c.code or c.name
+        out.append(("class_notes", {
+            "title": f"{name} is starting",
+            "body": "Tap to start today's notes in classmate.",
+            "data": {"screen": "notebook", "course_id": c.id},
+        }, [ledger_id]))
+    return out
 
 
 # ============================================================
@@ -2873,15 +2949,21 @@ def _run_push_reminders(now_utc: datetime | None = None) -> int:
                 local = _local_now(user_tokens[0].timezone, now_utc)
                 evening = PUSH_SEND_HOUR <= local.hour < PUSH_SEND_UNTIL_HOUR
                 daytime = URGENT_SEND_FROM <= local.hour < URGENT_SEND_UNTIL
-                if not (evening or daytime):
+                class_hours = 6 <= local.hour < 22
+                if not (evening or daytime or class_hours):
                     continue
                 profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
                 if not profile:
                     continue
                 if evening:
                     reminders = _build_user_reminders(db, profile, local)
-                else:
+                elif daytime:
                     reminders = _urgent_reminders(db, profile, local)
+                else:
+                    reminders = []
+                if class_hours:
+                    sent_ids = {r[0] for r in db.query(PushNotificationSent.id).filter(PushNotificationSent.user_id == user_id).all()}
+                    reminders = reminders + _class_start_nudges(db, profile, local.replace(tzinfo=None), sent_ids)
                 for kind, msg, ledger_ids in reminders:
                     messages = [{"to": t.token, "sound": "default", **msg} for t in user_tokens]
                     tickets = _expo_push_send(messages)
@@ -3910,6 +3992,8 @@ def app_config():
     return {
         "min_supported_version": os.getenv("MOBILE_MIN_SUPPORTED_VERSION", "1.0.0"),
         "latest_version": os.getenv("MOBILE_LATEST_VERSION", "1.0.0"),
+        # Shows "Study with Claude or ChatGPT" in the app once the connector is listed (set CONNECTOR_LIVE=1).
+        "connector_live": os.getenv("CONNECTOR_LIVE", "").lower() in ("1", "true", "yes"),
     }
 
 
@@ -4443,6 +4527,7 @@ class NotificationSettings(BaseModel):
     deadlines: bool = Field(True, description="3 days before and the day before each deadline")
     exams: bool = Field(True, description="Heads-up 7 days before exams")
     weekly: bool = Field(True, description="Sunday-evening brief of the week ahead")
+    class_notes: bool | None = Field(None, description="A nudge to take notes when a class starts (class times come from the syllabus). Omit to leave unchanged.")
 
 
 @app.post("/me/push-token", tags=["user"], summary="Register this device for push notifications")
@@ -4491,7 +4576,24 @@ def get_notification_settings(current_user: User = Depends(get_current_user)):
             "deadlines": p.notify_deadlines is not False if p else True,
             "exams": p.notify_exams is not False if p else True,
             "weekly": p.notify_weekly is not False if p else True,
+            "class_notes": p.notify_class_notes is not False if p else True,
         }
+    finally:
+        db.close()
+
+
+@app.get("/me/class-now", tags=["user"], summary="The class happening now (or next today), from syllabus class times")
+def class_now(current_user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        local_now = datetime.now(_user_timezone(db, current_user.id)).replace(tzinfo=None)
+        now_class, next_class = None, None
+        for c, start, end in _classes_today(db, current_user.id, local_now):
+            if start - timedelta(minutes=CLASS_EARLY_MIN) <= local_now <= end and not now_class:
+                now_class = _class_payload(c, start, end)
+            elif start > local_now and not next_class:
+                next_class = _class_payload(c, start, end)
+        return {"now": now_class, "next": next_class}
     finally:
         db.close()
 
@@ -4504,8 +4606,11 @@ def update_notification_settings(payload: NotificationSettings, current_user: Us
         if not p:
             raise HTTPException(status_code=404, detail="User profile not found")
         p.notify_deadlines, p.notify_exams, p.notify_weekly = payload.deadlines, payload.exams, payload.weekly
+        if payload.class_notes is not None:  # older app builds don't send it: leave it as it was
+            p.notify_class_notes = payload.class_notes
         db.commit()
-        return payload
+        return {"deadlines": payload.deadlines, "exams": payload.exams, "weekly": payload.weekly,
+                "class_notes": p.notify_class_notes is not False}
     finally:
         db.close()
 
@@ -5812,6 +5917,23 @@ def list_course_notes(
                 row["content"] = n.content or ""
             rows.append(row)
         return rows
+    finally:
+        db.close()
+
+
+@app.get("/notes", tags=["notes"], summary="Recent notes across all classes, plus a count per class")
+def list_recent_notes(limit: int = Query(20, ge=1, le=100), current_user: User = Depends(get_current_user)):
+    """For the app's Notebook tab: the most recently edited notes in any class, and how many notes
+    each class has."""
+    db = SessionLocal()
+    try:
+        notes = db.query(Note).filter(Note.user_id == current_user.id).order_by(Note.updated_at.desc()).limit(limit).all()
+        counts = dict(db.query(Note.course_id, func.count(Note.id)).filter(Note.user_id == current_user.id).group_by(Note.course_id).all())
+        return {
+            "recent": [{"id": n.id, "course_id": n.course_id, "title": n.title or "", "preview": _note_preview(n.content or ""),
+                        "updated_at": (n.updated_at or n.created_at).isoformat()} for n in notes],
+            "counts": counts,
+        }
     finally:
         db.close()
 

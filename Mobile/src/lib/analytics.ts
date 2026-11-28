@@ -17,6 +17,7 @@ export type AnalyticsEvent =
   | 'how_it_works_done'
   | 'pro_nudge_shown'
   | 'pro_nudge_dismissed'
+  | 'note_started'
   | 'alerts_plan_skipped'
   | 'lms_connected'
   | 'onboarding_lms_opened'
