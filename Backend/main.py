@@ -6978,7 +6978,13 @@ def sync_canvas(connection, user_id: str, db):
                                    dead=courses_resp.status_code in _LMS_DEAD_STATUSES)
                 return synced, errors
 
-            canvas_courses = courses_resp.json()
+            try:
+                canvas_courses = courses_resp.json()
+            except ValueError:
+                # A sign-in page instead of data: the token or address no longer works
+                errors.append("Canvas returned a web page instead of data")
+                _record_lms_health(db, connection, False, "not JSON (sign-in page?)", dead=True)
+                return synced, errors
             tz_corrected = False
             try:
                 prof_resp = client.get(f"{base}/api/v1/users/self/profile", headers=headers)
@@ -7588,12 +7594,17 @@ def sync_ical(connection, user_id: str, db):
                 lms_type = _infer_lms_type(summary)
                 if kind == "open" and summary.lower() in has_end:
                     if lms_type != "Exam":
-                        # Quiz/assignment window opening: not a deadline. Remove one saved by an older sync.
-                        db.query(Deadline).filter(
+                        # Quiz/assignment window opening: not a deadline. Remove one saved by an older sync,
+                        # and its "saved to calendar" entry first (a foreign key; deleting the deadline alone
+                        # failed in Postgres and rolled back the whole sync for that student).
+                        stale_ids = [r[0] for r in db.query(Deadline.id).filter(
                             Deadline.user_id == user_id,
                             Deadline.external_id == ext_id,
                             or_(Deadline.completed == False, Deadline.completed.is_(None)),  # noqa: E712
-                        ).delete(synchronize_session=False)
+                        ).all()]
+                        if stale_ids:
+                            db.query(CalendarEntry).filter(CalendarEntry.deadline_id.in_(stale_ids)).delete(synchronize_session=False)
+                            db.query(Deadline).filter(Deadline.id.in_(stale_ids)).delete(synchronize_session=False)
                         continue
                     summary = f"{summary} (opens)"  # exam start time: worth seeing next to its close
                 description = str(component.get("DESCRIPTION", ""))[:500]

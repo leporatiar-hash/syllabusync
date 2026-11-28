@@ -134,6 +134,18 @@ class _FakeClient:
 
 main.httpx.Client = _FakeClient
 
+# Enforce foreign keys like Postgres does in production (SQLite ignores them by default, which is
+# how a sync that failed on every Postgres run passed here).
+from sqlalchemy import event as _sa_event  # noqa: E402
+
+
+@_sa_event.listens_for(main.engine, "connect")
+def _sqlite_fks_on(dbapi_conn, _record):
+    dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
+
+main.engine.dispose()
+
 
 def check(name: str, condition: bool, detail: str = ""):
     status = "PASS" if condition else "FAIL"
@@ -653,6 +665,38 @@ def test_timezone_inferred_from_due_times():
     check("inferred Pacific: Essay 0 due Mon 11/9 at 11:59 PM", (d.date, d.time) == ("2026-11-09", "11:59 PM"), f"{d.date} {d.time}")
 
 
+def test_saved_opens_row_removed_with_its_calendar_entry():
+    """Same cleanup when the student had saved that 'opens' row to their calendar: the saved entry
+    goes first, and the sync completes (in production it failed and rolled back every time)."""
+    user_id, _ = make_user("old-opens-saved")
+    loc = "LOCATION:2026 Fall Investment Analysis (FINC-400-02)"
+    db = main.SessionLocal()
+    try:
+        d = main.Deadline(user_id=user_id, date="2026-12-01", time="9:00 AM", type="assignment",
+                          title="Quiz 5 - Available", source="ical", external_id="ical_1000-7101@lms.example.edu")
+        db.add(d)
+        db.commit()
+        db.add(main.CalendarEntry(deadline_id=d.id, user_id=user_id))
+        db.commit()
+    finally:
+        db.close()
+    _set_feed([_event("7101", "Quiz 5 - Available", loc, dtstart=_utc_stamp(3)),
+               _event("7102", "Quiz 5 - Availability Ends", loc, dtstart=_utc_stamp(4))])
+    try:
+        synced, errors = run_sync(user_id)
+        check("sync with a saved 'opens' row has no errors", not errors, str(errors))
+        check("saved 'opens' row removed", _deadline(user_id, "7101") is None)
+        check("its close event synced", _deadline(user_id, "7102") is not None)
+        db = main.SessionLocal()
+        try:
+            conn = db.query(main.LMSConnection).filter_by(user_id=user_id).first()
+            check("connection marked synced", conn.last_synced is not None and not (conn.last_error or ""), str(conn.last_error))
+        finally:
+            db.close()
+    finally:
+        _set_feed(FIXTURE_EVENTS)
+
+
 if __name__ == "__main__":
     try:
         main.Base.metadata.create_all(bind=main.engine)
@@ -669,6 +713,7 @@ if __name__ == "__main__":
         test_change_alerts_recorded()
         test_lms_titles_and_opens()
         test_old_opens_rows_removed()
+        test_saved_opens_row_removed_with_its_calendar_entry()
         test_feed_timezone_used_when_device_unknown()
         test_device_timezone_beats_feed_timezone()
         test_syllabus_items_the_lms_lacks_are_kept()
