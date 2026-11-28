@@ -1923,9 +1923,9 @@ ALWAYS_PRO_EMAILS: set[str] = {
 
 
 def _require_admin(current_user: User) -> None:
-    """Gate admin-only read endpoints. Reuses ALWAYS_PRO_EMAILS as the admin allowlist
-    since it's already the project's one privileged-access list — no separate roles table."""
-    if not current_user.email or current_user.email.lower() not in ALWAYS_PRO_EMAILS:
+    """Gate admin-only endpoints (they list other students' emails and answers). Founder accounts
+    only: ALWAYS_PRO_EMAILS is for comped Pro, not for seeing other people's data."""
+    if not current_user.email or current_user.email.lower() not in ADMIN_EMAILS:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 

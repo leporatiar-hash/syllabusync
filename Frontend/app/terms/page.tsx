@@ -15,7 +15,7 @@ export default function TermsPage() {
 
         <div className="rounded-3xl bg-white p-8 md:p-12 shadow-sm">
           <h1 className="text-3xl font-semibold text-slate-900">Terms of Use</h1>
-          <p className="mt-2 text-sm text-slate-500">Last updated February 17, 2026</p>
+          <p className="mt-2 text-sm text-slate-500">Last updated November 28, 2026</p>
 
           <div className="mt-8 space-y-8 text-sm text-slate-600 leading-relaxed">
             {/* Agreement */}
@@ -76,6 +76,9 @@ export default function TermsPage() {
               <h2 className="text-lg font-semibold text-slate-900 mb-3">1. Our Services</h2>
               <p>
                 The information provided when using the Services is not intended for distribution to or use by any person or entity in any jurisdiction or country where such distribution or use would be contrary to law or regulation. Those who choose to access the Services from other locations do so on their own initiative and are solely responsible for compliance with local laws.
+              </p>
+              <p className="mt-3">
+                <strong className="text-slate-800">Due dates and reminders.</strong> classmate copies due dates from your school&apos;s learning management system (LMS) and from documents you upload, and sends reminders as a convenience. Your LMS, syllabus and instructor are the official sources for your assignments and deadlines. Dates can be missing, late to update or wrong (for example if your instructor changes them, your LMS connection stops working, or a document is read incorrectly), and reminders can arrive late or not at all. You remain responsible for knowing and meeting your deadlines, and classmate is not liable for missed or late work, grades or other academic outcomes.
               </p>
             </section>
 
