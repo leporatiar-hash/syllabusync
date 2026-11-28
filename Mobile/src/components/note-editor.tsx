@@ -74,13 +74,14 @@ function LoadedEditor({ note, course, backLabel }: { note: Note; course: CourseL
   }, []);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<{ title: string; docChanged: boolean }>({ title: note.title, docChanged: false });
+  const everTyped = useRef(false); // any edit to the body since the page opened
 
   const initial = (note.content_json as NoteDoc | null) ?? textToDoc(note.content || '');
   const editor = useEditorBridge({
     autofocus: !note.content && !!note.title,
     avoidIosKeyboard: true,
     initialContent: initial,
-    onChange: () => schedule({ docChanged: true }),
+    onChange: () => { everTyped.current = true; schedule({ docChanged: true }); },
     bridgeExtensions: [
       ...TenTapStartKit,
       CoreBridge.configureCSS(EDITOR_CSS),
@@ -110,9 +111,16 @@ function LoadedEditor({ note, course, backLabel }: { note: Note; course: CourseL
     timer.current = setTimeout(save, 700);
   };
 
-  // Save anything pending when leaving the page.
+  // Leaving the page: a brand-new note nobody wrote in is removed (no blank notes piling up, and
+  // Claude never opens an empty one); otherwise save anything pending.
   useEffect(() => () => {
-    if (timer.current) { clearTimeout(timer.current); save(); }
+    if (timer.current) clearTimeout(timer.current);
+    const untouched = !note.content.trim() && !everTyped.current && latest.current.title === note.title;
+    if (untouched) {
+      api(`/notes/${note.id}`, { method: 'DELETE' }).catch(() => {});
+      return;
+    }
+    if (timer.current) save();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const paste = async () => {
